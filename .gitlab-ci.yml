@@ -1,0 +1,54 @@
+# 持续集成（内网 GitLab 示例）
+# 阶段：静态检查 → 类型检查 → 单元测试 → 构建
+stages:
+  - verify
+  - build
+
+default:
+  image: node:20-alpine
+
+variables:
+  PNPM_CACHE_FOLDER: '.pnpm-store'
+
+cache:
+  key: '$CI_COMMIT_REF_SLUG'
+  paths:
+    - .pnpm-store
+
+.pnpm_setup: &pnpm_setup
+  - corepack enable
+  - corepack prepare pnpm@9.14.4 --activate
+  - pnpm config set store-dir $PNPM_CACHE_FOLDER
+  - pnpm install --frozen-lockfile
+
+lint:
+  stage: verify
+  script:
+    - *pnpm_setup
+    - pnpm lint
+
+typecheck:
+  stage: verify
+  script:
+    - *pnpm_setup
+    - pnpm typecheck
+
+test:
+  stage: verify
+  script:
+    - *pnpm_setup
+    - pnpm test
+
+build:
+  stage: build
+  only:
+    - main
+    - tags
+  script:
+    - *pnpm_setup
+    - pnpm build
+  artifacts:
+    paths:
+      - apps/web/dist
+      - apps/server/dist
+    expire_in: 7 days

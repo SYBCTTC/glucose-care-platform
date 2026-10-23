@@ -1,0 +1,283 @@
+/**
+ * 全局基础样式。
+ * 所有取值来自 docs/UI-DESIGN-TOKENS.md；页面禁止硬编码色值，一律引用本文件的变量。
+ * 优先级：Antd token（组件内部） > 本文件 CSS 变量（自定义区域）。
+ */
+
+:root {
+  /* 1. 主色 */
+  --gc-color-primary: #6ad3d8;
+  --gc-color-primary-hover: #57c7cd;
+  --gc-color-primary-active: #41a9af;
+  --gc-color-primary-ink: #08333a;
+  --gc-color-primary-bg: rgba(106, 211, 216, 0.12);
+  --gc-color-primary-bg-hover: rgba(106, 211, 216, 0.2);
+  --gc-color-primary-border: #b7e7ea;
+  --gc-color-link: #1f8f96;
+
+  /* 3. 中性色 */
+  --gc-color-text: rgba(0, 0, 0, 0.88);
+  --gc-color-text-secondary: rgba(0, 0, 0, 0.65);
+  --gc-color-text-tertiary: rgba(0, 0, 0, 0.45);
+  --gc-color-text-quaternary: rgba(0, 0, 0, 0.25);
+  --gc-color-bg-layout: #f5f7fa;
+  --gc-color-bg-container: #ffffff;
+  --gc-color-bg-elevated: #ffffff;
+  --gc-color-bg-header: #fafafa;
+  --gc-color-border: #d9d9d9;
+  --gc-color-border-secondary: #f0f0f0;
+  --gc-color-mask: rgba(0, 0, 0, 0.45);
+  --gc-color-sider: #001529;
+  --gc-color-sider-text: rgba(255, 255, 255, 0.65);
+
+  /* 4. 功能色 */
+  --gc-color-success: #52c41a;
+  --gc-color-warning: #faad14;
+  --gc-color-error: #ff4d4f;
+
+  /* 5.1 血糖区间 */
+  --gc-color-glucose-low: #00a0e9;
+  --gc-color-glucose-lowish: #00a0e9;
+  --gc-color-glucose-normal: #389e0d;
+  --gc-color-glucose-highish: #ff0000;
+  --gc-color-glucose-high: #ff0000;
+  --gc-color-glucose-tir: #52c41a;
+
+  /* 5.2 记录状态 / 5.3 来源 / 5.4 设备状态 */
+  --gc-color-status-normal: #389e0d;
+  --gc-color-status-pending: #faad14;
+  --gc-color-status-rejected: #8c8c8c;
+  --gc-color-channel-manual: #1677ff;
+  --gc-color-channel-device: #13c2c2;
+  --gc-color-channel-vendor: #722ed1;
+  --gc-color-channel-cgm: #eb2f96;
+  --gc-color-device-online: #52c41a;
+  --gc-color-device-offline: #bfbfbf;
+  --gc-color-device-fault: #ff4d4f;
+  --gc-color-device-maintain: #faad14;
+  --gc-color-device-scrapped: #8c8c8c;
+
+  /* 7. 字号 */
+  --gc-font-xs: 12px;
+  --gc-font-sm: 13px;
+  --gc-font-md: 14px;
+  --gc-font-lg: 16px;
+  --gc-font-xl: 20px;
+  --gc-font-xxl: 28px;
+  --gc-line-height: 1.5715;
+
+  /* 8. 间距 / 圆角 / 阴影 */
+  --gc-space-xs: 4px;
+  --gc-space-sm: 8px;
+  --gc-space-md: 16px;
+  --gc-space-lg: 24px;
+  --gc-space-xl: 32px;
+  --gc-radius-sm: 4px;
+  --gc-radius-md: 6px;
+  --gc-radius-lg: 8px;
+  --gc-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.03), 0 1px 6px -1px rgba(0, 0, 0, 0.02);
+  --gc-shadow-pop: 0 6px 16px rgba(0, 0, 0, 0.08);
+  --gc-border-width: 1px;
+
+  /* 登录卡片半透明底：叠在深蓝灰背景图上后实测底色约 #d8dde2，深色文字对比度 ≈ 11:1 */
+  --gc-login-card-bg: rgba(255, 255, 255, 0.82);
+  --gc-login-card-border: rgba(255, 255, 255, 0.55);
+  --gc-login-control-bg: rgba(255, 255, 255, 0.7);
+
+  /* 9. 布局 */
+  --gc-sider-width: 208px;
+  --gc-sider-collapsed-width: 80px;
+  --gc-header-height: 56px;
+  --gc-content-padding: 16px;
+  --gc-content-min-width: 1024px;
+
+  /* 层级 */
+  --gc-z-sticky: 100;
+  --gc-z-drawer: 1000;
+  --gc-z-modal: 1010;
+  --gc-z-message: 1020;
+
+  /* 13. 动效 */
+  --gc-motion-fast: 100ms;
+  --gc-motion-mid: 200ms;
+  --gc-motion-slow: 300ms;
+  --gc-motion-ease: cubic-bezier(0.645, 0.045, 0.355, 1);
+}
+
+/* 暗色模式：仅覆盖中性底色与文字，语义色保持高辨识度 */
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  --gc-color-text: rgba(255, 255, 255, 0.88);
+  --gc-color-text-secondary: rgba(255, 255, 255, 0.65);
+  --gc-color-text-tertiary: rgba(255, 255, 255, 0.45);
+  --gc-color-text-quaternary: rgba(255, 255, 255, 0.25);
+  --gc-color-bg-layout: #141414;
+  --gc-color-bg-container: #1f1f1f;
+  --gc-color-bg-elevated: #1f1f1f;
+  --gc-color-bg-header: #262626;
+  --gc-color-border: #303030;
+  --gc-color-border-secondary: #434343;
+  --gc-color-primary-bg: rgba(106, 211, 216, 0.16);
+  --gc-color-primary-bg-hover: rgba(106, 211, 216, 0.24);
+  /* 暗色下压暗卡片，避免背景图透过后影响浅色文字对比度 */
+  --gc-login-card-bg: rgba(20, 20, 20, 0.68);
+  --gc-login-card-border: rgba(255, 255, 255, 0.14);
+  --gc-login-control-bg: rgba(255, 255, 255, 0.08);
+  --gc-color-primary-border: #41a9af;
+  --gc-color-link: #7fdfe4;
+  --gc-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --gc-shadow-pop: 0 6px 16px rgba(0, 0, 0, 0.5);
+
+  /* 暗底上提亮，保证警示色仍然醒目 */
+  --gc-color-glucose-low: #33b5f0;
+  --gc-color-glucose-high: #ff4d4f;
+  --gc-color-status-rejected: #a6a6a6;
+  --gc-color-device-offline: #8c8c8c;
+}
+
+/* 大字号（适老档） */
+[data-font='large'] {
+  --gc-font-xs: 14px;
+  --gc-font-sm: 15px;
+  --gc-font-md: 16px;
+  --gc-font-lg: 18px;
+  --gc-font-xl: 24px;
+  --gc-font-xxl: 32px;
+}
+
+/* ---------- 基础重置 ---------- */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei',
+    'Source Han Sans SC', 'Noto Sans CJK SC', Arial, sans-serif;
+  font-size: var(--gc-font-md);
+  line-height: var(--gc-line-height);
+  color: var(--gc-color-text);
+  background: var(--gc-color-bg-layout);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 15. 焦点必须可见 */
+:focus-visible {
+  outline: 2px solid var(--gc-color-primary-active);
+  outline-offset: 2px;
+}
+
+/* 13. 尊重系统减少动效设置 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---------- 通用工具类 ---------- */
+
+/** 表格与统计数值：等宽数字，右对齐，避免小数点跳动 */
+.gc-num {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.gc-text-secondary {
+  color: var(--gc-color-text-secondary);
+}
+
+.gc-text-tertiary {
+  color: var(--gc-color-text-tertiary);
+}
+
+/* 业务语义色（配合文字标签使用，禁止单靠颜色传达状态） */
+.gc-text-glucose-low {
+  color: var(--gc-color-glucose-low);
+}
+.gc-text-glucose-normal {
+  color: var(--gc-color-glucose-normal);
+}
+.gc-text-glucose-high {
+  color: var(--gc-color-glucose-high);
+}
+
+/* 页面根节点 */
+.gc-page {
+  min-width: var(--gc-content-min-width);
+}
+
+/* 登录容器：背景图铺满（cover 等比缩放不变形），兜底底色防图片未加载时闪白 */
+.gc-login-layout {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: var(--gc-space-md);
+  background: var(--gc-color-bg-layout) url('../assets/bg.jpg') center / cover no-repeat;
+}
+
+/* 背景图整体偏深，暗色模式下无需额外遮罩；卡片保持不透明实色保证文字对比度 */
+
+/* 登录卡片：与深蓝灰背景融合的半透明底（不透明度集中在变量里，便于微调） */
+.gc-login-card.ant-card {
+  background: var(--gc-login-card-bg);
+  border: var(--gc-border-width) solid var(--gc-login-card-border);
+  box-shadow: var(--gc-shadow-pop);
+}
+
+/* 卡内控件同步降饱和，避免白底输入框在半透明卡上显得突兀 */
+.gc-login-card .ant-input,
+.gc-login-card .ant-input-password {
+  background-color: var(--gc-login-control-bg);
+}
+
+.gc-login-card .ant-card-head {
+  border-bottom: none;
+  background: transparent;
+}
+
+.gc-login-brand {
+  height: 4px;
+  border-radius: var(--gc-radius-sm) var(--gc-radius-sm) 0 0;
+  background: linear-gradient(90deg, var(--gc-color-primary) 0%, var(--gc-color-primary-active) 100%);
+}
+
+/* ---------- 打印与导出（15 节） ---------- */
+@media print {
+  .gc-no-print,
+  .ant-layout-sider,
+  .ant-layout-header {
+    display: none !important;
+  }
+
+  body {
+    background: #fff;
+  }
+
+  .ant-card {
+    box-shadow: none !important;
+    border: var(--gc-border-width) solid #d9d9d9 !important;
+  }
+
+  .ant-table {
+    font-size: 12px;
+  }
+
+  /* 导出留痕：页脚水印由打印时注入，见导出实现 */
+  .gc-print-footer {
+    margin-top: var(--gc-space-md);
+    color: #666;
+    font-size: 12px;
+  }
+}

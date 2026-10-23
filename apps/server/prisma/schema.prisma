@@ -1,0 +1,260 @@
+// ============================================================
+// 设备与人员管理平台 —— 数据库 Schema（唯一事实来源）
+// 约定：
+//   1. 敏感个人信息（姓名/证件/手机号）加密存储（Cipher），
+//      同一字段另存脱敏值（Masked）用于列表展示。
+//   2. 患者数据不做物理删除，采用归档（archivedAt）。
+//   3. AuditLog 为只增表，禁止 UPDATE / DELETE（通过回收 DB 权限实现）。
+//   4. 审计日志留存 ≥180 天，满足等保三级追溯要求。
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------- 组织与账号 ----------------------------
+
+model Department {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @db.VarChar(64)
+  code      String   @unique @db.VarChar(32)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users    User[]
+  patients Patient[]
+  devices  Device[]
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+  LOCKED
+}
+
+model User {
+  id       String     @id @default(uuid()) @db.Uuid
+  username String     @unique @db.VarChar(64)
+  /// 真实姓名（医护，非患者，院内可见，按需仍可选择加密）
+  name     String     @db.VarChar(64)
+  /// 工号 / 手机号加密存储
+  phoneCipher String? @db.VarChar(512)
+  passwordHash String  @db.VarChar(255)
+  status     UserStatus @default(ACTIVE)
+  departmentId String  @db.Uuid
+  lastLoginAt DateTime?
+  /// 最近一次修改密码时间，用于密码有效期策略
+  passwordChangedAt DateTime @default(now())
+  /// 首次登录或被管理员重置后必须修改密码；为 true 时除改密/登出/个人信息的接口一律拒绝（20005）
+  mustChangePassword Boolean @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  department     Department      @relation(fields: [departmentId], references: [id])
+  roles          UserRole[]
+  bindings       PatientDeviceBinding[]
+  /// 作为责任医生负责的患者
+  patients       Patient[]       @relation("PatientDoctor")
+
+  @@index([departmentId])
+  @@index([status])
+}
+
+model Role {
+  id   String @id @default(uuid()) @db.Uuid
+  code String @unique @db.VarChar(32)
+  name String @db.VarChar(64)
+
+  users UserRole[]
+}
+
+model UserRole {
+  userId String @db.Uuid
+  roleId String @db.Uuid
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+}
+
+// ---------------------------- 患者 ----------------------------
+
+/// 患者住院状态：决定患者管理页 Tab 与查询范围
+enum PatientStatus {
+  INPATIENT
+  DISCHARGED
+}
+
+model Patient {
+  id   String @id @default(uuid()) @db.Uuid
+  /// 住院号 / 门诊号（院内唯一业务主键）
+  patientNo    String?  @unique @db.VarChar(32)
+  /// 姓名：密文 + 脱敏值（列表展示只用 Masked）
+  nameCipher   String   @db.VarChar(512)
+  nameMasked   String   @db.VarChar(64)
+  idCardCipher String? @db.VarChar(512)
+  idCardMasked String? @db.VarChar(64)
+  phoneCipher  String? @db.VarChar(512)
+  phoneMasked  String? @db.VarChar(32)
+
+  gender       String?    @db.VarChar(8)
+  birthDate    DateTime?  @db.Date
+  bedNo        String?    @db.VarChar(32)
+  remark       String?    @db.VarChar(255)
+  departmentId String     @db.Uuid
+  /// 住院 / 出院状态（Tab 与列表接口按此过滤）
+  status       PatientStatus @default(INPATIENT)
+  /// 入院时间（筛选区间）
+  admissionAt  DateTime?
+  /// 出院时间（出院 Tab 筛选区间；为空表示仍在院）
+  dischargeAt  DateTime?
+  /// 责任医生
+  doctorId     String?    @db.Uuid
+  archivedAt   DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  department     Department @relation(fields: [departmentId], references: [id])
+  doctor         User?      @relation("PatientDoctor", fields: [doctorId], references: [id])
+  bindings       PatientDeviceBinding[]
+  glucoseRecords GlucoseRecord[]
+
+  @@index([departmentId, archivedAt])
+  @@index([departmentId, status, admissionAt])
+  @@index([doctorId])
+  @@index([nameMasked])
+}
+
+/// 患者最近血糖读取模型。后续血糖录入/查询模块可在此基础上扩展。
+model GlucoseRecord {
+  id          String   @id @default(uuid()) @db.Uuid
+  patientId   String   @db.Uuid
+  /// 血糖值，统一 mmol/L
+  valueMmolL  Decimal  @db.Decimal(4, 1)
+  /// 测量时段，取值见 @gc/shared TIME_SLOTS.code
+  mealContext String?  @db.VarChar(32)
+  measuredAt  DateTime @db.Timestamptz(3)
+  createdAt   DateTime @default(now())
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId, measuredAt(sort: Desc)])
+}
+
+// ---------------------------- 设备 ----------------------------
+
+enum DeviceStatus {
+  /// 未绑定患者
+  IDLE
+  /// 已绑定患者且使用中
+  BOUND
+  /// 超过约定时长未上报（由定时任务或查询时计算）
+  OFFLINE
+  /// 停用/报废
+  DISABLED
+}
+
+model Device {
+  id             String       @id @default(uuid()) @db.Uuid
+  sn             String       @unique @db.VarChar(64)
+  model          String       @db.VarChar(64)
+  manufacturer   String?      @db.VarChar(64)
+  firmwareVersion String?     @db.VarChar(32)
+  status         DeviceStatus @default(IDLE)
+  enabled        Boolean      @default(true)
+  /// 最后一次上报时间，设备在线状态判断依据
+  lastReportAt   DateTime?
+  calibratedAt   DateTime?
+  departmentId   String?      @db.Uuid
+  /// 设备台账：采购与保修，用于设备生命周期管理
+  purchasedAt    DateTime?
+  warrantyUntil  DateTime?
+  remark         String?      @db.VarChar(255)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  department     Department? @relation(fields: [departmentId], references: [id])
+  bindings       PatientDeviceBinding[]
+
+  @@index([status, enabled])
+  @@index([departmentId])
+}
+
+model PatientDeviceBinding {
+  id         String    @id @default(uuid()) @db.Uuid
+  patientId  String    @db.Uuid
+  deviceId   String    @db.Uuid
+  boundAt    DateTime  @default(now())
+  unboundAt  DateTime?
+  operatorId String?   @db.Uuid
+
+  patient  Patient @relation(fields: [patientId], references: [id])
+  device   Device  @relation(fields: [deviceId], references: [id])
+  operator User?   @relation(fields: [operatorId], references: [id])
+
+  /// 同一台设备在同一时间只能绑定一个有效患者（partial unique 在 SQL 层补充）
+  @@unique([deviceId, boundAt])
+  @@index([patientId, unboundAt])
+  @@index([deviceId, unboundAt])
+}
+
+// ---------------------------- 审计与配置 ----------------------------
+
+enum AuditAction {
+  LOGIN
+  LOGIN_FAILED
+  LOGOUT
+  PASSWORD_CHANGE
+  PATIENT_VIEW
+  PATIENT_MANAGE
+  DEVICE_VIEW
+  DEVICE_MANAGE
+  USER_MANAGE
+  DATA_EXPORT
+}
+
+/// 审计日志：只增不改不删，留存 >= 180 天（等保三级要求）
+model AuditLog {
+  id String @id @default(uuid()) @db.Uuid
+
+  operatorId   String? @db.Uuid
+  operatorName String? @db.VarChar(64)
+  /// 快照操作人科室，便于事后按科室追溯
+  departmentId String? @db.Uuid
+
+  action AuditAction
+
+  /// 对象类型，如 PATIENT / DEVICE / AUDIT
+  targetType String? @db.VarChar(32)
+  targetId   String? @db.Uuid
+  /// 非 UUID 对象的业务主键（如登录用户名），用于失败锁定统计
+  targetKey  String? @db.VarChar(64)
+
+  ip        String? @db.VarChar(64)
+  userAgent String? @db.VarChar(255)
+
+  /// SUCCESS / DENIED / FAILED
+  result  String @db.VarChar(16)
+  detail Json?
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([createdAt])
+  @@index([operatorId, createdAt])
+  @@index([targetType, targetId, createdAt])
+  @@index([action, targetKey, createdAt])
+}
+
+/// 系统配置（告警阈值等，禁止硬编码在业务代码里）
+model SystemConfig {
+  key         String   @id @db.VarChar(64)
+  value       String   @db.VarChar(255)
+  description String?  @db.VarChar(255)
+  updatedAt   DateTime @updatedAt
+}

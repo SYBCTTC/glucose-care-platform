@@ -1,0 +1,40 @@
+{
+  "name": "glucose-care-platform",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@9.14.4",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "sync:shared": "pnpm --filter @gc/shared build && node scripts/sync-shared.mjs",
+    "dev": "pnpm sync:shared && pnpm -r --parallel dev",
+    "dev:web": "pnpm --filter @gc/web dev",
+    "dev:server": "pnpm --filter @gc/server dev",
+    "build": "pnpm sync:shared && pnpm --filter @gc/server build && pnpm --filter @gc/web build",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "db:generate": "pnpm --filter @gc/server prisma generate",
+    "db:migrate": "pnpm --filter @gc/server prisma migrate dev",
+    "db:deploy": "pnpm --filter @gc/server prisma migrate deploy",
+    "db:seed": "pnpm --filter @gc/server prisma db seed",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.16.0",
+    "@types/node": "^20.17.9",
+    "eslint": "^9.16.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.2.11",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.18.0"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": ["eslint --fix", "prettier --write"],
+    "*.{json,md,yml,yaml}": ["prettier --write"]
+  }
+}

@@ -1,0 +1,56 @@
+services:
+  postgres:
+    image: postgres:16.6-alpine
+    container_name: gc-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: gc
+      POSTGRES_PASSWORD: gc_dev_password
+      POSTGRES_DB: glucose_care
+      TZ: Asia/Shanghai
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    command:
+      - postgres
+      - -c
+      - max_connections=200
+      - -c
+      - log_statement=ddl
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U gc -d glucose_care']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: gc-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass gc_dev_redis
+    ports:
+      - '6379:6379'
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', '-a', 'gc_dev_redis', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 生产交付时追加（内网需提前导入离线镜像）：
+  # server:
+  #   image: gc-server:1.0.0
+  #   restart: unless-stopped
+  #   env_file: .env
+  #   depends_on: [postgres, redis]
+  # web:
+  #   image: gc-web:1.0.0
+  #   restart: unless-stopped
+  #   ports: ['80:80']
+  #   depends_on: [server]
+
+volumes:
+  pgdata:
+  redisdata:

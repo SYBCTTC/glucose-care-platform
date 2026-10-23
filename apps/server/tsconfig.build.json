@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "noEmit": false,
+    // 构建不做增量：否则删除 dist 后 tsc 仍可能依据 tsbuildinfo 跳过产出，导致运行期缺文件
+    "incremental": false,
+    "baseUrl": ".",
+    // 构建时不要引入共享包源码（否则会超出 rootDir），改为引用其编译产物
+    "paths": {
+      "@gc/shared": ["../../packages/shared/dist/index.d.ts"]
+    }
+  },
+  "exclude": ["node_modules", "dist", "prisma", "**/*.spec.ts"]
+}
