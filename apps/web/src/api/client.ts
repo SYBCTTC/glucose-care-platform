@@ -55,7 +55,11 @@ export function clearToken(): void {
   localStorage.removeItem(TOKEN_STORAGE_KEY);
 }
 
-async function request<T>(method: 'GET' | 'POST', url: string, body?: unknown): Promise<T> {
+async function request<T>(
+  method: 'GET' | 'POST' | 'PATCH',
+  url: string,
+  body?: unknown,
+): Promise<T> {
   const token = getToken();
 
   let response: Response;
@@ -104,4 +108,5 @@ export const http = {
     return request<T>('GET', `${url}${query}`);
   },
   post: <T>(url: string, body?: unknown) => request<T>('POST', url, body),
+  patch: <T>(url: string, body?: unknown) => request<T>('PATCH', url, body),
 };

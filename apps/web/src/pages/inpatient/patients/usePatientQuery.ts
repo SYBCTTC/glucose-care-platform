@@ -55,11 +55,7 @@ function filterDoctors(doctors: StaffOption[], departmentId: string): StaffOptio
     : doctors.filter((doctor) => doctor.departmentId === departmentId);
 }
 
-function buildParams(
-  filters: PatientFilters,
-  page: number,
-  pageSize: number,
-): PatientListParams {
+function buildParams(filters: PatientFilters, page: number, pageSize: number): PatientListParams {
   return {
     departmentId: filters.departmentId === ALL ? undefined : filters.departmentId,
     doctorId: filters.doctorId === ALL ? undefined : filters.doctorId,
@@ -344,6 +340,20 @@ export function usePatientQuery(initialStatus: PatientStatus, enabled = true) {
     }
   };
 
+  /**
+   * 局部替换单条患者（编辑成功后用）。
+   * 不走 refresh 是因为卡片模式的 refresh 会清空列表并从第 1 页重查，
+   * 编辑一个靠后的患者会让滚动位置跳回顶部。
+   */
+  const patchItem = useCallback((item: PatientListItem) => {
+    setCardItems((prev) => prev.map((current) => (current.id === item.id ? item : current)));
+    setResult((prev) =>
+      prev
+        ? { ...prev, items: prev.items.map((current) => (current.id === item.id ? item : current)) }
+        : prev,
+    );
+  }, []);
+
   const changePage = (nextPage: number, nextPageSize: number) => {
     setPage(nextPage);
     setPageSize(nextPageSize);
@@ -390,6 +400,7 @@ export function usePatientQuery(initialStatus: PatientStatus, enabled = true) {
     pageSize,
     changePage,
     refresh,
+    patchItem,
     loading,
     result,
     error,

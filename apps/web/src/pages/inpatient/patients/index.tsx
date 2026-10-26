@@ -6,6 +6,7 @@ import Tabs, { type TabItem } from '@/components/common/Tabs';
 import { useAuthStore } from '@/store/auth';
 import PatientCardGrid from './PatientCardGrid';
 import PatientCreateModal from './PatientCreateModal';
+import PatientEditModal from './PatientEditModal';
 import PatientFilter from './PatientFilter';
 import PatientTable from './PatientTable';
 import PatientToolbar from './PatientToolbar';
@@ -28,6 +29,11 @@ export default function PatientManagementPage() {
   const query = usePatientQuery(initialStatus, enabled);
   const isInpatient = query.status === PATIENT_STATUS.INPATIENT;
   const [createOpen, setCreateOpen] = useState(false);
+  const [editingPatientId, setEditingPatientId] = useState<string | null>(null);
+
+  const canEditPatient = hasPermission(PERMISSION.PATIENT_UPDATE);
+  // 本期不做出院患者编辑：入口置灰并提示，后端另有出院校验兜底
+  const editDisabledReason = isInpatient ? undefined : '出院患者不支持编辑患者信息';
 
   if (!enabled) {
     return (
@@ -123,6 +129,8 @@ export default function PatientManagementPage() {
               hasMore={query.cardHasMore}
               hasError={Boolean(query.cardError)}
               onLoadMore={query.loadMore}
+              canEditPatient={canEditPatient}
+              onEditPatient={(patient) => setEditingPatientId(patient.id)}
             />
           </div>
         ) : (
@@ -133,6 +141,9 @@ export default function PatientManagementPage() {
             page={query.page}
             pageSize={query.pageSize}
             onPageChange={query.changePage}
+            canEditPatient={canEditPatient}
+            editDisabledReason={editDisabledReason}
+            onEditPatient={(patient) => setEditingPatientId(patient.id)}
           />
         )}
       </div>
@@ -141,6 +152,13 @@ export default function PatientManagementPage() {
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         onSuccess={query.refresh}
+      />
+
+      <PatientEditModal
+        patientId={editingPatientId}
+        open={editingPatientId !== null}
+        onClose={() => setEditingPatientId(null)}
+        onUpdated={query.patchItem}
       />
     </Card>
   );

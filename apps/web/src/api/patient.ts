@@ -1,4 +1,11 @@
-import type { DiabetesType, Gender, PatientListItem, PatientStatus } from '@gc/shared';
+import type {
+  DiabetesType,
+  Gender,
+  PatientDetail,
+  PatientListItem,
+  PatientStatus,
+  PatientUpdateResult,
+} from '@gc/shared';
 import { http } from './client';
 
 /**
@@ -56,6 +63,45 @@ export interface PatientListResult {
 /** 患者建档（添加患者） */
 export function createPatient(payload: CreatePatientPayload): Promise<CreatePatientResult> {
   return http.post<CreatePatientResult>('/patients', payload);
+}
+
+/**
+ * 患者信息编辑请求体（PATCH /patients/:id）。
+ *
+ * 字段语义分两类，不要混用：
+ *  ① 敏感字段（name / idCard / phone）：**省略 = 不修改**。
+ *     密文不可逆，无法回填明文，只能「留空不改 / 填新值覆盖 / null 显式清除」。
+ *  ② 非敏感字段：**整表单覆盖**，总是传，null 表示清空。
+ *
+ * 住院号 / 入院时间 / 状态不可编辑，请求体里没有这三个字段。
+ */
+export interface UpdatePatientPayload {
+  name?: string;
+  idCard?: string | null;
+  phone?: string | null;
+  gender: Gender;
+  /** YYYY-MM-DD */
+  birthDate: string;
+  departmentId: string;
+  bedNo: string | null;
+  doctorId: string | null;
+  nurseId: string | null;
+  diabetesType: DiabetesType | null;
+  /** 糖化血红蛋白（%），0~100，1 位小数 */
+  hba1c: number | null;
+}
+
+/** 患者信息编辑（编辑弹窗提交） */
+export function updatePatient(
+  id: string,
+  payload: UpdatePatientPayload,
+): Promise<PatientUpdateResult> {
+  return http.patch<PatientUpdateResult>(`/patients/${id}`, payload);
+}
+
+/** 患者详情（编辑弹窗回填）：属敏感查询，后端会写 PATIENT_VIEW 审计 */
+export function fetchPatientDetail(id: string): Promise<PatientDetail> {
+  return http.get<PatientDetail>(`/patients/${id}`);
 }
 
 /** 住院 / 出院患者列表：两个接口权限点独立 */

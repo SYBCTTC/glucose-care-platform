@@ -12,6 +12,9 @@ interface PatientCardGridProps {
   hasMore: boolean;
   hasError?: boolean;
   onLoadMore: () => void;
+  /** 是否有患者编辑权限（决定「更多」菜单里是否出现「编辑患者信息」） */
+  canEditPatient: boolean;
+  onEditPatient: (patient: PatientListItem) => void;
 }
 
 function InfoRow({ label, value }: { label: string; value: string }) {
@@ -27,7 +30,13 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function PatientCard({ patient }: { patient: PatientListItem }) {
+interface PatientCardProps {
+  patient: PatientListItem;
+  canEditPatient: boolean;
+  onEditPatient: (patient: PatientListItem) => void;
+}
+
+function PatientCard({ patient, canEditPatient, onEditPatient }: PatientCardProps) {
   const glucoseValue =
     patient.lastGlucoseValue === null ? '-' : `${patient.lastGlucoseValue.toFixed(1)} mmol/L`;
   const glucoseContext = patient.lastGlucoseMealContext
@@ -45,7 +54,12 @@ function PatientCard({ patient }: { patient: PatientListItem }) {
           >
             {patient.bedNo || '暂无床号'}
           </Typography.Text>
-          <PatientMoreActions label="更多" />
+          <PatientMoreActions
+            patient={patient}
+            label="更多"
+            canEdit={canEditPatient}
+            onEdit={onEditPatient}
+          />
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -98,6 +112,8 @@ export default function PatientCardGrid({
   hasMore,
   hasError = false,
   onLoadMore,
+  canEditPatient,
+  onEditPatient,
 }: PatientCardGridProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -153,7 +169,12 @@ export default function PatientCardGrid({
           }}
         >
           {items.map((patient) => (
-            <PatientCard key={patient.id} patient={patient} />
+            <PatientCard
+              key={patient.id}
+              patient={patient}
+              canEditPatient={canEditPatient}
+              onEditPatient={onEditPatient}
+            />
           ))}
         </div>
       )}
