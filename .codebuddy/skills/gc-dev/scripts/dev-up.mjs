@@ -15,7 +15,14 @@
  *   node .codebuddy/skills/gc-dev/scripts/dev-up.mjs --seed          重新灌演示数据（危险：覆盖现有数据）
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { closeSync, existsSync, mkdirSync, openSync, readdirSync, rmSync, statSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import http from 'node:http';
@@ -29,6 +36,7 @@ const WEB_URL = `http://127.0.0.1:${WEB_PORT}`;
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 const logDir = join(root, '.devtools/logs');
+const runDir = join(root, '.devtools/run');
 const flags = new Set(process.argv.slice(2));
 
 const t0 = Date.now();
@@ -117,37 +125,25 @@ function run(command, args, label) {
   }
 }
 
-function listListeningPids(ports) {
-  const out = spawnSync('netstat', ['-ano', '-p', 'TCP'], { encoding: 'utf8', shell: true });
-  const pids = new Set();
-  for (const line of (out.stdout ?? '').split(/\r?\n/)) {
-    const cols = line.trim().split(/\s+/);
-    if (cols.length < 5 || !cols[0].toUpperCase().includes('TCP')) continue;
-    const localPort = Number(cols[1].split(':').pop());
-    if (ports.includes(localPort) && cols[3].toUpperCase() === 'LISTENING') pids.add(Number(cols[4]));
-  }
-  return [...pids].filter((pid) => Number.isFinite(pid) && pid > 0);
-}
-
-function killPids(pids) {
-  for (const pid of pids) {
-    spawnSync('taskkill', ['/PID', String(pid), '/F', '/T'], { stdio: 'ignore', shell: true });
-  }
+/** 记录 dev-up 启动的父进程 PID：dev-down 据此整树停止，避免只杀监听子进程留下 watcher */
+function writePid(name, pid) {
+  mkdirSync(runDir, { recursive: true });
+  writeFileSync(join(runDir, `${name}.pid`), String(pid));
 }
 
 function startDetached(command, args, logFile) {
   mkdirSync(logDir, { recursive: true });
-  const fd = openSync(join(logDir, logFile), 'w');
-  const child = spawn(command, args, {
+  const logPath = join(logDir, logFile);
+  // 由 Node 包装进程通过 pipe 落盘：detached 下 cmd 的句柄重定向不可靠（日志会是 0 字节）
+  const runner = join(root, '.codebuddy/skills/gc-dev/scripts/run-detached.mjs');
+  const child = spawn(process.execPath, [runner, logPath, command, ...args], {
     cwd: root,
     detached: true,
-    stdio: ['ignore', fd, fd],
-    shell: true,
+    stdio: 'ignore',
     windowsHide: true,
     env: { ...process.env, FORCE_COLOR: '0' },
   });
   child.unref();
-  closeSync(fd);
   return child.pid;
 }
 
@@ -155,12 +151,16 @@ async function main() {
   console.log('\n[gc-dev] 启动本地开发环境');
 
   if (flags.has('--restart')) {
-    const pids = listListeningPids([SERVER_PORT, WEB_PORT]);
-    if (pids.length) {
-      killPids(pids);
-      info(`已停止旧进程 ${pids.join(', ')}`);
-      await sleep(1500);
+    info('停止旧进程…');
+    const down = spawnSync(
+      process.execPath,
+      [join(root, '.codebuddy/skills/gc-dev/scripts/dev-down.mjs')],
+      { cwd: root, stdio: 'inherit' },
+    );
+    if (down.status !== 0) {
+      warn('旧进程停止失败，继续尝试启动');
     }
+    await sleep(800);
   }
 
   // ---------- 1. 依赖 ----------
@@ -176,7 +176,7 @@ async function main() {
     skip(`PostgreSQL ${PG_PORT} 已在运行（跳过启动）`);
   } else {
     info('启动嵌入式 PostgreSQL …');
-    startDetached('node', ['.devtools/start-db.mjs'], 'pg.log');
+    writePid('pg', startDetached('node', ['.devtools/start-db.mjs'], 'pg.log'));
     const ready = await waitPort(PG_PORT, 60_000);
     if (!ready) {
       warn('PostgreSQL 启动超时，查看 .devtools/logs/pg.log');
@@ -235,7 +235,7 @@ async function main() {
       return;
     }
     info('启动后端（nest 全量编译，约 10-13s）…');
-    startDetached('pnpm', ['dev:server'], 'server.log');
+    writePid('server', startDetached('pnpm', ['dev:server'], 'server.log'));
     if (!(await waitHttp(SERVER_HEALTH))) {
       warn('后端启动超时，查看 .devtools/logs/server.log');
       process.exit(1);
@@ -249,7 +249,7 @@ async function main() {
       return;
     }
     info('启动前端（Vite）…');
-    startDetached('pnpm', ['dev:web'], 'web.log');
+    writePid('web', startDetached('pnpm', ['dev:web'], 'web.log'));
     if (!(await waitHttp(WEB_URL))) {
       warn('前端启动超时，查看 .devtools/logs/web.log');
       process.exit(1);
