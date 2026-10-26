@@ -9,6 +9,8 @@
   "scripts": {
     "sync:shared": "pnpm --filter @gc/shared build && node scripts/sync-shared.mjs",
     "dev": "pnpm sync:shared && pnpm -r --parallel dev",
+    "dev:up": "node .codebuddy/skills/gc-dev/scripts/dev-up.mjs",
+    "dev:down": "node .codebuddy/skills/gc-dev/scripts/dev-down.mjs",
     "dev:web": "pnpm --filter @gc/web dev",
     "dev:server": "pnpm --filter @gc/server dev",
     "build": "pnpm sync:shared && pnpm --filter @gc/server build && pnpm --filter @gc/web build",
