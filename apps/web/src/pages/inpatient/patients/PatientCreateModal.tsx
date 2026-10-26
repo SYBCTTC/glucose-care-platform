@@ -122,7 +122,7 @@ export default function PatientCreateModal({ open, onClose, onSuccess }: Patient
     [staff, departmentId],
   );
 
-  /** 打开时重置表单：入院时间取当前时刻，状态固定为住院患者 */
+  /** 打开时重置表单：入院时间取当前时刻；住院状态由 Form initialValues 兜底 */
   useEffect(() => {
     if (!open) {
       return;
@@ -133,7 +133,6 @@ export default function PatientCreateModal({ open, onClose, onSuccess }: Patient
     form.resetFields();
     form.setFieldsValue({
       admissionAt: dayjs(),
-      status: PATIENT_STATUS.INPATIENT,
       departmentId: defaultDepartmentId,
     });
   }, [open, form, departmentOptions, profile?.departmentId]);
@@ -199,7 +198,15 @@ export default function PatientCreateModal({ open, onClose, onSuccess }: Patient
       onCancel={onClose}
       maskClosable={false}
     >
-      <Form form={form} layout="vertical" preserve={false} requiredMark>
+      <Form
+        form={form}
+        layout="horizontal"
+        labelCol={{ flex: '120px' }}
+        wrapperCol={{ flex: 'auto' }}
+        initialValues={{ status: PATIENT_STATUS.INPATIENT }}
+        preserve={false}
+        requiredMark
+      >
         <Row gutter={24}>
           <Col span={12}>
             <Form.Item
