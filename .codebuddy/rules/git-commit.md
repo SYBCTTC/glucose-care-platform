@@ -8,11 +8,20 @@ globs:
 
 ## 1. 提交时机
 
-- **每次代码改动完成后，自动执行一次 `git commit`**，无需用户确认。
-- 一次原子任务 = 一次提交。任务未完成（编译不过、测试红）时**不得提交**。
+- **每次代码改动完成后，自动执行 `git commit` 并 `git push` 到远程**，无需用户确认。
+- 一次原子任务 = 一次提交 = 一次推送。
+- 任务未完成（编译不过、测试红）时**不得提交**。
 - 提交前必须自查：
   - `git status --short`：确认无无关文件被带入
   - `git diff --stat`：单个提交建议 ≤ 400 行，超出则拆分
+
+## 1.1 推送规则
+
+- 推送目标：`origin` + 当前分支（默认 `main`），命令 `git push origin <branch>`。
+- 推送前先 `git fetch`；若本地落后远程，先 `git pull --rebase` 再推。
+- 推送失败（网络抖动、SSL reset、超时）：**重试 1 次**；仍失败则保留本地提交，明确告知用户"已提交未推送"及错误原文，不静默丢弃。
+- 推送被拒（non-fast-forward / 权限）：**停止并向用户报告**，禁止 `--force`、禁止 `--force-with-lease` 到 `main`。
+- 推送成功后，在回复中告知提交号与推送结果。
 
 ## 2. 提交粒度
 
@@ -66,6 +75,8 @@ git status --short
 git diff --stat
 git add <明确路径>          # 禁止 git add -A / git add .
 git commit -m "<type>(<scope>): <描述>" -m "<正文>"
+git fetch origin
+git push origin main        # 提交后立即推送
 ```
 
 ## 5. 敏感目录
@@ -85,4 +96,4 @@ git commit -m "<type>(<scope>): <描述>" -m "<正文>"
 - ❌ 一个提交混装格式化 + 逻辑改动
 - ❌ 提交编译不过 / 测试失败的中间态
 - ❌ 用 `--amend` 改写已 push 的提交，或用 `--force` 推送 `main`
-- ❌ 未经用户要求执行 `git push`（默认只提交到本地）
+- ❌ 未经用户同意删除/回滚已推送的远程提交
