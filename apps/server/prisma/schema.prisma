@@ -225,6 +225,8 @@ enum AuditAction {
   PATIENT_VIEW
   /// 患者建档（新增患者），与 PATIENT_MANAGE 区分，便于审计按动作过滤
   PATIENT_CREATE
+  /// 患者信息编辑（改床号/责任医生等），detail.changedFields 记变更字段名
+  PATIENT_UPDATE
   PATIENT_MANAGE
   DEVICE_VIEW
   DEVICE_MANAGE
