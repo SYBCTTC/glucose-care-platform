@@ -184,6 +184,7 @@ export default function PatientCreateModal({ open, onClose, onSuccess }: Patient
     }
   };
 
+  // 控制列必须用 flex-basis: 0：auto 会按内容最大宽度计算，长提示/长占位会把控件挤到下一行并独占整行
   return (
     <Modal
       open={open}
@@ -202,7 +203,7 @@ export default function PatientCreateModal({ open, onClose, onSuccess }: Patient
         form={form}
         layout="horizontal"
         labelCol={{ flex: '120px' }}
-        wrapperCol={{ flex: 'auto' }}
+        wrapperCol={{ flex: '1 1 0' }}
         initialValues={{ status: PATIENT_STATUS.INPATIENT }}
         preserve={false}
         requiredMark
@@ -350,7 +351,6 @@ export default function PatientCreateModal({ open, onClose, onSuccess }: Patient
               name="status"
               label="状态"
               rules={[{ required: true, message: '请选择状态' }]}
-              extra="本期建档只支持住院患者，出院流转由后续出院操作产生"
             >
               <Select
                 disabled
