@@ -87,9 +87,7 @@ export class AuditLogInterceptor implements NestInterceptor {
           result,
           detail: {
             ...pickAllowedFields({ ...params, ...query, ...body }),
-            ...(payload !== null && typeof payload === 'object'
-              ? pickAllowedFields(payload as Record<string, unknown>)
-              : {}),
+            ...pickPayloadFields(payload),
             ...(error ? { error: 'denied_or_failed' } : {}),
             path: `${request.method} ${request.route?.path ?? request.url}`,
             requestId: context.getClass().name,
@@ -101,6 +99,25 @@ export class AuditLogInterceptor implements NestInterceptor {
       console.error('[audit] 审计日志写入失败', action, writeError);
     }
   }
+}
+
+/**
+ * 从响应体里取白名单字段。
+ * 业务字段在统一响应信封 { code, message, data } 的 data 里（如 changedFields），
+ * 信封本身也要看一层，避免漏掉将来提到顶层的字段。
+ */
+function pickPayloadFields(payload: unknown): Record<string, unknown> {
+  if (payload === null || typeof payload !== 'object') {
+    return {};
+  }
+  const envelope = payload as Record<string, unknown>;
+  const nested = envelope.data;
+  return {
+    ...(nested !== null && typeof nested === 'object'
+      ? pickAllowedFields(nested as Record<string, unknown>)
+      : {}),
+    ...pickAllowedFields(envelope),
+  };
 }
 
 function pickAllowedFields(source: Record<string, unknown>): Record<string, unknown> {

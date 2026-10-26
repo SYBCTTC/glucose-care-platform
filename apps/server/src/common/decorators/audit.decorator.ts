@@ -19,4 +19,6 @@ export const AUDIT_DETAIL_ALLOW_LIST = [
   'count',
   'rangeFrom',
   'rangeTo',
+  /** 变更字段名数组（只记字段名，不记值）：患者编辑等需要追溯"改了哪些字段"的场景 */
+  'changedFields',
 ] as const;
