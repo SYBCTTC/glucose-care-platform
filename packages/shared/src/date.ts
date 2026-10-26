@@ -29,3 +29,27 @@ export function formatDateTime(value: Date | null | undefined): string | null {
   const time = `${pad(value.getHours())}:${pad(value.getMinutes())}:${pad(value.getSeconds())}`;
   return `${date} ${time}`;
 }
+
+/** 纯日期（如出生日期）统一格式：YYYY-MM-DD，不带时间与时区后缀 */
+export const DATE_ONLY_FORMAT = 'YYYY-MM-DD';
+export const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * 接口纯日期入参：仅接受 YYYY-MM-DD。
+ * 统一按 UTC 零点转 Date，避免运行环境时区把日期写成前一天（@db.Date 存 UTC 日期部分）。
+ */
+export const dateOnlyStringSchema = z
+  .string()
+  .trim()
+  .regex(DATE_ONLY_PATTERN, `日期格式应为 ${DATE_ONLY_FORMAT}`)
+  .refine((value) => !Number.isNaN(new Date(value).getTime()), '日期不合法')
+  .transform((value) => new Date(value));
+
+/** 纯日期出参：Date → YYYY-MM-DD（按 UTC 取日期部分，与入库口径一致）；空值返回 null */
+export function formatDateOnly(value: Date | null | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+  const pad = (input: number) => String(input).padStart(2, '0');
+  return `${value.getUTCFullYear()}-${pad(value.getUTCMonth() + 1)}-${pad(value.getUTCDate())}`;
+}

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { dateTimeStringSchema } from '../date';
+import { dateOnlyStringSchema, dateTimeStringSchema } from '../date';
 
 /**
  * 患者领域契约（前后端共享）。
@@ -13,6 +13,8 @@ import { dateTimeStringSchema } from '../date';
 export const GENDER = {
   MALE: 'MALE',
   FEMALE: 'FEMALE',
+  /** 未说明：新增建档时的"拒绝/不便提供"选项，与历史 UNKNOWN(未知) 区分 */
+  UNSPECIFIED: 'UNSPECIFIED',
   UNKNOWN: 'UNKNOWN',
 } as const;
 export type Gender = (typeof GENDER)[keyof typeof GENDER];
@@ -20,8 +22,35 @@ export type Gender = (typeof GENDER)[keyof typeof GENDER];
 export const GENDER_LABELS: Record<Gender, string> = {
   MALE: '男',
   FEMALE: '女',
+  UNSPECIFIED: '未说明',
   UNKNOWN: '未知',
 };
+
+/** 建档时可选的性别（UNKNOWN 为历史数据兜底，不在下拉中出现） */
+export const GENDER_SELECTABLE: Gender[] = [GENDER.MALE, GENDER.FEMALE, GENDER.UNSPECIFIED];
+
+/** 糖尿病类型（D-DIABETES）：静态字典，落库存 code，展示用 LABELS */
+export const DIABETES_TYPE = {
+  TYPE_1: 'TYPE_1',
+  TYPE_2: 'TYPE_2',
+  GESTATIONAL: 'GESTATIONAL',
+  SPECIAL: 'SPECIAL',
+  OTHER: 'OTHER',
+} as const;
+export type DiabetesType = (typeof DIABETES_TYPE)[keyof typeof DIABETES_TYPE];
+
+export const DIABETES_TYPE_LABELS: Record<DiabetesType, string> = {
+  TYPE_1: 'I型糖尿病',
+  TYPE_2: 'II型糖尿病',
+  GESTATIONAL: '妊娠型糖尿病',
+  SPECIAL: '特殊型糖尿病',
+  OTHER: '其他',
+};
+
+/** 糖化血红蛋白（HbA1c）：百分比，0~100，最多 1 位小数 */
+export const HBA1C_MIN = 0;
+export const HBA1C_MAX = 100;
+export const HBA1C_UNIT = '%';
 
 /** 患者住院状态：决定患者管理页的 Tab 与查询接口 */
 export const PATIENT_STATUS = {
@@ -49,16 +78,43 @@ export const phoneSchema = z
   .regex(/^1[3-9]\d{9}$/, '手机号格式不正确')
   .optional();
 
+/** 糖化血红蛋白：0~100（%），最多 1 位小数 */
+const hba1cSchema = z
+  .coerce.number()
+  .min(HBA1C_MIN, `糖化血红蛋白不能小于 ${HBA1C_MIN}`)
+  .max(HBA1C_MAX, `糖化血红蛋白不能大于 ${HBA1C_MAX}`)
+  .refine((value) => Math.abs(value * 10 - Math.round(value * 10)) < 1e-9, '糖化血红蛋白最多 1 位小数');
+
+/** 建档状态：本期仅支持"住院患者"，出院流转由后续出院操作产生 */
+const createStatusSchema = z
+  .nativeEnum(PATIENT_STATUS)
+  .default(PATIENT_STATUS.INPATIENT)
+  .refine((value) => value === PATIENT_STATUS.INPATIENT, '建档时状态只能是「住院患者」');
+
+/** 出生日期：YYYY-MM-DD，不允许晚于今天 */
+const birthDateSchema = dateOnlyStringSchema.refine(
+  (value) => value.getTime() <= Date.now(),
+  '出生日期不能晚于今天',
+);
+
 export const createPatientSchema = z.object({
   name: z.string().trim().min(1, '请输入患者姓名').max(32, '姓名过长'),
-  gender: z.nativeEnum(GENDER).default(GENDER.UNKNOWN),
-  birthDate: z.coerce.date().optional(),
-  /** 住院号 / 门诊号 */
-  patientNo: z.string().trim().min(1).max(32).optional(),
+  gender: z.nativeEnum(GENDER, { errorMap: () => ({ message: '请选择性别' }) }),
+  birthDate: birthDateSchema,
+  /** 住院号 / 门诊号，院内唯一 */
+  patientNo: z.string().trim().min(1, '请输入住院号').max(32, '住院号过长'),
   idCard: idCardSchema,
   phone: phoneSchema,
-  departmentId: z.string().uuid('科室不合法'),
-  bedNo: z.string().trim().max(32).optional(),
+  departmentId: z.string().uuid('请选择科室'),
+  bedNo: z.string().trim().max(32, '床号过长').optional(),
+  /** 责任医生，须属于所选科室 */
+  doctorId: z.string().uuid('责任医生不合法').optional(),
+  /** 责任护士，须属于所选科室 */
+  nurseId: z.string().uuid('责任护士不合法').optional(),
+  diabetesType: z.nativeEnum(DIABETES_TYPE).optional(),
+  hba1c: hba1cSchema.optional(),
+  admissionAt: dateTimeStringSchema,
+  status: createStatusSchema,
   remark: z.string().trim().max(255).optional(),
 });
 export type CreatePatientInput = z.infer<typeof createPatientSchema>;

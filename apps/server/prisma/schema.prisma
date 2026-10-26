@@ -60,6 +60,8 @@ model User {
   bindings       PatientDeviceBinding[]
   /// 作为责任医生负责的患者
   patients       Patient[]       @relation("PatientDoctor")
+  /// 作为责任护士负责的患者
+  nursePatients  Patient[]       @relation("PatientNurse")
 
   @@index([departmentId])
   @@index([status])
@@ -103,9 +105,14 @@ model Patient {
   phoneCipher  String? @db.VarChar(512)
   phoneMasked  String? @db.VarChar(32)
 
-  gender       String?    @db.VarChar(8)
+  /// 性别：取值见 @gc/shared GENDER（含 UNSPECIFIED 未说明，故长度 16）
+  gender       String?    @db.VarChar(16)
   birthDate    DateTime?  @db.Date
   bedNo        String?    @db.VarChar(32)
+  /// 糖尿病类型：取值见 @gc/shared DIABETES_TYPE
+  diabetesType String?    @db.VarChar(32)
+  /// 糖化血红蛋白（%），0~100，保留 1 位小数
+  hba1c        Decimal?   @db.Decimal(4, 1)
   remark       String?    @db.VarChar(255)
   departmentId String     @db.Uuid
   /// 住院 / 出院状态（Tab 与列表接口按此过滤）
@@ -116,18 +123,22 @@ model Patient {
   dischargeAt  DateTime?
   /// 责任医生
   doctorId     String?    @db.Uuid
+  /// 责任护士
+  nurseId      String?    @db.Uuid
   archivedAt   DateTime?
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
   department     Department @relation(fields: [departmentId], references: [id])
   doctor         User?      @relation("PatientDoctor", fields: [doctorId], references: [id])
+  nurse          User?      @relation("PatientNurse", fields: [nurseId], references: [id])
   bindings       PatientDeviceBinding[]
   glucoseRecords GlucoseRecord[]
 
   @@index([departmentId, archivedAt])
   @@index([departmentId, status, admissionAt])
   @@index([doctorId])
+  @@index([nurseId])
   @@index([nameMasked])
 }
 
@@ -212,6 +223,8 @@ enum AuditAction {
   LOGOUT
   PASSWORD_CHANGE
   PATIENT_VIEW
+  /// 患者建档（新增患者），与 PATIENT_MANAGE 区分，便于审计按动作过滤
+  PATIENT_CREATE
   PATIENT_MANAGE
   DEVICE_VIEW
   DEVICE_MANAGE

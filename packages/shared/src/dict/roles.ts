@@ -21,6 +21,8 @@ export const ROLE_LABELS: Record<RoleCode, string> = {
  */
 export const PERMISSION = {
   PATIENT_VIEW: 'patient:view',
+  /** 患者建档（新增患者）；与编辑/归档等管理动作分离，便于只授予建档权限 */
+  PATIENT_CREATE: 'patient:create',
   PATIENT_MANAGE: 'patient:manage',
   /** 住院患者 Tab 可见/可查 */
   PATIENT_INPATIENT_VIEW: 'patient:inpatient:view',
@@ -64,6 +66,7 @@ export const ROLE_PERMISSIONS: Record<RoleCode, PermissionCode[]> = {
   ],
   NURSE: [
     PERMISSION.PATIENT_VIEW,
+    PERMISSION.PATIENT_CREATE,
     PERMISSION.PATIENT_INPATIENT_VIEW,
     PERMISSION.PATIENT_DISCHARGED_VIEW,
     PERMISSION.DEVICE_VIEW,
@@ -75,6 +78,7 @@ export const ROLE_PERMISSIONS: Record<RoleCode, PermissionCode[]> = {
   ],
   NURSE_HEAD: [
     PERMISSION.PATIENT_VIEW,
+    PERMISSION.PATIENT_CREATE,
     PERMISSION.PATIENT_INPATIENT_VIEW,
     PERMISSION.PATIENT_DISCHARGED_VIEW,
     PERMISSION.PATIENT_MANAGE,
@@ -99,6 +103,7 @@ export const ROLE_PERMISSIONS: Record<RoleCode, PermissionCode[]> = {
   // 权限一律用权限点显式表达，前后端同源，避免前后端两套判断不一致。
   SYS_ADMIN: [
     PERMISSION.PATIENT_VIEW,
+    PERMISSION.PATIENT_CREATE,
     PERMISSION.PATIENT_INPATIENT_VIEW,
     PERMISSION.PATIENT_DISCHARGED_VIEW,
     PERMISSION.PATIENT_MANAGE,
