@@ -2,7 +2,7 @@
 
 > 用途：登记项目内**高频复用、统一维护**的公共数据。后续向 AI 提需求时，直接引用「代号」即可，
 > 无需重复描述取值，也禁止在业务代码里硬编码这些取值。
-> 最后更新：2026-10-23（动态数据接口 + 前端一次性加载落地；新增患者状态字典）。
+> 最后更新：2026-10-26（患者建档：性别增加"未说明"、新增糖尿病类型字典）。
 
 ## 一、使用约定
 
@@ -22,7 +22,8 @@
 | `D-RESULT` | 检测结果类型 | `dict/result-types.ts` | `RESULT_TYPE` / `RESULT_TYPE_LABELS` / `RESULT_TYPE_COUNTED` / `getResultTypeLabel` | `NORMAL`(检测)/`LOW`(Low)/`HIGH`(High)/`REFUSED`(拒检)/`OUT`(外出) | 血糖/质控录入结果下拉；`COUNTED` 标记是否计入统计 |
 | `D-TIMESLOT` | 时段划分 | `dict/time-slots.ts` | `TIME_SLOTS` / `TIME_SLOT_TYPE` / `getTimeSlotLabel` / `getTimeSlotsByType` | 普通：`FASTING`(空腹)/`BREAKFAST_PRE`(早餐前)/`BREAKFAST_POST`(早餐后)/`LUNCH_PRE`(午餐前)/`LUNCH_POST`(午餐后)/`DINNER_PRE`(晚餐前)/`DINNER_POST`(晚餐后)/`BEDTIME`(睡前)；强化：`INTENSIVE_AM`(强化-上午)/`INTENSIVE_PM`(强化-下午)/`INTENSIVE_NIGHT`(强化-夜间) | 患者血糖展示按"时段"作表头分组；起止不固化，仅分组语义 |
 | `D-ALERT` | 预警范围默认值 | `dict/time-slots.ts` | `DEFAULT_ALERT_RANGE` | `{ low: 3.9, high: 16.7 }`（mmol/L） | 低血糖/高血糖阈值占位；接口就绪后改为读 `SystemConfig`，禁止硬编码 |
-| `D-GENDER` | 性别 | `patient/schema.ts` | `GENDER` / `GENDER_LABELS` | `MALE`(男)/`FEMALE`(女)/`UNKNOWN`(未知) | 患者建档性别下拉 |
+| `D-GENDER` | 性别 | `patient/schema.ts` | `GENDER` / `GENDER_LABELS` / `GENDER_SELECTABLE` | `MALE`(男)/`FEMALE`(女)/`UNSPECIFIED`(未说明)/`UNKNOWN`(未知，历史数据兜底，不进下拉) | 患者建档性别下拉（用 `GENDER_SELECTABLE`） |
+| `D-DIABETES` | 糖尿病类型 | `patient/schema.ts` | `DIABETES_TYPE` / `DIABETES_TYPE_LABELS` | `TYPE_1`(I型糖尿病)/`TYPE_2`(II型糖尿病)/`GESTATIONAL`(妊娠型糖尿病)/`SPECIAL`(特殊型糖尿病)/`OTHER`(其他) | 患者建档糖尿病类型下拉；库内存 code |
 | `D-PATSTATUS` | 患者住院状态 | `patient/schema.ts` | `PATIENT_STATUS` / `PATIENT_STATUS_LABELS` | `INPATIENT`(住院患者)/`DISCHARGED`(出院患者) | 患者管理 Tab、列表状态展示 |
 | `D-DEVSTATUS` | 设备状态 | `device/schema.ts` | `DEVICE_STATUS` / `DEVICE_STATUS_LABELS` | `IDLE`(未绑定)/`BOUND`(使用中)/`OFFLINE`(离线)/`DISABLED`(已停用) | 设备列表/详情展示 |
 | `D-USERSTATUS` | 用户状态 | `dict/user-status.ts` | `USER_STATUS_LABELS` / `getUserStatusLabel` | `ACTIVE`(启用)/`DISABLED`(禁用)/`LOCKED`(锁定) | 人员列表/详情展示 |
@@ -59,7 +60,8 @@
 - "添加血糖表单的**结果下拉**用 `D-RESULT`，**操作人下拉**用 `DY-OPERATOR`（默认带出 `CURRENT_USER`）。"
 - "患者血糖展示按 `D-TIMESLOT` 的时段作为表头，超 `D-ALERT` 范围标红。"
 - "设备列表的状态列用 `D-DEVSTATUS` 映射中文；设备选择用 `DY-DEVICE`（`useCommonDataStore().devices`）。"
-- "建档表单的性别用 `D-GENDER`，责任医生用 `DY-DOCTOR`（`staffByRole('DOCTOR')`），科室用 `DY-DEPT`。"
+- "建档表单的性别用 `D-GENDER`（可选值取 `GENDER_SELECTABLE`），糖尿病类型用 `D-DIABETES`，责任医生用 `DY-DOCTOR`（`staffByRole('DOCTOR')`），责任护士用 `DY-OPERATOR`，科室用 `DY-DEPT`。"
+- "糖化血红蛋白：范围常量 `HBA1C_MIN/HBA1C_MAX/HBA1C_UNIT`（`patient/schema.ts`），0~100、最多 1 位小数、单位 `%`，禁止在页面写死范围和单位。"
 - "公共数据已在登录后加载，组件里**不要再调接口**，直接从 `useCommonDataStore` 取。"
 
 ---

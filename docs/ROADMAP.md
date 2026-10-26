@@ -128,18 +128,18 @@ flowchart LR
 
 ---
 
-## P4 患者管理 —— ⬜ 0%
+## P4 患者管理 —— 🟡 50%
 
 > 前置：App.tsx 现为 Placeholder；等保要求"列表不返回完整身份信息"。
 
 | # | 任务 | 关键点 |
 |---|---|---|
 | 1 | **真实加密替换占位** | `Patient.*Cipher` 现为 base64 占位（等保硬项）→ AES-256-GCM 或国密 SM4，密钥由环境变量/院方 KMS 注入，**禁止入库** |
-| 2 | 建档接口 | 住院号唯一（`40002`）、写入 `*Masked`、审计 `@Audit('PATIENT_CREATE')` |
-| 3 | 列表接口 | 分页 + 脱敏 + 关键词（按脱敏值/住院号）+ `buildScopeWhere(RESOURCE.PATIENT)` |
-| 4 | 详情与按需查看 | 默认脱敏；查看完整身份信息需 `PATIENT_MANAGE` + 单独接口 + 审计留痕 |
-| 5 | 归档 | `archivedAt` 软删除；已归档患者禁止录血糖（`30003 PATIENT_ARCHIVED`） |
-| 6 | 前端页面 | 列表/建档表单/详情，替换 Placeholder |
+| 2 | 建档接口 ✅ 2026-10-26 | `POST /patients`（权限点 `patient:create`）；住院号唯一（`40002`）、写入 `*Masked`、审计 `PATIENT_CREATE`；责任医护需属所选科室 |
+| 3 | 列表接口 ✅ 2026-10-26 | 分页 + 脱敏 + 关键词（按脱敏值/住院号）+ `buildScopeWhere(RESOURCE.PATIENT)` |
+| 4 | 详情与按需查看 ⬜ | 默认脱敏；查看完整身份信息需 `PATIENT_MANAGE` + 单独接口 + 审计留痕 |
+| 5 | 归档 ⬜ | `archivedAt` 软删除；已归档患者禁止录血糖（`30003 PATIENT_ARCHIVED`） |
+| 6 | 前端页面 🟡 | 列表、卡片、筛选、添加患者弹窗 ✅；详情/编辑/归档待做 |
 
 **验收**：`dr.chen`（心内科）访问内分泌患者返回 `30002`；设备管理员访问返回 `30006`；列表不出现明文身份证。
 
