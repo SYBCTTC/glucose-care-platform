@@ -1,7 +1,14 @@
-import { Body, Controller, Get, Post, Query, Req } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import type { Request } from 'express';
-import { createPatientSchema, patientListQuerySchema, PERMISSION, RESOURCE } from '@gc/shared';
-import type { CreatePatientInput, PatientListQuery } from '@gc/shared';
+import {
+  createPatientSchema,
+  patientIdSchema,
+  patientListQuerySchema,
+  PERMISSION,
+  RESOURCE,
+  updatePatientSchema,
+} from '@gc/shared';
+import type { CreatePatientInput, PatientListQuery, UpdatePatientInput } from '@gc/shared';
 import { Audit } from '../../common/decorators/audit.decorator';
 import { RequireDataScope } from '../../common/data-scope/data-scope.decorator';
 import { RequirePermissions } from '../../common/guards/permissions.guard';
@@ -57,5 +64,40 @@ export class PatientController {
       query,
     );
     return page(result.items, result.total, query.page, query.pageSize);
+  }
+
+  /**
+   * 患者详情（编辑弹窗回填）。
+   * 注意：以下两个带 :id 的路由必须声明在 inpatient / discharged 之后，
+   * 否则 Nest 会先匹配到 :id，把 "inpatient" 当成患者 ID。
+   */
+  @Get(':id')
+  @RequirePermissions(PERMISSION.PATIENT_VIEW)
+  @RequireDataScope(RESOURCE.PATIENT)
+  @Audit('PATIENT_VIEW')
+  async detail(
+    @Req() request: Request,
+    @Param(new ZodValidationPipe(patientIdSchema)) params: { id: string },
+  ) {
+    const result = await this.patientService.detail(request.user as AuthenticatedUser, params.id);
+    return ok(result);
+  }
+
+  /** 患者信息编辑：出院校验与数据范围校验都在 service，controller 只做鉴权与转发 */
+  @Patch(':id')
+  @RequirePermissions(PERMISSION.PATIENT_UPDATE)
+  @RequireDataScope(RESOURCE.PATIENT)
+  @Audit('PATIENT_UPDATE')
+  async update(
+    @Req() request: Request,
+    @Param(new ZodValidationPipe(patientIdSchema)) params: { id: string },
+    @Body(new ZodValidationPipe(updatePatientSchema)) body: UpdatePatientInput,
+  ) {
+    const result = await this.patientService.update(
+      request.user as AuthenticatedUser,
+      params.id,
+      body,
+    );
+    return ok(result);
   }
 }

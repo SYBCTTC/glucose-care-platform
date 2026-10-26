@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import {
   ERROR_CODES,
+  formatDateOnly,
   formatDateTime,
   PATIENT_STATUS,
   RESOURCE,
@@ -8,13 +9,22 @@ import {
 } from '@gc/shared';
 import type {
   CreatePatientInput,
+  DiabetesType,
   FieldError,
+  PatientDetail,
   PatientListItem,
   PatientListQuery,
   PatientStatus,
+  PatientUpdateResult,
+  UpdatePatientInput,
 } from '@gc/shared';
 import { Prisma } from '@prisma/client';
-import { encryptDeterministic, maskIdCard, maskName, maskPhone } from '../../common/crypto/field-crypto';
+import {
+  encryptDeterministic,
+  maskIdCard,
+  maskName,
+  maskPhone,
+} from '../../common/crypto/field-crypto';
 import { assertInScope, buildScopeWhere } from '../../common/data-scope/scope.util';
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -46,6 +56,73 @@ function calcAge(birthDate: Date | null): number | null {
   }
   return age >= 0 ? age : null;
 }
+
+/**
+ * 列表 / 详情共用的患者字段选择器。
+ * 出参一律脱敏：*Cipher 列永远不进 select，避免明文或密文泄露到前端。
+ */
+const PATIENT_PUBLIC_SELECT = Prisma.validator<Prisma.PatientSelect>()({
+  id: true,
+  nameMasked: true,
+  patientNo: true,
+  gender: true,
+  birthDate: true,
+  bedNo: true,
+  departmentId: true,
+  department: { select: { name: true } },
+  doctorId: true,
+  doctor: { select: { name: true } },
+  status: true,
+  admissionAt: true,
+  dischargeAt: true,
+  archivedAt: true,
+  glucoseRecords: {
+    orderBy: { measuredAt: 'desc' },
+    take: 1,
+    select: { valueMmolL: true, mealContext: true, measuredAt: true },
+  },
+});
+
+type PatientPublicRow = Prisma.PatientGetPayload<{ select: typeof PATIENT_PUBLIC_SELECT }>;
+
+/** 行 → 列表项。列表与详情共用，保证两处口径一致 */
+function toListItem(row: PatientPublicRow): PatientListItem {
+  const lastGlucose = row.glucoseRecords[0] ?? null;
+  return {
+    id: row.id,
+    nameMasked: row.nameMasked,
+    patientNo: row.patientNo,
+    gender: row.gender,
+    bedNo: row.bedNo,
+    departmentId: row.departmentId,
+    departmentName: row.department.name,
+    doctorId: row.doctorId,
+    doctorName: row.doctor?.name ?? null,
+    status: row.status,
+    admissionAt: formatDateTime(row.admissionAt),
+    dischargeAt: formatDateTime(row.dischargeAt),
+    archivedAt: formatDateTime(row.archivedAt),
+    age: calcAge(row.birthDate),
+    lastGlucoseValue: lastGlucose ? Number(lastGlucose.valueMmolL) : null,
+    lastGlucoseMealContext: lastGlucose?.mealContext ?? null,
+    lastGlucoseMeasuredAt: formatDateTime(lastGlucose?.measuredAt ?? null),
+  };
+}
+
+/** 详情选择器：在列表字段之上补编辑弹窗回填所需的字段，仍不含任何明文 */
+const PATIENT_DETAIL_SELECT = Prisma.validator<Prisma.PatientSelect>()({
+  ...PATIENT_PUBLIC_SELECT,
+  idCardMasked: true,
+  phoneMasked: true,
+  remark: true,
+  nurseId: true,
+  diabetesType: true,
+  hba1c: true,
+  bindings: {
+    where: { unboundAt: null },
+    select: { device: { select: { id: true, sn: true, model: true, status: true } } },
+  },
+});
 
 @Injectable()
 export class PatientService {
@@ -194,27 +271,7 @@ export class PatientService {
     const [rows, total] = await this.prisma.$transaction([
       this.prisma.patient.findMany({
         where,
-        select: {
-          id: true,
-          nameMasked: true,
-          patientNo: true,
-          gender: true,
-          birthDate: true,
-          bedNo: true,
-          departmentId: true,
-          department: { select: { name: true } },
-          doctorId: true,
-          doctor: { select: { name: true } },
-          status: true,
-          admissionAt: true,
-          dischargeAt: true,
-          archivedAt: true,
-          glucoseRecords: {
-            orderBy: { measuredAt: 'desc' },
-            take: 1,
-            select: { valueMmolL: true, mealContext: true, measuredAt: true },
-          },
-        },
+        select: PATIENT_PUBLIC_SELECT,
         orderBy,
         skip: (query.page - 1) * query.pageSize,
         take: query.pageSize,
@@ -222,30 +279,182 @@ export class PatientService {
       this.prisma.patient.count({ where }),
     ]);
 
+    return { items: rows.map(toListItem), total };
+  }
+
+  /**
+   * 患者详情（编辑弹窗回填用）。
+   * 安全约定：
+   *  1. 只返回脱敏值，明文身份信息一律不出库；
+   *  2. 数据范围走 assertInScope，跨科室 → 30002；
+   *  3. 属敏感查询，controller 挂 @Audit('PATIENT_VIEW') 逐条留痕。
+   */
+  async detail(user: AuthenticatedUser, id: string): Promise<PatientDetail> {
+    const row = await this.prisma.patient.findUnique({
+      where: { id },
+      select: PATIENT_DETAIL_SELECT,
+    });
+    if (!row || row.archivedAt) {
+      throw new BusinessException(ERROR_CODES.PATIENT_NOT_FOUND);
+    }
+    assertInScope(user, RESOURCE.PATIENT, { departmentId: row.departmentId });
+
     return {
-      items: rows.map((row) => {
-        const lastGlucose = row.glucoseRecords[0] ?? null;
-        return {
-          id: row.id,
-          nameMasked: row.nameMasked,
-          patientNo: row.patientNo,
-          gender: row.gender,
-          bedNo: row.bedNo,
-          departmentId: row.departmentId,
-          departmentName: row.department.name,
-          doctorId: row.doctorId,
-          doctorName: row.doctor?.name ?? null,
-          status: row.status,
-          admissionAt: formatDateTime(row.admissionAt),
-          dischargeAt: formatDateTime(row.dischargeAt),
-          archivedAt: formatDateTime(row.archivedAt),
-          age: calcAge(row.birthDate),
-          lastGlucoseValue: lastGlucose ? Number(lastGlucose.valueMmolL) : null,
-          lastGlucoseMealContext: lastGlucose?.mealContext ?? null,
-          lastGlucoseMeasuredAt: formatDateTime(lastGlucose?.measuredAt ?? null),
-        };
-      }),
-      total,
+      ...toListItem(row),
+      idCardMasked: row.idCardMasked,
+      phoneMasked: row.phoneMasked,
+      birthDate: formatDateOnly(row.birthDate),
+      remark: row.remark,
+      nurseId: row.nurseId,
+      diabetesType: row.diabetesType as DiabetesType | null,
+      hba1c: row.hba1c === null ? null : Number(row.hba1c),
+      devices: row.bindings.map((binding) => binding.device),
     };
+  }
+
+  /**
+   * 患者信息编辑（PATCH）。
+   * 安全约定：
+   *  1. 只有住院患者可编辑，出院 / 已归档一律拒绝；
+   *  2. 患者当前科室与目标科室都必须落在数据范围内；
+   *  3. 姓名 / 身份证 / 手机号只有显式给出新值才重新加密，未传则保留原值
+   *     （密文不可逆，前端无法回填明文，只能「留空不改」）；
+   *  4. 返回 changedFields（仅字段名），供审计留痕，不含任何患者信息。
+   */
+  async update(
+    user: AuthenticatedUser,
+    id: string,
+    input: UpdatePatientInput,
+  ): Promise<PatientUpdateResult> {
+    const existing = await this.prisma.patient.findUnique({
+      where: { id },
+      select: {
+        status: true,
+        archivedAt: true,
+        departmentId: true,
+        nameCipher: true,
+        idCardCipher: true,
+        phoneCipher: true,
+        gender: true,
+        birthDate: true,
+        bedNo: true,
+        doctorId: true,
+        nurseId: true,
+        diabetesType: true,
+        hba1c: true,
+      },
+    });
+    if (!existing || existing.archivedAt) {
+      throw new BusinessException(ERROR_CODES.PATIENT_NOT_FOUND);
+    }
+
+    // 先按患者当前科室判权限，再按目标科室判一次，避免"借改科室跨出数据范围"
+    assertInScope(user, RESOURCE.PATIENT, { departmentId: existing.departmentId });
+    if (existing.status !== PATIENT_STATUS.INPATIENT) {
+      throw new BusinessException(ERROR_CODES.PATIENT_INVALID_STATE);
+    }
+    if (input.departmentId !== existing.departmentId) {
+      assertInScope(user, RESOURCE.PATIENT, { departmentId: input.departmentId });
+    }
+
+    // 医护归属按「最终生效值」校验：只改了科室、没换医护时也会被拦下
+    await this.assertStaffInDepartment(
+      input.doctorId ?? undefined,
+      input.departmentId,
+      [ROLE_CODE.DOCTOR],
+      'doctorId',
+      '责任医生不属于所选科室',
+    );
+    await this.assertStaffInDepartment(
+      input.nurseId ?? undefined,
+      input.departmentId,
+      NURSE_ROLE_CODES,
+      'nurseId',
+      '责任护士不属于所选科室',
+    );
+
+    const data: Prisma.PatientUncheckedUpdateInput = {};
+    const changedFields: string[] = [];
+
+    // ① 敏感字段：只有显式给值才写，密文相同视为未变更
+    if (input.name !== undefined) {
+      const cipher = encryptDeterministic(input.name);
+      if (cipher !== existing.nameCipher) {
+        data.nameCipher = cipher;
+        data.nameMasked = maskName(input.name);
+        changedFields.push('name');
+      }
+    }
+    if (input.idCard !== undefined) {
+      const cipher = input.idCard === null ? null : encryptDeterministic(input.idCard);
+      if (cipher !== existing.idCardCipher) {
+        data.idCardCipher = cipher;
+        data.idCardMasked = input.idCard === null ? null : maskIdCard(input.idCard);
+        changedFields.push('idCard');
+      }
+    }
+    if (input.phone !== undefined) {
+      const cipher = input.phone === null ? null : encryptDeterministic(input.phone);
+      if (cipher !== existing.phoneCipher) {
+        data.phoneCipher = cipher;
+        data.phoneMasked = input.phone === null ? null : maskPhone(input.phone);
+        changedFields.push('phone');
+      }
+    }
+
+    // ② 非敏感字段：覆盖式提交，null 表示清空
+    if (input.gender !== existing.gender) {
+      data.gender = input.gender;
+      changedFields.push('gender');
+    }
+    if (input.birthDate.getTime() !== existing.birthDate?.getTime()) {
+      data.birthDate = input.birthDate;
+      changedFields.push('birthDate');
+    }
+    const nextBedNo = input.bedNo?.trim() || null;
+    if (nextBedNo !== existing.bedNo) {
+      data.bedNo = nextBedNo;
+      changedFields.push('bedNo');
+    }
+    if (input.departmentId !== existing.departmentId) {
+      data.departmentId = input.departmentId;
+      changedFields.push('departmentId');
+    }
+    const nextDoctorId = input.doctorId ?? null;
+    if (nextDoctorId !== existing.doctorId) {
+      data.doctorId = nextDoctorId;
+      changedFields.push('doctorId');
+    }
+    const nextNurseId = input.nurseId ?? null;
+    if (nextNurseId !== existing.nurseId) {
+      data.nurseId = nextNurseId;
+      changedFields.push('nurseId');
+    }
+    const nextDiabetesType = input.diabetesType ?? null;
+    if (nextDiabetesType !== existing.diabetesType) {
+      data.diabetesType = nextDiabetesType;
+      changedFields.push('diabetesType');
+    }
+    const currentHba1c = existing.hba1c === null ? null : Number(existing.hba1c);
+    const nextHba1c = input.hba1c ?? null;
+    if (nextHba1c !== currentHba1c) {
+      data.hba1c = nextHba1c === null ? null : new Prisma.Decimal(nextHba1c.toFixed(1));
+      changedFields.push('hba1c');
+    }
+
+    if (changedFields.length === 0) {
+      const row = await this.prisma.patient.findUniqueOrThrow({
+        where: { id },
+        select: PATIENT_PUBLIC_SELECT,
+      });
+      return { id, changedFields, item: toListItem(row) };
+    }
+
+    const row = await this.prisma.patient.update({
+      where: { id },
+      data,
+      select: PATIENT_PUBLIC_SELECT,
+    });
+    return { id, changedFields, item: toListItem(row) };
   }
 }
