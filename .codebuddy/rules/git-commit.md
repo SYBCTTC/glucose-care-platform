@@ -41,7 +41,7 @@ globs:
 
 **type（只允许）**：`feat` `fix` `refactor` `perf` `test` `docs` `chore` `style` `revert`
 
-**scope（只允许）**：`web` `server` `shared` `prisma` `auth` `patient` `device` `glucose` `audit` `system` `ci` `deps` `docs` `rules`
+**scope（只允许）**：`web` `server` `shared` `prisma` `auth` `patient` `device` `glucose` `audit` `system` `ci` `deps` `docs` `rules` `dev`（本地开发环境与工具脚本）
 
 **正文模板**（4 个小标题必须齐全，无变化也写"无变化"）：
 
