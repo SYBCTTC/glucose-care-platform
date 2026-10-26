@@ -1,9 +1,11 @@
+import { useState } from 'react';
 import { Alert, Button, Card, Result } from 'antd';
 import { PATIENT_STATUS, PERMISSION } from '@gc/shared';
 import type { PatientStatus } from '@gc/shared';
 import Tabs, { type TabItem } from '@/components/common/Tabs';
 import { useAuthStore } from '@/store/auth';
 import PatientCardGrid from './PatientCardGrid';
+import PatientCreateModal from './PatientCreateModal';
 import PatientFilter from './PatientFilter';
 import PatientTable from './PatientTable';
 import PatientToolbar from './PatientToolbar';
@@ -25,6 +27,7 @@ export default function PatientManagementPage() {
 
   const query = usePatientQuery(initialStatus, enabled);
   const isInpatient = query.status === PATIENT_STATUS.INPATIENT;
+  const [createOpen, setCreateOpen] = useState(false);
 
   if (!enabled) {
     return (
@@ -59,7 +62,11 @@ export default function PatientManagementPage() {
           : undefined
       }
     >
-      <PatientToolbar value={query.status} onChange={query.changeStatus} />
+      <PatientToolbar
+        value={query.status}
+        onChange={query.changeStatus}
+        onAddPatient={() => setCreateOpen(true)}
+      />
       <PatientFilter
         status={query.status}
         filters={query.filters}
@@ -129,6 +136,12 @@ export default function PatientManagementPage() {
           />
         )}
       </div>
+
+      <PatientCreateModal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onSuccess={query.refresh}
+      />
     </Card>
   );
 }

@@ -8,9 +8,11 @@ import { useAuthStore } from '@/store/auth';
 interface PatientToolbarProps {
   value: PatientStatus;
   onChange: (value: PatientStatus) => void;
+  /** 打开"添加患者"弹窗 */
+  onAddPatient: () => void;
 }
 
-export default function PatientToolbar({ value, onChange }: PatientToolbarProps) {
+export default function PatientToolbar({ value, onChange, onAddPatient }: PatientToolbarProps) {
   const hasPermission = useAuthStore((state) => state.hasPermission);
 
   const items: TabItem[] = [];
@@ -21,9 +23,10 @@ export default function PatientToolbar({ value, onChange }: PatientToolbarProps)
     items.push({ key: PATIENT_STATUS.DISCHARGED, label: PATIENT_STATUS_LABELS.DISCHARGED });
   }
 
-  // 添加/批量添加仅住院 Tab 且具备患者管理权限时显示
-  const canManage =
-    hasPermission(PERMISSION.PATIENT_MANAGE) && value === PATIENT_STATUS.INPATIENT;
+  // 添加患者：住院 Tab + 建档权限点（patient:create），与编辑等管理动作分离
+  const canCreate = hasPermission(PERMISSION.PATIENT_CREATE) && value === PATIENT_STATUS.INPATIENT;
+  // 批量添加：走患者管理权限点（本期未实现，仅占位）
+  const canBulk = hasPermission(PERMISSION.PATIENT_MANAGE) && value === PATIENT_STATUS.INPATIENT;
 
   return (
     <div
@@ -40,37 +43,37 @@ export default function PatientToolbar({ value, onChange }: PatientToolbarProps)
         onChange={(key) => onChange(key as PatientStatus)}
         variant="underline"
       />
-      {canManage ? (
+      {canCreate || canBulk ? (
         <Space>
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={() => message.info('添加患者功能开发中')}
-          >
-            添加患者
-          </Button>
-          <Dropdown
-            menu={{
-              items: [
-                {
-                  key: 'template',
-                  icon: <DownloadOutlined />,
-                  label: '模板下载',
-                  onClick: () => message.info('模板下载功能开发中'),
-                },
-                {
-                  key: 'import',
-                  icon: <UploadOutlined />,
-                  label: '批量导入',
-                  onClick: () => message.info('批量导入功能开发中'),
-                },
-              ],
-            }}
-          >
-            <Button icon={<PlusOutlined />}>
-              批量添加 <DownOutlined />
+          {canCreate ? (
+            <Button type="primary" icon={<PlusOutlined />} onClick={onAddPatient}>
+              添加患者
             </Button>
-          </Dropdown>
+          ) : null}
+          {canBulk ? (
+            <Dropdown
+              menu={{
+                items: [
+                  {
+                    key: 'template',
+                    icon: <DownloadOutlined />,
+                    label: '模板下载',
+                    onClick: () => message.info('模板下载功能开发中'),
+                  },
+                  {
+                    key: 'import',
+                    icon: <UploadOutlined />,
+                    label: '批量导入',
+                    onClick: () => message.info('批量导入功能开发中'),
+                  },
+                ],
+              }}
+            >
+              <Button icon={<PlusOutlined />}>
+                批量添加 <DownOutlined />
+              </Button>
+            </Dropdown>
+          ) : null}
         </Space>
       ) : null}
     </div>

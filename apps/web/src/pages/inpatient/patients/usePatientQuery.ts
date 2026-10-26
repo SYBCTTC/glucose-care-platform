@@ -332,6 +332,18 @@ export function usePatientQuery(initialStatus: PatientStatus, enabled = true) {
     }
   };
 
+  /** 按当前筛选与视图重查一次（新增/编辑后刷新列表用） */
+  const refresh = () => {
+    if (!enabled) {
+      return;
+    }
+    if (status === PATIENT_STATUS.INPATIENT && viewMode === 'CARD') {
+      void runCardQuery(filters, status, true);
+    } else {
+      void runQuery(filters, status, page, pageSize);
+    }
+  };
+
   const changePage = (nextPage: number, nextPageSize: number) => {
     setPage(nextPage);
     setPageSize(nextPageSize);
@@ -377,6 +389,7 @@ export function usePatientQuery(initialStatus: PatientStatus, enabled = true) {
     page,
     pageSize,
     changePage,
+    refresh,
     loading,
     result,
     error,
