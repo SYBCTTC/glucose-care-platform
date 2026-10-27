@@ -11,6 +11,7 @@ import type {
   CreatePatientInput,
   DiabetesType,
   FieldError,
+  PatientAdmitResult,
   PatientDetail,
   PatientListItem,
   PatientListQuery,
@@ -456,5 +457,55 @@ export class PatientService {
       select: PATIENT_PUBLIC_SELECT,
     });
     return { id, changedFields, item: toListItem(row) };
+  }
+
+  /**
+   * 办理住院（重新入院）：出院患者 → 住院患者。
+   * 安全约定：
+   *  1. 只有 DISCHARGED 可办理，其它状态 → 40004（PATIENT_INVALID_STATE）；
+   *  2. 数据范围走 assertInScope（PATIENT），跨科室 → 30002；
+   *  3. 审计由 controller 的 @Audit 统一留痕，detail 记 fromStatus / toStatus；
+   *  4. 住院号沿用原值（院内唯一业务主键不变），床位不自动分配，由后续入院流程补齐。
+   */
+  async admit(user: AuthenticatedUser, id: string): Promise<PatientAdmitResult> {
+    const existing = await this.prisma.patient.findUnique({
+      where: { id },
+      select: { status: true, archivedAt: true, departmentId: true },
+    });
+    if (!existing || existing.archivedAt) {
+      throw new BusinessException(ERROR_CODES.PATIENT_NOT_FOUND);
+    }
+    assertInScope(user, RESOURCE.PATIENT, { departmentId: existing.departmentId });
+    if (existing.status !== PATIENT_STATUS.DISCHARGED) {
+      throw new BusinessException(ERROR_CODES.PATIENT_INVALID_STATE);
+    }
+
+    // 办理住院时间 = 本次操作时刻（业务时刻，明确赋值，不用默认值兜底）
+    const admissionAt = new Date();
+    let row: PatientPublicRow;
+    try {
+      // where 带 status 条件：并发重复点击时只有一次能命中，避免覆盖已入院记录
+      row = await this.prisma.patient.update({
+        where: { id, status: PATIENT_STATUS.DISCHARGED },
+        data: {
+          status: PATIENT_STATUS.INPATIENT,
+          admissionAt,
+          dischargeAt: null,
+        },
+        select: PATIENT_PUBLIC_SELECT,
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
+        throw new BusinessException(ERROR_CODES.PATIENT_INVALID_STATE);
+      }
+      throw error;
+    }
+
+    return {
+      id,
+      fromStatus: PATIENT_STATUS.DISCHARGED,
+      toStatus: PATIENT_STATUS.INPATIENT,
+      item: toListItem(row),
+    };
   }
 }

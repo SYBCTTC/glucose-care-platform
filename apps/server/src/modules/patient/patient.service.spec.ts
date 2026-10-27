@@ -296,3 +296,71 @@ describe('PatientService.detail', () => {
     expect(detail).not.toHaveProperty('phone');
   });
 });
+
+describe('PatientService.admit — 办理住院', () => {
+  let service: PatientService;
+  let prisma: ReturnType<typeof createService>['prisma'];
+
+  beforeEach(() => {
+    ({ service, prisma } = createService());
+    prisma.patient.update.mockResolvedValue(publicRow());
+  });
+
+  it('出院患者可办理住院：状态转住院、清空出院时间、写入本次入院时间', async () => {
+    prisma.patient.findUnique.mockResolvedValue({
+      status: PATIENT_STATUS.DISCHARGED,
+      archivedAt: null,
+      departmentId: 'd-endo',
+    });
+
+    const result = await service.admit(deptUser, PATIENT_ID);
+
+    const args = prisma.patient.update.mock.calls[0][0];
+    expect(args.where).toEqual({ id: PATIENT_ID, status: PATIENT_STATUS.DISCHARGED });
+    expect(args.data.status).toBe(PATIENT_STATUS.INPATIENT);
+    expect(args.data.admissionAt).toBeInstanceOf(Date);
+    expect(args.data.dischargeAt).toBeNull();
+    expect(result.fromStatus).toBe(PATIENT_STATUS.DISCHARGED);
+    expect(result.toStatus).toBe(PATIENT_STATUS.INPATIENT);
+    expect(result.item.status).toBe(PATIENT_STATUS.INPATIENT);
+  });
+
+  it('住院中的患者重复办理按 40004 拒绝，且不写库', async () => {
+    prisma.patient.findUnique.mockResolvedValue({
+      status: PATIENT_STATUS.INPATIENT,
+      archivedAt: null,
+      departmentId: 'd-endo',
+    });
+
+    await expect(service.admit(allUser, PATIENT_ID)).rejects.toMatchObject({
+      code: ERROR_CODES.PATIENT_INVALID_STATE,
+    });
+    expect(prisma.patient.update).not.toHaveBeenCalled();
+  });
+
+  it('跨科室患者 → 30002，且不写库', async () => {
+    prisma.patient.findUnique.mockResolvedValue({
+      status: PATIENT_STATUS.DISCHARGED,
+      archivedAt: null,
+      departmentId: 'd-cardio',
+    });
+
+    await expect(service.admit(deptUser, PATIENT_ID)).rejects.toMatchObject({
+      code: ERROR_CODES.CROSS_DEPARTMENT_DENIED,
+    });
+    expect(prisma.patient.update).not.toHaveBeenCalled();
+  });
+
+  it('患者不存在或已归档按 40001 处理', async () => {
+    prisma.patient.findUnique.mockResolvedValue({
+      status: PATIENT_STATUS.DISCHARGED,
+      archivedAt: new Date('2026-10-01T00:00:00.000Z'),
+      departmentId: 'd-endo',
+    });
+
+    await expect(service.admit(allUser, PATIENT_ID)).rejects.toMatchObject({
+      code: ERROR_CODES.PATIENT_NOT_FOUND,
+    });
+    expect(prisma.patient.update).not.toHaveBeenCalled();
+  });
+});

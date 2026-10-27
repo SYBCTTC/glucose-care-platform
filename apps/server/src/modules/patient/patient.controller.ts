@@ -100,4 +100,21 @@ export class PatientController {
     );
     return ok(result);
   }
+
+  /**
+   * 办理住院：出院患者 → 住院患者。
+   * 状态流转校验与数据范围都在 service；审计沿用 PATIENT_MANAGE
+   * （AuditAction 是 Prisma 枚举，新增专用值需改 schema + migration，走人工评审）。
+   */
+  @Post(':id/admit')
+  @RequirePermissions(PERMISSION.PATIENT_ADMIT)
+  @RequireDataScope(RESOURCE.PATIENT)
+  @Audit('PATIENT_MANAGE')
+  async admit(
+    @Req() request: Request,
+    @Param(new ZodValidationPipe(patientIdSchema)) params: { id: string },
+  ) {
+    const result = await this.patientService.admit(request.user as AuthenticatedUser, params.id);
+    return ok(result);
+  }
 }

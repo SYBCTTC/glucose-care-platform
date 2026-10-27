@@ -21,4 +21,7 @@ export const AUDIT_DETAIL_ALLOW_LIST = [
   'rangeTo',
   /** 变更字段名数组（只记字段名，不记值）：患者编辑等需要追溯"改了哪些字段"的场景 */
   'changedFields',
+  /** 状态流转前后值（仅状态码，不含患者信息）：办理住院等流转类操作留痕 */
+  'fromStatus',
+  'toStatus',
 ] as const;
