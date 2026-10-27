@@ -16,6 +16,9 @@ interface PatientCardGridProps {
   /** 是否有患者编辑权限（决定「更多」菜单里是否出现「编辑患者信息」） */
   canEditPatient: boolean;
   onEditPatient: (patient: PatientListItem) => void;
+  /** 是否有添加血糖权限（住院 Tab 且具备 GLUCOSE_CREATE 时才为 true） */
+  canCreateGlucose: boolean;
+  onAddGlucose: (patient: PatientListItem) => void;
 }
 
 function InfoRow({ label, value }: { label: string; value: string }) {
@@ -35,9 +38,17 @@ interface PatientCardProps {
   patient: PatientListItem;
   canEditPatient: boolean;
   onEditPatient: (patient: PatientListItem) => void;
+  canCreateGlucose: boolean;
+  onAddGlucose: (patient: PatientListItem) => void;
 }
 
-function PatientCard({ patient, canEditPatient, onEditPatient }: PatientCardProps) {
+function PatientCard({
+  patient,
+  canEditPatient,
+  onEditPatient,
+  canCreateGlucose,
+  onAddGlucose,
+}: PatientCardProps) {
   const glucoseContext = patient.lastGlucoseMealContext
     ? getTimeSlotLabel(patient.lastGlucoseMealContext)
     : '-';
@@ -57,7 +68,9 @@ function PatientCard({ patient, canEditPatient, onEditPatient }: PatientCardProp
             patient={patient}
             label="更多"
             canEdit={canEditPatient}
+            canCreateGlucose={canCreateGlucose}
             onEdit={onEditPatient}
+            onAddGlucose={onAddGlucose}
           />
         </div>
 
@@ -113,6 +126,8 @@ export default function PatientCardGrid({
   onLoadMore,
   canEditPatient,
   onEditPatient,
+  canCreateGlucose,
+  onAddGlucose,
 }: PatientCardGridProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -173,6 +188,8 @@ export default function PatientCardGrid({
               patient={patient}
               canEditPatient={canEditPatient}
               onEditPatient={onEditPatient}
+              canCreateGlucose={canCreateGlucose}
+              onAddGlucose={onAddGlucose}
             />
           ))}
         </div>

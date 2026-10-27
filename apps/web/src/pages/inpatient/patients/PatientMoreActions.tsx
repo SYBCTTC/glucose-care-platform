@@ -19,7 +19,10 @@ interface PatientMoreActionsProps {
   canEdit: boolean;
   /** 置灰原因（出院患者传值）：有值时编辑项置灰并提示，不隐藏 */
   editDisabledReason?: string;
+  /** 是否有添加血糖权限：无权限时整项不展示（出院患者也不展示） */
+  canCreateGlucose?: boolean;
   onEdit: (patient: PatientListItem) => void;
+  onAddGlucose?: (patient: PatientListItem) => void;
 }
 
 /** 患者列表/卡片共用的操作菜单 */
@@ -28,7 +31,9 @@ export default function PatientMoreActions({
   label = '更多操作',
   canEdit,
   editDisabledReason,
+  canCreateGlucose = false,
   onEdit,
+  onAddGlucose,
 }: PatientMoreActionsProps) {
   const items = useMemo<NonNullable<MenuProps['items']>>(() => {
     const result: NonNullable<MenuProps['items']> = [];
@@ -45,18 +50,24 @@ export default function PatientMoreActions({
         ),
       });
     }
+    if (canCreateGlucose) {
+      result.push({ key: 'glucose', label: ACTION_LABELS.glucose });
+    }
     result.push(
-      { key: 'glucose', label: ACTION_LABELS.glucose },
       { key: 'ward', label: ACTION_LABELS.ward },
       { type: 'divider' },
       { key: 'detail', label: ACTION_LABELS.detail },
     );
     return result;
-  }, [canEdit, editDisabledReason]);
+  }, [canEdit, editDisabledReason, canCreateGlucose]);
 
   const handleClick: MenuProps['onClick'] = ({ key }) => {
     if (key === 'edit') {
       onEdit(patient);
+      return;
+    }
+    if (key === 'glucose') {
+      onAddGlucose?.(patient);
       return;
     }
     message.info(`${ACTION_LABELS[key] ?? '该功能'}暂未开发`);

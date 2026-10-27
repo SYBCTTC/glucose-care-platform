@@ -24,6 +24,9 @@ interface PatientTableProps {
   admittingId: string | null;
   onEditPatient: (patient: PatientListItem) => void;
   onAdmitPatient: (patient: PatientListItem) => void;
+  /** 是否有添加血糖权限（住院 Tab 且具备 GLUCOSE_CREATE 时才为 true） */
+  canCreateGlucose: boolean;
+  onAddGlucose: (patient: PatientListItem) => void;
 }
 
 function buildColumns(
@@ -33,6 +36,8 @@ function buildColumns(
   admittingId: string | null,
   onEditPatient: (patient: PatientListItem) => void,
   onAdmitPatient: (patient: PatientListItem) => void,
+  canCreateGlucose: boolean,
+  onAddGlucose: (patient: PatientListItem) => void,
 ): ColumnsType<PatientListItem> {
   return [
     {
@@ -128,7 +133,9 @@ function buildColumns(
           <PatientMoreActions
             patient={record}
             canEdit={canEditPatient}
+            canCreateGlucose={canCreateGlucose}
             onEdit={onEditPatient}
+            onAddGlucose={onAddGlucose}
           />
         );
       },
@@ -149,6 +156,8 @@ export default function PatientTable({
   admittingId,
   onEditPatient,
   onAdmitPatient,
+  canCreateGlucose,
+  onAddGlucose,
 }: PatientTableProps) {
   const columns = useMemo(
     () =>
@@ -159,8 +168,19 @@ export default function PatientTable({
         admittingId,
         onEditPatient,
         onAdmitPatient,
+        canCreateGlucose,
+        onAddGlucose,
       ),
-    [canEditPatient, isDischarged, canAdmitPatient, admittingId, onEditPatient, onAdmitPatient],
+    [
+      canEditPatient,
+      isDischarged,
+      canAdmitPatient,
+      admittingId,
+      onEditPatient,
+      onAdmitPatient,
+      canCreateGlucose,
+      onAddGlucose,
+    ],
   );
 
   return (

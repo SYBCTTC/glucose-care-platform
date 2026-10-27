@@ -5,6 +5,7 @@ import type { PatientListItem, PatientStatus } from '@gc/shared';
 import { admitPatient } from '@/api/patient';
 import Tabs, { type TabItem } from '@/components/common/Tabs';
 import { useAuthStore } from '@/store/auth';
+import GlucoseCreateModal from './GlucoseCreateModal';
 import PatientCardGrid from './PatientCardGrid';
 import PatientCreateModal from './PatientCreateModal';
 import PatientEditModal from './PatientEditModal';
@@ -31,9 +32,13 @@ export default function PatientManagementPage() {
   const isInpatient = query.status === PATIENT_STATUS.INPATIENT;
   const [createOpen, setCreateOpen] = useState(false);
   const [editingPatientId, setEditingPatientId] = useState<string | null>(null);
+  /** 正在添加血糖的患者；null 表示弹窗关闭 */
+  const [glucosePatient, setGlucosePatient] = useState<PatientListItem | null>(null);
 
   const canEditPatient = hasPermission(PERMISSION.PATIENT_UPDATE);
   const canAdmitPatient = hasPermission(PERMISSION.PATIENT_ADMIT);
+  // 出院患者不录入血糖：仅住院 Tab 且具备 GLUCOSE_CREATE 时展示入口
+  const canCreateGlucose = isInpatient && hasPermission(PERMISSION.GLUCOSE_CREATE);
   const [admittingId, setAdmittingId] = useState<string | null>(null);
 
   const handleAdmit = async (patient: PatientListItem) => {
@@ -146,6 +151,8 @@ export default function PatientManagementPage() {
               onLoadMore={query.loadMore}
               canEditPatient={canEditPatient}
               onEditPatient={(patient) => setEditingPatientId(patient.id)}
+              canCreateGlucose={canCreateGlucose}
+              onAddGlucose={setGlucosePatient}
             />
           </div>
         ) : (
@@ -162,6 +169,8 @@ export default function PatientManagementPage() {
             admittingId={admittingId}
             onEditPatient={(patient) => setEditingPatientId(patient.id)}
             onAdmitPatient={handleAdmit}
+            canCreateGlucose={canCreateGlucose}
+            onAddGlucose={setGlucosePatient}
           />
         )}
       </div>
@@ -177,6 +186,13 @@ export default function PatientManagementPage() {
         open={editingPatientId !== null}
         onClose={() => setEditingPatientId(null)}
         onUpdated={query.patchItem}
+      />
+
+      <GlucoseCreateModal
+        patient={glucosePatient}
+        open={glucosePatient !== null}
+        onClose={() => setGlucosePatient(null)}
+        onSuccess={(result) => query.patchItem(result.item)}
       />
     </Card>
   );
