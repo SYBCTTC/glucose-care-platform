@@ -1,8 +1,8 @@
 import { useMemo } from 'react';
 import { Button, Popconfirm, Table } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { getTimeSlotLabel } from '@gc/shared';
 import type { PatientListItem } from '@gc/shared';
+import { useCommonDataStore } from '@/store/common-data';
 import LastGlucose from './LastGlucose';
 import PatientMoreActions from './PatientMoreActions';
 import { formatAge, formatHospitalDays, getGenderLabel } from './patient-format';
@@ -38,6 +38,8 @@ function buildColumns(
   onAdmitPatient: (patient: PatientListItem) => void,
   canCreateGlucose: boolean,
   onAddGlucose: (patient: PatientListItem) => void,
+  /** 时段码 → 名称（动态时段，停用项也能回显） */
+  getTimeSlotName: (code: string) => string,
 ): ColumnsType<PatientListItem> {
   return [
     {
@@ -90,7 +92,7 @@ function buildColumns(
       title: '测量时段',
       dataIndex: 'lastGlucoseMealContext',
       width: 100,
-      render: (value: string | null) => (value ? getTimeSlotLabel(value) : '-'),
+      render: (value: string | null) => (value ? getTimeSlotName(value) : '-'),
     },
     {
       title: '测量时间',
@@ -159,6 +161,8 @@ export default function PatientTable({
   canCreateGlucose,
   onAddGlucose,
 }: PatientTableProps) {
+  const getTimeSlotName = useCommonDataStore((state) => state.getTimeSlotName);
+
   const columns = useMemo(
     () =>
       buildColumns(
@@ -170,6 +174,7 @@ export default function PatientTable({
         onAdmitPatient,
         canCreateGlucose,
         onAddGlucose,
+        getTimeSlotName,
       ),
     [
       canEditPatient,
@@ -180,6 +185,7 @@ export default function PatientTable({
       onAdmitPatient,
       canCreateGlucose,
       onAddGlucose,
+      getTimeSlotName,
     ],
   );
 

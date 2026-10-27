@@ -1,7 +1,13 @@
 import { create } from 'zustand';
-import { DICT_TYPE } from '@gc/shared';
-import type { DictItemOption, DictType } from '@gc/shared';
-import { fetchDepartments, fetchDevices, fetchDictItems, fetchStaff } from '@/api/common-data';
+import { DICT_TYPE, getFallbackTimeSlots, getTimeSlotLabel } from '@gc/shared';
+import type { DictItemOption, DictType, TimeSlotOption } from '@gc/shared';
+import {
+  fetchDepartments,
+  fetchDevices,
+  fetchDictItems,
+  fetchStaff,
+  fetchTimeSlots,
+} from '@/api/common-data';
 import type { DepartmentOption, DeviceOption, StaffOption } from '@/api/common-data';
 
 interface CommonDataState {
@@ -10,6 +16,8 @@ interface CommonDataState {
   devices: DeviceOption[];
   /** 动态字典（按 dictType 分组），登录后一次性加载 */
   dicts: Partial<Record<DictType, DictItemOption[]>>;
+  /** 时段（DY-TIMESLOT）：含停用项，下拉只用 enabled，历史血糖靠它回显名称 */
+  timeSlots: TimeSlotOption[];
   /** 是否已成功加载（用于幂等） */
   loaded: boolean;
   /** 是否正在加载（并发调用只发一次请求） */
@@ -24,6 +32,8 @@ interface CommonDataState {
   getStaffName: (id: string) => string;
   /** 取某类字典项；未加载或类型未下发时返回空数组，调用方不用判空 */
   dictItems: (dictType: DictType) => DictItemOption[];
+  /** 按 code 取时段名；库里没有时回退内置默认，保证历史记录不展示裸 code */
+  getTimeSlotName: (code: string) => string;
 }
 
 function emptyData() {
@@ -32,6 +42,7 @@ function emptyData() {
     staff: [] as StaffOption[],
     devices: [] as DeviceOption[],
     dicts: {} as Partial<Record<DictType, DictItemOption[]>>,
+    timeSlots: [] as TimeSlotOption[],
   };
 }
 
@@ -47,17 +58,23 @@ export const useCommonDataStore = create<CommonDataState>((set, get) => ({
     }
     set({ loading: true });
     try {
-      const [departments, staff, devices, glucoseResults] = await Promise.all([
+      const [departments, staff, devices, glucoseResults, timeSlots] = await Promise.all([
         fetchDepartments(),
         fetchStaff(),
         fetchDevices(),
         fetchDictItems(DICT_TYPE.GLUCOSE_RESULT),
+        // 时段单独容错：接口异常时回退内置默认，避免连累科室/人员/设备全部拿不到
+        fetchTimeSlots().catch((error: unknown) => {
+          console.warn('[common-data] 时段加载失败，回退内置默认时段', error);
+          return getFallbackTimeSlots();
+        }),
       ]);
       set({
         departments,
         staff,
         devices,
         dicts: { [DICT_TYPE.GLUCOSE_RESULT]: glucoseResults },
+        timeSlots,
         loaded: true,
       });
     } finally {
@@ -73,4 +90,7 @@ export const useCommonDataStore = create<CommonDataState>((set, get) => ({
   getStaffName: (id) => get().staff.find((item) => item.id === id)?.name ?? id,
 
   dictItems: (dictType) => get().dicts[dictType] ?? [],
+
+  getTimeSlotName: (code) =>
+    get().timeSlots.find((slot) => slot.code === code)?.name ?? getTimeSlotLabel(code),
 }));

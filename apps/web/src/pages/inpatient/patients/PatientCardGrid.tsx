@@ -1,8 +1,8 @@
 import { ClockCircleOutlined } from '@ant-design/icons';
 import { Card, Empty, Space, Spin, Typography } from 'antd';
 import { useEffect, useRef } from 'react';
-import { getTimeSlotLabel } from '@gc/shared';
 import type { PatientListItem } from '@gc/shared';
+import { useCommonDataStore } from '@/store/common-data';
 import LastGlucose from './LastGlucose';
 import PatientMoreActions from './PatientMoreActions';
 import { formatAge, formatGlucoseTime, formatHospitalDays, getGenderLabel } from './patient-format';
@@ -49,8 +49,10 @@ function PatientCard({
   canCreateGlucose,
   onAddGlucose,
 }: PatientCardProps) {
+  // 时段名取自动态时段（库里改名即时生效；停用项也能回显历史记录）
+  const getTimeSlotName = useCommonDataStore((state) => state.getTimeSlotName);
   const glucoseContext = patient.lastGlucoseMealContext
-    ? getTimeSlotLabel(patient.lastGlucoseMealContext)
+    ? getTimeSlotName(patient.lastGlucoseMealContext)
     : '-';
 
   return (

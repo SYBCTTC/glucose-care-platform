@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DatePicker, Form, Input, InputNumber, Modal, Radio, Select, message } from 'antd';
 import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
@@ -10,10 +10,10 @@ import {
   GLUCOSE_UNIT,
   GLUCOSE_VALUE_MAX,
   GLUCOSE_VALUE_MIN,
-  getTimeSlotsByType,
+  pickTimeSlotByTime,
   TEST_STRIP_MAX,
   TEST_STRIP_MIN,
-  TIME_SLOT_TYPE,
+  TIME_SLOT_CATEGORY,
 } from '@gc/shared';
 import type { GlucoseCreateResult, PatientListItem } from '@gc/shared';
 import { ApiError } from '@/api/client';
@@ -73,30 +73,49 @@ export default function GlucoseCreateModal({
   const profile = useAuthStore((state) => state.profile);
   const staff = useCommonDataStore((state) => state.staff);
   const dicts = useCommonDataStore((state) => state.dicts);
+  const timeSlots = useCommonDataStore((state) => state.timeSlots);
+  /** 用户是否手动改过检测时段：改过就不再被「按检测时间自动选中」覆盖 */
+  const mealContextTouched = useRef(false);
 
   const resultType = Form.useWatch('resultType', form);
   const isDetect = resultType === GLUCOSE_ENTRY_DETECT;
   const dictItems = dicts[DICT_TYPE.GLUCOSE_RESULT] ?? [];
 
-  /** 检测时段：常规（含随机）/ 强化 分组，顺序与字典一致 */
-  const timeSlotOptions = useMemo(
-    () => [
-      {
-        label: '常规时段',
-        options: getTimeSlotsByType(TIME_SLOT_TYPE.NORMAL).map((slot) => ({
-          value: slot.code,
-          label: slot.name,
-        })),
-      },
-      {
-        label: '强化时段',
-        options: getTimeSlotsByType(TIME_SLOT_TYPE.INTENSIVE).map((slot) => ({
-          value: slot.code,
-          label: slot.name,
-        })),
-      },
-    ],
-    [],
+  /**
+   * 检测时段：普通 → 特殊（随机/复测）→ 强化 分组，顺序由接口 sortOrder 决定。
+   * 数据来自动态时段（GET /time-slots），只渲染 enabled 项；空分组不显示。
+   */
+  const timeSlotOptions = useMemo(() => {
+    const enabled = timeSlots.filter((slot) => slot.enabled);
+    return [
+      { label: '普通时段', type: TIME_SLOT_CATEGORY.NORMAL },
+      { label: '特殊时段', type: TIME_SLOT_CATEGORY.SPECIAL },
+      { label: '强化时段', type: TIME_SLOT_CATEGORY.INTENSIVE },
+    ]
+      .map((group) => ({
+        label: group.label,
+        options: enabled
+          .filter((slot) => slot.type === group.type)
+          .map((slot) => ({ value: slot.code, label: slot.name })),
+      }))
+      .filter((group) => group.options.length > 0);
+  }, [timeSlots]);
+
+  /**
+   * 检测时段默认值：按检测时间落入的普通时段自动选中（区间左闭右开，见 pickTimeSlotByTime）。
+   * 用户手动改过时段后不再覆盖。
+   */
+  const applyTimeSlotByMeasuredAt = useCallback(
+    (value: Dayjs | null | undefined) => {
+      if (!value || mealContextTouched.current) {
+        return;
+      }
+      const slot = pickTimeSlotByTime(timeSlots, value.format('HH:mm'));
+      if (slot) {
+        form.setFieldsValue({ mealContext: slot.code });
+      }
+    },
+    [form, timeSlots],
   );
 
   /**
@@ -127,6 +146,7 @@ export default function GlucoseCreateModal({
 
   /**
    * 打开时重置：检测时间取当前时刻、结果类型默认「检测」、记录者默认当前账号。
+   * 检测时段由下面的 effect 按检测时间自动选中。
    *
    * 注意不要给 Form 加 preserve={false}：Modal 的 body 在首帧后会再挂载一次，
    * 非保留字段在 Form 卸载时会被 destroyForm 清空，导致这里写入的默认值在首帧渲染时被抹掉
@@ -136,6 +156,7 @@ export default function GlucoseCreateModal({
     if (!open) {
       return;
     }
+    mealContextTouched.current = false;
     form.resetFields();
     form.setFieldsValue({
       measuredAt: dayjs(),
@@ -143,6 +164,17 @@ export default function GlucoseCreateModal({
       operatorId: profile?.userId,
     });
   }, [open, form, profile?.userId]);
+
+  /**
+   * 检测时段默认值。公共数据可能晚于弹窗到达（timeSlots 变化会再次触发），
+   * 所以不能只在打开时算一次；用户手动选过之后 applyTimeSlotByMeasuredAt 内部会自动跳过。
+   */
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    applyTimeSlotByMeasuredAt(form.getFieldValue('measuredAt') as Dayjs | undefined);
+  }, [open, applyTimeSlotByMeasuredAt, form]);
 
   /** 切换结果类型：非检测类型没有读数，血糖值与试纸一并清空（输入框同时置灰） */
   const handleResultTypeChange = () => {
@@ -227,6 +259,8 @@ export default function GlucoseCreateModal({
             format={DATE_TIME_FORMAT}
             style={{ width: '100%' }}
             disabledDate={(current) => current.isAfter(dayjs(), 'day')}
+            // 改检测时间时同步推荐时段（用户已手动选过则保持不变）
+            onChange={(value) => applyTimeSlotByMeasuredAt(value)}
           />
         </Form.Item>
 
@@ -235,7 +269,14 @@ export default function GlucoseCreateModal({
           label="检测时段"
           rules={[{ required: true, message: '请选择检测时段' }]}
         >
-          <Select options={timeSlotOptions} placeholder="请选择检测时段" />
+          <Select
+            options={timeSlotOptions}
+            placeholder="请选择检测时段"
+            // 手动选择后不再被时间自动推荐覆盖
+            onChange={() => {
+              mealContextTouched.current = true;
+            }}
+          />
         </Form.Item>
 
         <Form.Item

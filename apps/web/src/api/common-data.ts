@@ -1,4 +1,4 @@
-import type { DictItemOption, DictType } from '@gc/shared';
+import type { DictItemOption, DictType, TimeSlotOption } from '@gc/shared';
 import { http } from './client';
 
 /** 科室下拉项 */
@@ -43,4 +43,9 @@ export function fetchDevices(): Promise<DeviceOption[]> {
 /** 动态字典项（公共数据，如血糖监测结果 DY-RESULT） */
 export function fetchDictItems(dictType: DictType): Promise<DictItemOption[]> {
   return http.get<DictItemOption[]>(`/dicts/${dictType}`);
+}
+
+/** 时段（公共数据 DY-TIMESLOT）：含起止时间、类型、控糖目标；停用项也会下发 */
+export function fetchTimeSlots(): Promise<TimeSlotOption[]> {
+  return http.get<TimeSlotOption[]>('/time-slots');
 }
