@@ -1,66 +1,265 @@
 /**
- * 时段划分与预警范围（公共数据 D-TIMESLOT / D-ALERT）。
- * 后续患者血糖展示按"时段"作为表头分组。
- * 来源：静态字典，随 @gc/shared 发布。
+ * 时段（D-TIMESLOT）。
+ *
+ * 时段已从**静态字典**改为**动态数据**：数据表 `TimeSlot`，接口 `GET /time-slots`，
+ * 前端登录后随公共数据一次性加载进 `useCommonDataStore().timeSlots`。
+ * 本文件保留三类内容：
+ *  1. `TIME_SLOT_CATEGORY`：type 取值语义（0 强化 / 1 普通 / 4 特殊）；
+ *  2. `TIME_SLOTS`：默认时段，作 seed 灌库数据源 + 动态数据缺失时的兜底 label；
+ *  3. `pickTimeSlotByTime`：按检测时间求所属普通时段（录入默认值，后续报表归组复用）。
+ *
+ * 口径（与业务确认过）：
+ *  - 只有**普通时段**要求 00:00~24:00 全覆盖、不重叠、不跨零点，区间左闭右开 `[startTime, endTime)`；
+ *  - 特殊时段（随机/复测）与强化时段不要求区间，`startTime/endTime/timeScope` 均为 null；
+ *  - 控糖目标 `valueDown/valueUp`（mmol/L）只落在普通时段，特殊/强化为空。
+ *
+ * 注意：`code` 是**契约**（`GlucoseRecord.mealContext` 的落库值），改名不改码。
  */
-export const TIME_SLOT_TYPE = {
-  /** 普通时段 */
-  NORMAL: 'NORMAL',
-  /** 强化时段（更密集监测） */
-  INTENSIVE: 'INTENSIVE',
+export const TIME_SLOT_CATEGORY = {
+  /** 强化时段：更密集监测；展示时按检测时间落点归入对应普通时段（展示逻辑后续实现） */
+  INTENSIVE: 0,
+  /** 普通时段：血糖报表表头分组的主体，区间必须 24 小时全覆盖 */
+  NORMAL: 1,
+  /** 特殊时段：随机 / 复测，排在普通时段之后 */
+  SPECIAL: 4,
 } as const;
-export type TimeSlotType = (typeof TIME_SLOT_TYPE)[keyof typeof TIME_SLOT_TYPE];
+export type TimeSlotCategory = (typeof TIME_SLOT_CATEGORY)[keyof typeof TIME_SLOT_CATEGORY];
 
-export interface TimeSlot {
-  /** 唯一码，如 BREAKFAST_PRE / INTENSIVE_AM */
+/** 时段接口下发项（`GET /time-slots`） */
+export interface TimeSlotOption {
+  /** 时段码，落库值（`GlucoseRecord.mealContext`） */
   code: string;
-  /** 中文名称，作表头 */
+  /** 时段名，展示用；可在库里改，不影响历史数据 */
   name: string;
-  /** 普通 / 强化 */
-  type: TimeSlotType;
-  /**
-   * 起止时间 HH:mm（预留字段）。
-   * 业务不固化具体时间，统一留空，仅保留分组语义；
-   * 具体时段归属由录入的 measuredAt 判断。
-   */
-  start?: string;
-  end?: string;
+  /** 0 强化 / 1 普通 / 4 特殊 */
+  type: TimeSlotCategory;
+  /** 起点 HH:mm；无区间时为 null */
+  startTime: string | null;
+  /** 终点 HH:mm，'24:00' 表示当日终点；无区间时为 null */
+  endTime: string | null;
+  /** 派生字段：`startTime-endTime`，服务端拼接、不落库；无区间时为 null */
+  timeScope: string | null;
+  /** 控糖目标下限 mmol/L；未设置时为 null */
+  valueDown: number | null;
+  /** 控糖目标上限 mmol/L；未设置时为 null */
+  valueUp: number | null;
+  /** 同类型内展示顺序，升序 */
+  sortOrder: number;
+  /** 停用项也会下发（历史血糖需按 code 展示名称），下拉只渲染 enabled 项 */
+  enabled: boolean;
+}
+
+/** 默认时段（seed 灌库用，也是动态数据不可用时的兜底） */
+export type TimeSlotSeed = Omit<TimeSlotOption, 'timeScope' | 'enabled'>;
+
+/**
+ * 默认时段清单：普通时段覆盖 00:00~24:00 且首尾相接，特殊/强化无区间。
+ *
+ * 区间与控糖目标按常见口径给出（空腹/餐前 4.4~7.0，餐后 4.4~10.0，睡前 5.0~8.3），
+ * 属**待业务校准的初始值**：上线前由临床确认后在库里直接调整数据即可，无需改代码。
+ */
+export const TIME_SLOTS: TimeSlotSeed[] = [
+  // 普通时段：00:00 → 24:00 首尾相接，左闭右开
+  {
+    code: 'FASTING',
+    name: '空腹',
+    type: TIME_SLOT_CATEGORY.NORMAL,
+    startTime: '00:00',
+    endTime: '07:00',
+    valueDown: 4.4,
+    valueUp: 7.0,
+    sortOrder: 10,
+  },
+  {
+    code: 'BREAKFAST_PRE',
+    name: '早餐前',
+    type: TIME_SLOT_CATEGORY.NORMAL,
+    startTime: '07:00',
+    endTime: '08:00',
+    valueDown: 4.4,
+    valueUp: 7.0,
+    sortOrder: 20,
+  },
+  {
+    code: 'BREAKFAST_POST',
+    name: '早餐后',
+    type: TIME_SLOT_CATEGORY.NORMAL,
+    startTime: '08:00',
+    endTime: '11:00',
+    valueDown: 4.4,
+    valueUp: 10.0,
+    sortOrder: 30,
+  },
+  {
+    code: 'LUNCH_PRE',
+    name: '午餐前',
+    type: TIME_SLOT_CATEGORY.NORMAL,
+    startTime: '11:00',
+    endTime: '12:00',
+    valueDown: 4.4,
+    valueUp: 7.0,
+    sortOrder: 40,
+  },
+  {
+    code: 'LUNCH_POST',
+    name: '午餐后',
+    type: TIME_SLOT_CATEGORY.NORMAL,
+    startTime: '12:00',
+    endTime: '17:00',
+    valueDown: 4.4,
+    valueUp: 10.0,
+    sortOrder: 50,
+  },
+  {
+    code: 'DINNER_PRE',
+    name: '晚餐前',
+    type: TIME_SLOT_CATEGORY.NORMAL,
+    startTime: '17:00',
+    endTime: '18:00',
+    valueDown: 4.4,
+    valueUp: 7.0,
+    sortOrder: 60,
+  },
+  {
+    code: 'DINNER_POST',
+    name: '晚餐后',
+    type: TIME_SLOT_CATEGORY.NORMAL,
+    startTime: '18:00',
+    endTime: '22:00',
+    valueDown: 4.4,
+    valueUp: 10.0,
+    sortOrder: 70,
+  },
+  {
+    code: 'BEDTIME',
+    name: '睡前',
+    type: TIME_SLOT_CATEGORY.NORMAL,
+    startTime: '22:00',
+    endTime: '24:00',
+    valueDown: 5.0,
+    valueUp: 8.3,
+    sortOrder: 80,
+  },
+  // 特殊时段：无区间、无控糖目标，排在普通时段之后
+  {
+    code: 'RANDOM',
+    name: '随机',
+    type: TIME_SLOT_CATEGORY.SPECIAL,
+    startTime: null,
+    endTime: null,
+    valueDown: null,
+    valueUp: null,
+    sortOrder: 90,
+  },
+  {
+    code: 'RETEST',
+    name: '复测',
+    type: TIME_SLOT_CATEGORY.SPECIAL,
+    startTime: null,
+    endTime: null,
+    valueDown: null,
+    valueUp: null,
+    sortOrder: 100,
+  },
+  // 强化时段：无区间、无控糖目标
+  {
+    code: 'INTENSIVE_AM',
+    name: '强化-上午',
+    type: TIME_SLOT_CATEGORY.INTENSIVE,
+    startTime: null,
+    endTime: null,
+    valueDown: null,
+    valueUp: null,
+    sortOrder: 110,
+  },
+  {
+    code: 'INTENSIVE_PM',
+    name: '强化-下午',
+    type: TIME_SLOT_CATEGORY.INTENSIVE,
+    startTime: null,
+    endTime: null,
+    valueDown: null,
+    valueUp: null,
+    sortOrder: 120,
+  },
+  {
+    code: 'INTENSIVE_NIGHT',
+    name: '强化-夜间',
+    type: TIME_SLOT_CATEGORY.INTENSIVE,
+    startTime: null,
+    endTime: null,
+    valueDown: null,
+    valueUp: null,
+    sortOrder: 130,
+  },
+];
+
+/** 内置默认时段的接口形态：动态数据不可用时兜底，保证录入/展示不被阻塞 */
+export function getFallbackTimeSlots(): TimeSlotOption[] {
+  return TIME_SLOTS.map((slot) => ({
+    ...slot,
+    timeScope: slot.startTime && slot.endTime ? `${slot.startTime}-${slot.endTime}` : null,
+    enabled: true,
+  }));
+}
+
+/** 兜底：按 code 取时段名（动态数据缺失时用，保证历史记录不展示裸 code） */
+export function getTimeSlotLabel(code: string): string {
+  return TIME_SLOTS.find((slot) => slot.code === code)?.name ?? code;
+}
+
+/** 'HH:mm'（两位时分）→ 当日分钟数；非法格式（含 24:00 以外的越界）返回 null */
+export function timeToMinutes(time: string): number | null {
+  const match = /^(\d{2}):(\d{2})$/.exec(time.trim());
+  if (!match) {
+    return null;
+  }
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (minute > 59 || hour > 24 || (hour === 24 && minute !== 0)) {
+    return null;
+  }
+  return hour * 60 + minute;
 }
 
 /**
- * 血糖展示表头用的时段划分。
- * 普通时段：早/午/晚餐前、早/午/晚餐后、睡前、空腹。
- * 强化时段：上/下/夜三段。
- * 起止时间不固化（start/end 留空），仅用于分组。
+ * 按检测时间求所属**普通时段**：区间左闭右开 `[startTime, endTime)`，'24:00' 可作终点。
+ *
+ * @param slots 时段列表（接口下发或 store 缓存）
+ * @param time  'HH:mm'，即检测时间的时分
+ * @returns 命中的普通时段；无区间/无命中（如数据有空洞）返回 null
  */
-export const TIME_SLOTS: TimeSlot[] = [
-  { code: 'FASTING', name: '空腹', type: 'NORMAL' },
-  { code: 'BREAKFAST_PRE', name: '早餐前', type: 'NORMAL' },
-  { code: 'BREAKFAST_POST', name: '早餐后', type: 'NORMAL' },
-  { code: 'LUNCH_PRE', name: '午餐前', type: 'NORMAL' },
-  { code: 'LUNCH_POST', name: '午餐后', type: 'NORMAL' },
-  { code: 'DINNER_PRE', name: '晚餐前', type: 'NORMAL' },
-  { code: 'DINNER_POST', name: '晚餐后', type: 'NORMAL' },
-  { code: 'BEDTIME', name: '睡前', type: 'NORMAL' },
-  /** 随机时段：不符合固定时段的临时测量，排在常规时段末尾、强化时段之前 */
-  { code: 'RANDOM', name: '随机', type: 'NORMAL' },
-  { code: 'INTENSIVE_AM', name: '强化-上午', type: 'INTENSIVE' },
-  { code: 'INTENSIVE_PM', name: '强化-下午', type: 'INTENSIVE' },
-  { code: 'INTENSIVE_NIGHT', name: '强化-夜间', type: 'INTENSIVE' },
-];
+export function pickTimeSlotByTime(slots: TimeSlotOption[], time: string): TimeSlotOption | null {
+  const minutes = timeToMinutes(time);
+  if (minutes === null) {
+    return null;
+  }
 
-export function getTimeSlotLabel(code: string): string {
-  return TIME_SLOTS.find((s) => s.code === code)?.name ?? code;
-}
+  for (const slot of slots) {
+    if (slot.type !== TIME_SLOT_CATEGORY.NORMAL || !slot.enabled) {
+      continue;
+    }
+    if (!slot.startTime || !slot.endTime) {
+      continue;
+    }
+    const start = timeToMinutes(slot.startTime);
+    const end = timeToMinutes(slot.endTime);
+    if (start === null || end === null || end <= start) {
+      continue;
+    }
+    if (minutes >= start && minutes < end) {
+      return slot;
+    }
+  }
 
-export function getTimeSlotsByType(type: TimeSlotType): TimeSlot[] {
-  return TIME_SLOTS.filter((s) => s.type === type);
+  return null;
 }
 
 /**
  * 默认预警范围（mmol/L）。
  * 原属 SystemConfig（低血糖 < low，高血糖 > high），现阶段以常量占位；
  * 接口就绪后应改为读取 SystemConfig（key: alert.low / alert.high），禁止在业务代码硬编码。
+ * 注意：与时段控糖目标（TimeSlot.valueDown/valueUp）不是同一概念，后者按时段细化。
  */
 export const DEFAULT_ALERT_RANGE = {
   low: 3.9,

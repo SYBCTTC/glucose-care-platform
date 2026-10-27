@@ -72,6 +72,11 @@ const testStripSchema = z
   .min(TEST_STRIP_MIN, `试纸数量不能小于 ${TEST_STRIP_MIN}`)
   .max(TEST_STRIP_MAX, `试纸数量不能大于 ${TEST_STRIP_MAX}`);
 
+/**
+ * 时段码白名单：时段本身是动态数据（表 TimeSlot），但 **code 是契约**（落库值），
+ * 因此这里用静态清单校验；新增时段必须同时补 @gc/shared 的 TIME_SLOTS 与库数据，
+ * 否则接口会以「检测时段不在字典范围内」拒绝（10001）。
+ */
 const TIME_SLOT_CODES = TIME_SLOTS.map((slot) => slot.code);
 
 /**
