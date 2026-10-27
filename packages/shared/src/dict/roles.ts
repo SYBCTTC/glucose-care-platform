@@ -49,6 +49,8 @@ export const PERMISSION = {
   // 公共数据（登录后一次性加载，供下拉/默认值使用）
   DEPARTMENT_VIEW: 'department:view',
   OPERATOR_VIEW: 'staff:lookup',
+  /** 动态字典读取（公共数据，登录后一次性加载，全院可见） */
+  DICT_VIEW: 'dict:view',
 } as const;
 export type PermissionCode = (typeof PERMISSION)[keyof typeof PERMISSION];
 
@@ -68,6 +70,7 @@ export const ROLE_PERMISSIONS: Record<RoleCode, PermissionCode[]> = {
     PERMISSION.QUALITY_VIEW,
     PERMISSION.DEPARTMENT_VIEW,
     PERMISSION.OPERATOR_VIEW,
+    PERMISSION.DICT_VIEW,
   ],
   NURSE: [
     PERMISSION.PATIENT_VIEW,
@@ -82,6 +85,7 @@ export const ROLE_PERMISSIONS: Record<RoleCode, PermissionCode[]> = {
     PERMISSION.QUALITY_VIEW,
     PERMISSION.DEPARTMENT_VIEW,
     PERMISSION.OPERATOR_VIEW,
+    PERMISSION.DICT_VIEW,
   ],
   NURSE_HEAD: [
     PERMISSION.PATIENT_VIEW,
@@ -99,6 +103,7 @@ export const ROLE_PERMISSIONS: Record<RoleCode, PermissionCode[]> = {
     PERMISSION.QUALITY_MANAGE,
     PERMISSION.DEPARTMENT_VIEW,
     PERMISSION.OPERATOR_VIEW,
+    PERMISSION.DICT_VIEW,
   ],
   DEVICE_ADMIN: [
     PERMISSION.DEVICE_VIEW,
@@ -107,6 +112,7 @@ export const ROLE_PERMISSIONS: Record<RoleCode, PermissionCode[]> = {
     PERMISSION.QUALITY_MANAGE,
     PERMISSION.DEPARTMENT_VIEW,
     PERMISSION.OPERATOR_VIEW,
+    PERMISSION.DICT_VIEW,
   ],
   // 系统管理员：全权限点。不要在这里留"超管后门"式的隐式放行——
   // 权限一律用权限点显式表达，前后端同源，避免前后端两套判断不一致。
@@ -131,6 +137,7 @@ export const ROLE_PERMISSIONS: Record<RoleCode, PermissionCode[]> = {
     PERMISSION.ROLE_MANAGE,
     PERMISSION.DEPARTMENT_VIEW,
     PERMISSION.OPERATOR_VIEW,
+    PERMISSION.DICT_VIEW,
   ],
 };
 
@@ -172,6 +179,8 @@ export const RESOURCE = {
   STAFF: 'STAFF',
   /** 科室：院内基础组织数据，全院可见 */
   DEPARTMENT: 'DEPARTMENT',
+  /** 动态字典：院内基础数据，全院可见 */
+  DICT: 'DICT',
 } as const;
 export type ResourceType = (typeof RESOURCE)[keyof typeof RESOURCE];
 

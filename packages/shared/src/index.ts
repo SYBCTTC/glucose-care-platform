@@ -5,7 +5,7 @@ export * from './device/schema';
 export * from './auth/schema';
 export * from './auth/password';
 export * from './dict/roles';
-export * from './dict/result-types';
+export * from './dict/dict-types';
 export * from './dict/time-slots';
 export * from './dict/user-status';
 export * from './mask';
