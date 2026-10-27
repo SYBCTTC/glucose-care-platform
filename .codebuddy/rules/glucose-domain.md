@@ -21,12 +21,12 @@ globs:
 - 存储 UTC，展示本地（Asia/Shanghai）
 
 ## 取值与异常
-- 合法区间 `[1.1, 33.3] mmol/L`，边界含
+- 合法区间 `[0.6, 33.3] mmol/L`，边界含（与 `Low < 0.6` / `High > 33.3` 对齐）
 - 越界 → 不入库业务表，标记 `PENDING_REVIEW` 等待人工确认
 - 阈值（低 < 3.9、高 > 16.7）从系统配置读取，禁止硬编码
 
 ## BGM 上下文
-`mealContext` 必填：`FASTING | PRE_MEAL | POST_MEAL | BEDTIME | RANDOM`
+`mealContext` 必填，取值一律用 `@gc/shared` 的 `TIME_SLOTS`（含 `RANDOM` 随机），禁止自定义时段码
 
 ## 去重
 - `dedupeKey` 必须唯一；冲突时幂等跳过

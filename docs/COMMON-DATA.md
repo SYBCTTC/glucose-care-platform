@@ -6,7 +6,7 @@
 
 ## 一、使用约定
 
-- **静态字典**：从 `@gc/shared` 导入（如 `import { ROLE_CODE } from '@gc/shared'`）。
+- **静态字典**：从 `@gc/shared` 导入（如 `import { RESULT_TYPE } from '@gc/shared'`）。
   改 `@gc/shared` 后必须走 `packages/shared` 改动流程：`build → sync:shared → 清 Vite 缓存`。
 - **动态数据**：来自数据库，后端已提供查询接口（科室/人员/设备）。**登录后由 `BasicLayout` 一次性拉取并存入 `useCommonDataStore`，后续所有场景直接从 store 取，禁止重复请求接口**（登出时自动清空）。
 - **当前登录账号**：从 `useAuthStore().profile` 直接取，无需查接口。
@@ -19,7 +19,7 @@
 | 代号 | 名称 | 来源文件（`@gc/shared`） | 主要导出 | 取值 | 用途 |
 |---|---|---|---|---|---|
 | `D-ROLE` | 系统角色 | `dict/roles.ts` | `ROLE_CODE` / `ROLE_LABELS` / `ROLE_PERMISSIONS` | `DOCTOR`/`NURSE`/`NURSE_HEAD`/`DEVICE_ADMIN`/`SYS_ADMIN` | 人员角色、权限、数据范围 |
-| `D-TIMESLOT` | 时段划分 | `dict/time-slots.ts` | `TIME_SLOTS` / `TIME_SLOT_TYPE` / `getTimeSlotLabel` / `getTimeSlotsByType` | 普通：`FASTING`(空腹)/`BREAKFAST_PRE`(早餐前)/`BREAKFAST_POST`(早餐后)/`LUNCH_PRE`(午餐前)/`LUNCH_POST`(午餐后)/`DINNER_PRE`(晚餐前)/`DINNER_POST`(晚餐后)/`BEDTIME`(睡前)；强化：`INTENSIVE_AM`(强化-上午)/`INTENSIVE_PM`(强化-下午)/`INTENSIVE_NIGHT`(强化-夜间) | 患者血糖展示按"时段"作表头分组；起止不固化，仅分组语义 |
+| `D-TIMESLOT` | 时段划分 | `dict/time-slots.ts` | `TIME_SLOTS` / `TIME_SLOT_TYPE` / `getTimeSlotLabel` / `getTimeSlotsByType` | 普通：`FASTING`(空腹)/`BREAKFAST_PRE`(早餐前)/`BREAKFAST_POST`(早餐后)/`LUNCH_PRE`(午餐前)/`LUNCH_POST`(午餐后)/`DINNER_PRE`(晚餐前)/`DINNER_POST`(晚餐后)/`BEDTIME`(睡前)/`RANDOM`(随机，排在常规末尾)；强化：`INTENSIVE_AM`(强化-上午)/`INTENSIVE_PM`(强化-下午)/`INTENSIVE_NIGHT`(强化-夜间) | 患者血糖展示按"时段"作表头分组；起止不固化，仅分组语义；血糖录入的"检测时段"取自本字典 |
 | `D-ALERT` | 预警范围默认值 | `dict/time-slots.ts` | `DEFAULT_ALERT_RANGE` | `{ low: 3.9, high: 16.7 }`（mmol/L） | 低血糖/高血糖阈值占位；接口就绪后改为读 `SystemConfig`，禁止硬编码 |
 | `D-GENDER` | 性别 | `patient/schema.ts` | `GENDER` / `GENDER_LABELS` / `GENDER_SELECTABLE` | `MALE`(男)/`FEMALE`(女)/`UNSPECIFIED`(未说明)/`UNKNOWN`(未知，历史数据兜底，不进下拉) | 患者建档性别下拉（用 `GENDER_SELECTABLE`） |
 | `D-DIABETES` | 糖尿病类型 | `patient/schema.ts` | `DIABETES_TYPE` / `DIABETES_TYPE_LABELS` | `TYPE_1`(I型糖尿病)/`TYPE_2`(II型糖尿病)/`GESTATIONAL`(妊娠型糖尿病)/`SPECIAL`(特殊型糖尿病)/`OTHER`(其他) | 患者建档糖尿病类型下拉；库内存 code |
@@ -57,7 +57,7 @@
 
 ## 五、提取示例（后续提需求时这样引用）
 
-- "添加血糖表单的**结果选项**用 `DY-RESULT`（`dictItems(DICT_TYPE.GLUCOSE_RESULT)`，RadioGroup 只渲染 `checkable=true` 的项），**操作人**用 `DY-OPERATOR`（默认带出 `CURRENT_USER`）。"
+- "添加血糖表单的**结果选项**用 `DY-RESULT`（`dictItems(DICT_TYPE.GLUCOSE_RESULT)`，RadioGroup 只渲染 `checkable=true` 的项，并在最前面加一个不在字典里的「检测」占位项），**操作人**用 `DY-OPERATOR`（默认带出 `CURRENT_USER`，若当前账号不在其中则前端临时补一条，不写回 DY-OPERATOR）。"
 - "患者血糖展示按 `D-TIMESLOT` 的时段作为表头，超 `D-ALERT` 范围标红。"
 - "设备列表的状态列用 `D-DEVSTATUS` 映射中文；设备选择用 `DY-DEVICE`（`useCommonDataStore().devices`）。"
 - "建档表单的性别用 `D-GENDER`（可选值取 `GENDER_SELECTABLE`），糖尿病类型用 `D-DIABETES`，责任医生用 `DY-DOCTOR`（`staffByRole('DOCTOR')`），责任护士用 `DY-OPERATOR`，科室用 `DY-DEPT`。"
