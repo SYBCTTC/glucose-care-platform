@@ -3,6 +3,7 @@ import { Card, Empty, Space, Spin, Typography } from 'antd';
 import { useEffect, useRef } from 'react';
 import { getTimeSlotLabel } from '@gc/shared';
 import type { PatientListItem } from '@gc/shared';
+import LastGlucose from './LastGlucose';
 import PatientMoreActions from './PatientMoreActions';
 import { formatAge, formatGlucoseTime, formatHospitalDays, getGenderLabel } from './patient-format';
 
@@ -37,8 +38,6 @@ interface PatientCardProps {
 }
 
 function PatientCard({ patient, canEditPatient, onEditPatient }: PatientCardProps) {
-  const glucoseValue =
-    patient.lastGlucoseValue === null ? '-' : `${patient.lastGlucoseValue.toFixed(1)} mmol/L`;
   const glucoseContext = patient.lastGlucoseMealContext
     ? getTimeSlotLabel(patient.lastGlucoseMealContext)
     : '-';
@@ -95,9 +94,9 @@ function PatientCard({ patient, canEditPatient, onEditPatient }: PatientCardProp
         </Typography.Text>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <Typography.Text strong style={{ marginRight: 'auto' }}>
-            {glucoseValue}
-          </Typography.Text>
+          <span style={{ marginRight: 'auto' }}>
+            <LastGlucose resultType={patient.lastGlucoseResultType} value={patient.lastGlucoseValue} />
+          </span>
           <Typography.Text>{glucoseContext}</Typography.Text>
         </div>
       </div>

@@ -39,13 +39,13 @@ export const functionalColor = {
 
 /** 5.1 血糖区间语义色（低/正常/高，阈值来自后端系统配置） */
 export const glucoseColor = {
-  low: '#00a0e9',
-  /** 偏低：与低值同色，待业务细分时再启用 */
-  lowish: '#00a0e9',
-  normal: '#389e0d',
-  /** 偏高：与高值同色 */
-  highish: '#ff0000',
-  high: '#ff0000',
+  low: '#4BB2ED',
+  /** 偏低：与 Low 同色（数值低 vs 类型低，语义不同但同色） */
+  lowish: '#4BB2ED',
+  normal: '#389E0D',
+  /** 偏高：与 High 同色 */
+  highish: '#FF1516',
+  high: '#FF1516',
   /** 目标范围内 TIR（CGM 预留） */
   tir: '#52c41a',
 } as const;

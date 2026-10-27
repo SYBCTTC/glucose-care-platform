@@ -1,8 +1,9 @@
 import { useMemo } from 'react';
-import { Button, Popconfirm, Table, Typography } from 'antd';
+import { Button, Popconfirm, Table } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { getTimeSlotLabel } from '@gc/shared';
 import type { PatientListItem } from '@gc/shared';
+import LastGlucose from './LastGlucose';
 import PatientMoreActions from './PatientMoreActions';
 import { formatAge, formatHospitalDays, getGenderLabel } from './patient-format';
 
@@ -76,8 +77,9 @@ function buildColumns(
       title: '最近血糖',
       dataIndex: 'lastGlucoseValue',
       width: 120,
-      render: (value: number | null) =>
-        value === null ? '-' : <Typography.Text strong>{value.toFixed(1)} mmol/L</Typography.Text>,
+      render: (_, record) => (
+        <LastGlucose resultType={record.lastGlucoseResultType} value={record.lastGlucoseValue} />
+      ),
     },
     {
       title: '测量时段',
