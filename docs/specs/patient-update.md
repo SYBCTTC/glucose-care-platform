@@ -131,17 +131,23 @@
 
 2026-10-26 端到端验证（`sys.admin` / `dr.wang`，演示数据）：
 
-| # | 场景 | 结果 |
-|---|---|---|
-| 1 | `GET /patients/:id` | 200，返回 `birthDate/nurseId/diabetesType/hba1c/devices`，无任何明文字段 |
-| 2 | `PATCH` 改床号 + 糖尿病类型 + hba1c | 200，`changedFields = [bedNo, diabetesType, hba1c]` |
-| 3 | 重复提交同一份数据（幂等） | 200，`changedFields = []` |
-| 4 | 请求体多传 `patientNo / admissionAt / status` | 被 schema strip，患者住院号/状态/入院时间未变 |
-| 5 | 编辑出院患者 | 409 / `40004` |
-| 6 | `dr.wang`（DOCTOR，无 `patient:update`）调用 | 403，符合权限设计 |
-| 7 | 审计留痕 | `PATIENT_VIEW` 1 条、`PATIENT_UPDATE` 成功 4 条 / 失败 2 条；`detail.changedFields` 正确落库 |
+| #   | 场景                                          | 结果                                                                                         |
+| --- | --------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| 1   | `GET /patients/:id`                           | 200，返回 `birthDate/nurseId/diabetesType/hba1c/devices`，无任何明文字段                     |
+| 2   | `PATCH` 改床号 + 糖尿病类型 + hba1c           | 200，`changedFields = [bedNo, diabetesType, hba1c]`                                          |
+| 3   | 重复提交同一份数据（幂等）                    | 200，`changedFields = []`                                                                    |
+| 4   | 请求体多传 `patientNo / admissionAt / status` | 被 schema strip，患者住院号/状态/入院时间未变                                                |
+| 5   | 编辑出院患者                                  | 409 / `40004`                                                                                |
+| 6   | `dr.wang`（DOCTOR，无 `patient:update`）调用  | 403，符合权限设计                                                                            |
+| 7   | 审计留痕                                      | `PATIENT_VIEW` 1 条、`PATIENT_UPDATE` 成功 4 条 / 失败 2 条；`detail.changedFields` 正确落库 |
 
 未覆盖：护士跨科室编辑的端到端验证。`nurse.li` 演示账号处于「首次登录必须改密」状态，登录后被改密守卫拦下，未为此改动演示账号。该分支与建档共用 `assertInScope`，已有 `scope.util.spec.ts` 单测覆盖。
+
+2026-10-27 自动化测试（`apps/server/src/modules/patient/patient.service.spec.ts`，14 例，只 mock `PrismaService`）：
+
+- **已覆盖**：出院 / 已归档 / 不存在三类拦截；患者当前科室越权；改目标科室的二次判权；责任医生、护士不属于科室（校验 `details` 定位到字段）；敏感字段省略则保留密文；显式 `null` 同时清空密文与脱敏值；改名重算密文与 `nameMasked`；无变更时不写库且 `changedFields` 为空；`hba1c` 按 `Decimal` 保一位小数；详情出参不含 `name/idCard/phone` 明文键。
+- **未覆盖**：controller 层（`@RequirePermissions` / `@RequireDataScope` / `@Audit` 是否真正生效）、Prisma 真实读写与唯一约束冲突。补齐需独立测试库，本次未搭。
+- `create()` 路径无自动化测试，不在本次改动范围。
 
 ## 9. 待确认项
 
