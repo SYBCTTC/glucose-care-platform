@@ -54,6 +54,10 @@ export function buildScopeWhere(
       // 科室为院内基础组织数据，全院可见，不做数据范围限制
       return {};
 
+    case 'DICT':
+      // 动态字典同为院内基础数据，全院可见；且不含患者信息
+      return {};
+
     default:
       // 未知资源类型：按最小权限拒绝，避免新增资源后静默放行
       throw new BusinessException(ERROR_CODES.NO_PATIENT_DATA_SCOPE);
