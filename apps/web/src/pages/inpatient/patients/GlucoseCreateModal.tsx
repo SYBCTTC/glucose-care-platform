@@ -125,7 +125,13 @@ export default function GlucoseCreateModal({
     return options;
   }, [staff, profile]);
 
-  /** 打开时重置：检测时间取当前时刻、结果类型默认「检测」、记录者默认当前账号 */
+  /**
+   * 打开时重置：检测时间取当前时刻、结果类型默认「检测」、记录者默认当前账号。
+   *
+   * 注意不要给 Form 加 preserve={false}：Modal 的 body 在首帧后会再挂载一次，
+   * 非保留字段在 Form 卸载时会被 destroyForm 清空，导致这里写入的默认值在首帧渲染时被抹掉
+   * （表现为首次打开时全部为空、血糖值/试纸置灰）。关闭时不清空也无妨：每次打开都会重置。
+   */
   useEffect(() => {
     if (!open) {
       return;
@@ -203,7 +209,14 @@ export default function GlucoseCreateModal({
       onCancel={onClose}
       maskClosable={false}
     >
-      <Form form={form} layout="vertical" preserve={false} requiredMark>
+      {/* 与患者弹框一致：label 与控件同行，label 定宽保证各行控件左边缘对齐 */}
+      <Form
+        form={form}
+        layout="horizontal"
+        labelCol={{ flex: '120px' }}
+        wrapperCol={{ flex: '1 1 0' }}
+        requiredMark
+      >
         <Form.Item
           name="measuredAt"
           label="检测时间"
@@ -242,10 +255,14 @@ export default function GlucoseCreateModal({
           />
         </Form.Item>
 
-        {/* 无标签：选项直接跟在血糖值下方，与血糖值共同构成"这次检测的结果" */}
+        {/*
+          无 label：选项直接跟在血糖值下方，与血糖值共同构成"这次检测的结果"。
+          仍占用一个空 label 单元格（label=" "），否则本行控件会顶到最左侧、与上面的输入框错位。
+        */}
         <Form.Item
           name="resultType"
-          style={{ marginTop: -8 }}
+          label=" "
+          colon={false}
           rules={[{ required: true, message: '请选择检测结果类型' }]}
         >
           <Radio.Group
