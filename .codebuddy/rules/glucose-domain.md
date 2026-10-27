@@ -26,7 +26,9 @@ globs:
 - 阈值（低 < 3.9、高 > 16.7）从系统配置读取，禁止硬编码
 
 ## BGM 上下文
-`mealContext` 必填，取值一律用 `@gc/shared` 的 `TIME_SLOTS`（含 `RANDOM` 随机），禁止自定义时段码
+`mealContext` 必填，落库**时段码**（`code`）。时段是动态数据（表 `TimeSlot`，接口 `GET /time-slots`，前端 `useCommonDataStore().timeSlots`），
+名称/区间/控糖目标在库里维护；code 是契约，只能取 `@gc/shared` `TIME_SLOTS` 登记过的值（含 `RANDOM` 随机 / `RETEST` 复测），禁止自定义或按名称匹配。
+普通时段（`type=1`）区间必须 00:00~24:00 全覆盖、不重叠、不跨零点，左闭右开；特殊（`4`）/强化（`0`）无区间。
 
 ## 去重
 - `dedupeKey` 必须唯一；冲突时幂等跳过

@@ -99,7 +99,8 @@ packages/
 - 默认告警阈值：低血糖 `< 3.9 mmol/L`，高血糖 `> 16.7 mmol/L`（阈值需可配置，从系统配置读取，**禁止硬编码在业务代码**）
 
 ### 4.4 录入上下文（BGM 必填）
-- `mealContext` 枚举：`FASTING 空腹 / PRE_MEAL 餐前 / POST_MEAL 餐后 / BEDTIME 睡前 / RANDOM 随机`
+- `mealContext` 必填，落库**时段码**（`TimeSlot.code`）：普通 `FASTING`/`BREAKFAST_PRE`/`BREAKFAST_POST`/`LUNCH_PRE`/`LUNCH_POST`/`DINNER_PRE`/`DINNER_POST`/`BEDTIME`，特殊 `RANDOM`/`RETEST`，强化 `INTENSIVE_AM`/`INTENSIVE_PM`/`INTENSIVE_NIGHT`
+- 时段的**名称/起止时间/类型/控糖目标**是动态数据（表 `TimeSlot`，接口 `GET /time-slots`，前端 `useCommonDataStore().timeSlots`）；code 是契约，名称可改，**禁止按名称匹配**
 - 手工录入时 `operatorId` 必须记录当前医护 ID（**留痕**）
 
 ### 4.5 去重
