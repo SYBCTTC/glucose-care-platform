@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { Table, Typography } from 'antd';
+import { Button, Popconfirm, Table, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { getTimeSlotLabel } from '@gc/shared';
 import type { PatientListItem } from '@gc/shared';
@@ -13,17 +13,25 @@ interface PatientTableProps {
   page: number;
   pageSize: number;
   onPageChange: (page: number, pageSize: number) => void;
-  /** 是否有患者编辑权限（无权限时菜单里不出现「编辑患者信息」） */
+  /** 是否存在患者编辑权限（无权限时菜单里不出现「编辑患者信息」） */
   canEditPatient: boolean;
-  /** 置灰原因（出院 Tab 传值），有值时编辑项置灰并提示 */
-  editDisabledReason?: string;
+  /** 是否出院 Tab：出院患者的操作列只有一个「办理住院」按钮 */
+  isDischarged: boolean;
+  /** 是否有办理住院权限（无权限时操作列为空，后端仍强制校验） */
+  canAdmitPatient: boolean;
+  /** 正在办理的患者 ID，用于按钮 loading 与防重复提交 */
+  admittingId: string | null;
   onEditPatient: (patient: PatientListItem) => void;
+  onAdmitPatient: (patient: PatientListItem) => void;
 }
 
 function buildColumns(
   canEditPatient: boolean,
-  editDisabledReason: string | undefined,
+  isDischarged: boolean,
+  canAdmitPatient: boolean,
+  admittingId: string | null,
   onEditPatient: (patient: PatientListItem) => void,
+  onAdmitPatient: (patient: PatientListItem) => void,
 ): ColumnsType<PatientListItem> {
   return [
     {
@@ -88,14 +96,40 @@ function buildColumns(
       key: 'actions',
       width: 120,
       fixed: 'right',
-      render: (_, record) => (
-        <PatientMoreActions
-          patient={record}
-          canEdit={canEditPatient}
-          editDisabledReason={editDisabledReason}
-          onEdit={onEditPatient}
-        />
-      ),
+      render: (_, record) => {
+        // 出院 Tab：只有一个「办理住院」按钮，不再提供更多操作菜单
+        if (isDischarged) {
+          if (!canAdmitPatient) {
+            return null;
+          }
+          return (
+            <Popconfirm
+              title="办理住院"
+              description={`确认将 ${record.nameMasked} 重新办理住院？`}
+              okText="确认"
+              cancelText="取消"
+              onConfirm={() => onAdmitPatient(record)}
+            >
+              <Button
+                type="link"
+                size="small"
+                loading={admittingId === record.id}
+                disabled={admittingId !== null && admittingId !== record.id}
+                style={{ paddingInline: 0, height: 'auto' }}
+              >
+                办理住院
+              </Button>
+            </Popconfirm>
+          );
+        }
+        return (
+          <PatientMoreActions
+            patient={record}
+            canEdit={canEditPatient}
+            onEdit={onEditPatient}
+          />
+        );
+      },
     },
   ];
 }
@@ -108,12 +142,23 @@ export default function PatientTable({
   pageSize,
   onPageChange,
   canEditPatient,
-  editDisabledReason,
+  isDischarged,
+  canAdmitPatient,
+  admittingId,
   onEditPatient,
+  onAdmitPatient,
 }: PatientTableProps) {
   const columns = useMemo(
-    () => buildColumns(canEditPatient, editDisabledReason, onEditPatient),
-    [canEditPatient, editDisabledReason, onEditPatient],
+    () =>
+      buildColumns(
+        canEditPatient,
+        isDischarged,
+        canAdmitPatient,
+        admittingId,
+        onEditPatient,
+        onAdmitPatient,
+      ),
+    [canEditPatient, isDischarged, canAdmitPatient, admittingId, onEditPatient, onAdmitPatient],
   );
 
   return (

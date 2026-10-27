@@ -1,6 +1,7 @@
 import type {
   DiabetesType,
   Gender,
+  PatientAdmitResult,
   PatientDetail,
   PatientListItem,
   PatientStatus,
@@ -102,6 +103,14 @@ export function updatePatient(
 /** 患者详情（编辑弹窗回填）：属敏感查询，后端会写 PATIENT_VIEW 审计 */
 export function fetchPatientDetail(id: string): Promise<PatientDetail> {
   return http.get<PatientDetail>(`/patients/${id}`);
+}
+
+/**
+ * 办理住院：出院患者重新入院（DISCHARGED → INPATIENT）。
+ * 属状态流转类敏感操作，后端写 PATIENT_MANAGE 审计并做数据权限校验。
+ */
+export function admitPatient(id: string): Promise<PatientAdmitResult> {
+  return http.post<PatientAdmitResult>(`/patients/${id}/admit`);
 }
 
 /** 住院 / 出院患者列表：两个接口权限点独立 */

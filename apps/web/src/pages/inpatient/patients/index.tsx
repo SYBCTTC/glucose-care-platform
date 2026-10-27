@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Alert, Button, Card, Result } from 'antd';
+import { Alert, Button, Card, Result, message } from 'antd';
 import { PATIENT_STATUS, PERMISSION } from '@gc/shared';
-import type { PatientStatus } from '@gc/shared';
+import type { PatientListItem, PatientStatus } from '@gc/shared';
+import { admitPatient } from '@/api/patient';
 import Tabs, { type TabItem } from '@/components/common/Tabs';
 import { useAuthStore } from '@/store/auth';
 import PatientCardGrid from './PatientCardGrid';
@@ -32,8 +33,22 @@ export default function PatientManagementPage() {
   const [editingPatientId, setEditingPatientId] = useState<string | null>(null);
 
   const canEditPatient = hasPermission(PERMISSION.PATIENT_UPDATE);
-  // 本期不做出院患者编辑：入口置灰并提示，后端另有出院校验兜底
-  const editDisabledReason = isInpatient ? undefined : '出院患者不支持编辑患者信息';
+  const canAdmitPatient = hasPermission(PERMISSION.PATIENT_ADMIT);
+  const [admittingId, setAdmittingId] = useState<string | null>(null);
+
+  const handleAdmit = async (patient: PatientListItem) => {
+    setAdmittingId(patient.id);
+    try {
+      await admitPatient(patient.id);
+      void message.success('已办理住院');
+      // 患者已转到住院 Tab，出院列表需重查
+      query.refresh();
+    } catch {
+      // 失败提示由请求拦截器统一处理（含越权、状态冲突），这里只解除 loading
+    } finally {
+      setAdmittingId(null);
+    }
+  };
 
   if (!enabled) {
     return (
@@ -142,8 +157,11 @@ export default function PatientManagementPage() {
             pageSize={query.pageSize}
             onPageChange={query.changePage}
             canEditPatient={canEditPatient}
-            editDisabledReason={editDisabledReason}
+            isDischarged={!isInpatient}
+            canAdmitPatient={canAdmitPatient}
+            admittingId={admittingId}
             onEditPatient={(patient) => setEditingPatientId(patient.id)}
+            onAdmitPatient={handleAdmit}
           />
         )}
       </div>
