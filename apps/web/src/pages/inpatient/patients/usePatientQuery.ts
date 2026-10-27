@@ -167,7 +167,9 @@ export function usePatientQuery(initialStatus: PatientStatus, enabled = true) {
     async (nextFilters: PatientFilters, nextStatus: PatientStatus, reset: boolean) => {
       if (reset) {
         clearCardState();
-      } else if (cardLoadingRef.current || !cardHasMoreRef.current) {
+      } else if (!initializedRef.current || cardLoadingRef.current || !cardHasMoreRef.current) {
+        // 初始化前一律不发请求：默认筛选还在等公共数据，此时 filters 仍是"全部"，
+        // 而首屏卡片哨兵就在视口内，会先发一次无筛选的请求，初始化后再发一次 → 重复请求。
         return;
       }
 
