@@ -219,6 +219,7 @@ async function main(): Promise<void> {
   await prisma.glucoseRecord.deleteMany({ where: { patientId: { in: patientIds } } });
   const glucoseRows: Array<{
     patientId: string;
+    resultType: string;
     valueMmolL: number;
     mealContext: string;
     measuredAt: Date;
@@ -226,9 +227,12 @@ async function main(): Promise<void> {
   patients.forEach((patient, patientIndex) => {
     const recordCount = 3 + (patientIndex % 3);
     for (let recordIndex = 0; recordIndex < recordCount; recordIndex += 1) {
+      const valueMmolL = Number((4.2 + ((patientIndex * 7 + recordIndex * 11) % 90) / 10).toFixed(1));
       glucoseRows.push({
         patientId: patient.id,
-        valueMmolL: Number((4.2 + ((patientIndex * 7 + recordIndex * 11) % 90) / 10).toFixed(1)),
+        // 0 偏低 / 1 正常 / 2 偏高：与 UI-DESIGN-TOKENS 5.1 阈值一致
+        resultType: valueMmolL < 3.9 ? '0' : valueMmolL <= 16.7 ? '1' : '2',
+        valueMmolL,
         mealContext: mealContexts[(patientIndex + recordIndex) % mealContexts.length],
         measuredAt: dayjs()
           .subtract(recordIndex * 6 + (patientIndex % 12), 'hour')

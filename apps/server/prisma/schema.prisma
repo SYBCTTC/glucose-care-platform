@@ -146,8 +146,10 @@ model Patient {
 model GlucoseRecord {
   id          String   @id @default(uuid()) @db.Uuid
   patientId   String   @db.Uuid
-  /// 血糖值，统一 mmol/L
-  valueMmolL  Decimal  @db.Decimal(4, 1)
+  /// 结果类型，取值见 @gc/shared DICT_TYPE.GLUCOSE_RESULT（'0'~'9'）；0/2 由后台按阈值判定
+  resultType  String   @db.VarChar(2)
+  /// 血糖值，统一 mmol/L；非数值类型（3~9）为 null
+  valueMmolL  Decimal? @db.Decimal(4, 1)
   /// 测量时段，取值见 @gc/shared TIME_SLOTS.code
   mealContext String?  @db.VarChar(32)
   measuredAt  DateTime @db.Timestamptz(3)
