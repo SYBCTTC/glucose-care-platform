@@ -62,7 +62,7 @@ function calcAge(birthDate: Date | null): number | null {
  * 列表 / 详情共用的患者字段选择器。
  * 出参一律脱敏：*Cipher 列永远不进 select，避免明文或密文泄露到前端。
  */
-const PATIENT_PUBLIC_SELECT = Prisma.validator<Prisma.PatientSelect>()({
+export const PATIENT_PUBLIC_SELECT = Prisma.validator<Prisma.PatientSelect>()({
   id: true,
   nameMasked: true,
   patientNo: true,
@@ -84,10 +84,13 @@ const PATIENT_PUBLIC_SELECT = Prisma.validator<Prisma.PatientSelect>()({
   },
 });
 
-type PatientPublicRow = Prisma.PatientGetPayload<{ select: typeof PATIENT_PUBLIC_SELECT }>;
+export type PatientPublicRow = Prisma.PatientGetPayload<{ select: typeof PATIENT_PUBLIC_SELECT }>;
 
-/** 行 → 列表项。列表与详情共用，保证两处口径一致 */
-function toListItem(row: PatientPublicRow): PatientListItem {
+/**
+ * 行 → 列表项。列表与详情共用，保证两处口径一致。
+ * 导出供血糖模块复用：添加血糖后要回传更新后的列表项，避免前端整页重查。
+ */
+export function toListItem(row: PatientPublicRow): PatientListItem {
   const lastGlucose = row.glucoseRecords[0] ?? null;
   return {
     id: row.id,

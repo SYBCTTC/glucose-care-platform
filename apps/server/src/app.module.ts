@@ -10,6 +10,7 @@ import { StaffModule } from './modules/staff/staff.module';
 import { DeviceModule } from './modules/device/device.module';
 import { PatientModule } from './modules/patient/patient.module';
 import { DictModule } from './modules/dict/dict.module';
+import { GlucoseModule } from './modules/glucose/glucose.module';
 import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
@@ -28,6 +29,7 @@ import { PrismaModule } from './common/prisma/prisma.module';
     DeviceModule,
     PatientModule,
     DictModule,
+    GlucoseModule,
   ],
   providers: [
     // 顺序即执行顺序：先鉴权 → 再权限校验 → 再强制改密拦截 → 最后审计留痕

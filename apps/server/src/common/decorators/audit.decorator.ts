@@ -16,6 +16,9 @@ export const AUDIT_DETAIL_ALLOW_LIST = [
   'measuredAt',
   'mealContext',
   'valueMmolL',
+  /** 血糖添加：结果类型与试纸数量（备注为自由文本，可能含个人信息，不入日志） */
+  'resultType',
+  'testStrip',
   'count',
   'rangeFrom',
   'rangeTo',
