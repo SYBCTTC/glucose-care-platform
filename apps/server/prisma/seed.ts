@@ -82,7 +82,7 @@ async function main(): Promise<void> {
 
   // dr.wang 作为"已正常登录、无需强制改密"的演示账号（区别于其他需首次改密的账号）
   const doctorWang = await ensureUser('dr.wang', '王医生', '13800000001', endocrinology.id, 'DOCTOR', false);
-  await ensureUser('nurse.li', '李护士', '13800000002', endocrinology.id, 'NURSE');
+  const nurseLi = await ensureUser('nurse.li', '李护士', '13800000002', endocrinology.id, 'NURSE');
   const headNurse = await ensureUser('head.zhou', '周护士长', '13800000003', endocrinology.id, 'NURSE_HEAD');
   // 其他科室账号：用于验证跨科室越权被拒
   const doctorChen = await ensureUser('dr.chen', '陈医生', '13800000004', cardiology.id, 'DOCTOR');
@@ -223,6 +223,9 @@ async function main(): Promise<void> {
     valueMmolL: number;
     mealContext: string;
     measuredAt: Date;
+    operatorId: string;
+    testStrip: number | null;
+    remark: string | null;
   }> = [];
   patients.forEach((patient, patientIndex) => {
     const recordCount = 3 + (patientIndex % 3);
@@ -237,6 +240,9 @@ async function main(): Promise<void> {
         measuredAt: dayjs()
           .subtract(recordIndex * 6 + (patientIndex % 12), 'hour')
           .toDate(),
+        operatorId: recordIndex % 2 === 0 ? nurseLi.id : headNurse.id,
+        testStrip: ((patientIndex + recordIndex) % 50) + 1,
+        remark: recordIndex === 0 ? '餐前指尖血，患者配合良好' : null,
       });
     }
   });
@@ -289,11 +295,12 @@ async function main(): Promise<void> {
   }
 
   // ---------- 动态字典（公共数据 DY-RESULT：血糖监测结果） ----------
-  // 0/2（偏低/偏高）由后台按阈值自动判定，checkable=false 不进录入选项；
+  // 0/1/2（偏低/正常/偏高）由后台按阈值自动判定，checkable=false 不进录入选项
+  // （录入界面用「检测」占位，选了就填数值）；
   // 5~9（拒检/外出/请假/已吃饭/未进食）不计入统计，counted=false。
   const glucoseResults = [
     { code: '0', label: '偏低', color: '#4BB2ED', checkable: false, counted: true },
-    { code: '1', label: '正常', color: '#389E0D', checkable: true, counted: true },
+    { code: '1', label: '正常', color: '#389E0D', checkable: false, counted: true },
     { code: '2', label: '偏高', color: '#FF1516', checkable: false, counted: true },
     { code: '3', label: 'Low', color: '#4BB2ED', checkable: true, counted: true },
     { code: '4', label: 'High', color: '#FF1516', checkable: true, counted: true },

@@ -62,6 +62,8 @@ model User {
   patients       Patient[]       @relation("PatientDoctor")
   /// 作为责任护士负责的患者
   nursePatients  Patient[]       @relation("PatientNurse")
+  /// 手工录入的血糖记录（作为记录者）
+  glucoseRecords GlucoseRecord[] @relation("GlucoseOperator")
 
   @@index([departmentId])
   @@index([status])
@@ -153,11 +155,19 @@ model GlucoseRecord {
   /// 测量时段，取值见 @gc/shared TIME_SLOTS.code
   mealContext String?  @db.VarChar(32)
   measuredAt  DateTime @db.Timestamptz(3)
+  /// 记录者（录入人）；历史数据与设备自动上报可为空，手工录入由应用层强制必填
+  operatorId  String?  @db.Uuid
+  /// 试纸数量（张，整数）；仅检测类结果可填
+  testStrip   Int?
+  /// 备注，最长 500 字
+  remark      String?  @db.VarChar(500)
   createdAt   DateTime @default(now())
 
-  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patient  Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  operator User?   @relation("GlucoseOperator", fields: [operatorId], references: [id])
 
   @@index([patientId, measuredAt(sort: Desc)])
+  @@index([operatorId])
 }
 
 // ---------------------------- 设备 ----------------------------
@@ -230,6 +240,8 @@ enum AuditAction {
   /// 患者信息编辑（改床号/责任医生等），detail.changedFields 记变更字段名
   PATIENT_UPDATE
   PATIENT_MANAGE
+  /// 添加血糖（手工录入血糖记录），detail 记 resultType / valueMmolL / testStrip / measuredAt
+  GLUCOSE_CREATE
   DEVICE_VIEW
   DEVICE_MANAGE
   USER_MANAGE
