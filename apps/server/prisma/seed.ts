@@ -5,7 +5,7 @@
 import { PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import dayjs from 'dayjs';
-import { DICT_TYPE } from '@gc/shared';
+import { DICT_TYPE, TIME_SLOTS } from '@gc/shared';
 
 const prisma = new PrismaClient();
 
@@ -317,6 +317,19 @@ async function main(): Promise<void> {
       where: { dictType_code: { dictType, code: item.code } },
       update: data,
       create: { dictType, ...data },
+    });
+  }
+
+  // ---------- 时段（DY-TIMESLOT，原静态字典改为动态数据） ----------
+  // 初始值以 @gc/shared TIME_SLOTS 为唯一来源，避免库里与代码两份数据漂移；
+  // 上线后由临床在库里直接调整（改名/改区间/改控糖目标），不再改代码。
+  // 普通时段 00:00~24:00 首尾相接、左闭右开；特殊（随机/复测）与强化无区间。
+  for (const slot of TIME_SLOTS) {
+    const data = { ...slot, enabled: true };
+    await prisma.timeSlot.upsert({
+      where: { code: slot.code },
+      update: data,
+      create: data,
     });
   }
 

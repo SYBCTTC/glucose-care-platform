@@ -314,3 +314,32 @@ model DictItem {
   @@unique([dictType, code])
   @@index([dictType, sortOrder])
 }
+
+/// 时段（原 D-TIMESLOT 静态字典，改为动态数据）。
+/// 血糖按 measuredAt 落入 [startTime, endTime) 归组；普通时段要求 00:00~24:00 全覆盖、不重叠、不跨零点，
+/// 特殊时段（随机/复测）与强化时段无区间。code 是落库契约（GlucoseRecord.mealContext），改名不改码。
+model TimeSlot {
+  id    String @id @default(uuid()) @db.Uuid
+  /// 时段码，落库值：FASTING / BREAKFAST_PRE / RANDOM ...
+  code  String @unique @db.VarChar(32)
+  /// 时段名，展示用
+  name  String @db.VarChar(64)
+  /// 0-强化 1-普通 4-特殊，取值见 @gc/shared TIME_SLOT_CATEGORY
+  type  Int
+  /// 起点 HH:mm（'24:00' 可作终点）；特殊/强化为空
+  startTime String? @db.VarChar(5)
+  /// 终点 HH:mm；特殊/强化为空
+  endTime   String? @db.VarChar(5)
+  /// 时段控糖目标下限 mmol/L；特殊/强化为空
+  valueDown Decimal? @db.Decimal(4, 1)
+  /// 时段控糖目标上限 mmol/L；特殊/强化为空
+  valueUp   Decimal? @db.Decimal(4, 1)
+  /// 展示顺序，升序；普通在前、特殊居中、强化在后
+  sortOrder Int      @default(0)
+  enabled   Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([type, sortOrder])
+}
