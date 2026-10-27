@@ -42,6 +42,8 @@ export const TIME_SLOTS: TimeSlot[] = [
   { code: 'DINNER_PRE', name: '晚餐前', type: 'NORMAL' },
   { code: 'DINNER_POST', name: '晚餐后', type: 'NORMAL' },
   { code: 'BEDTIME', name: '睡前', type: 'NORMAL' },
+  /** 随机时段：不符合固定时段的临时测量，排在常规时段末尾、强化时段之前 */
+  { code: 'RANDOM', name: '随机', type: 'NORMAL' },
   { code: 'INTENSIVE_AM', name: '强化-上午', type: 'INTENSIVE' },
   { code: 'INTENSIVE_PM', name: '强化-下午', type: 'INTENSIVE' },
   { code: 'INTENSIVE_NIGHT', name: '强化-夜间', type: 'INTENSIVE' },

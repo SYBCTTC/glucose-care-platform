@@ -32,6 +32,8 @@ export const PERMISSION = {
   PATIENT_DISCHARGED_VIEW: 'patient:discharged:view',
   /** 办理住院：把出院患者重新转为住院（DISCHARGED → INPATIENT） */
   PATIENT_ADMIT: 'patient:admit',
+  /** 添加血糖（手工录入血糖记录）；与患者编辑分离，便于只授予录入权限 */
+  GLUCOSE_CREATE: 'glucose:create',
   DEVICE_VIEW: 'device:view',
   DEVICE_MANAGE: 'device:manage',
   AUDIT_VIEW: 'audit:view',
@@ -68,6 +70,7 @@ export const ROLE_PERMISSIONS: Record<RoleCode, PermissionCode[]> = {
     PERMISSION.WARD_VIEW,
     PERMISSION.ALERT_VIEW,
     PERMISSION.QUALITY_VIEW,
+    PERMISSION.GLUCOSE_CREATE,
     PERMISSION.DEPARTMENT_VIEW,
     PERMISSION.OPERATOR_VIEW,
     PERMISSION.DICT_VIEW,
@@ -85,6 +88,7 @@ export const ROLE_PERMISSIONS: Record<RoleCode, PermissionCode[]> = {
     PERMISSION.QUALITY_VIEW,
     PERMISSION.DEPARTMENT_VIEW,
     PERMISSION.OPERATOR_VIEW,
+    PERMISSION.GLUCOSE_CREATE,
     PERMISSION.DICT_VIEW,
   ],
   NURSE_HEAD: [
@@ -103,6 +107,7 @@ export const ROLE_PERMISSIONS: Record<RoleCode, PermissionCode[]> = {
     PERMISSION.QUALITY_MANAGE,
     PERMISSION.DEPARTMENT_VIEW,
     PERMISSION.OPERATOR_VIEW,
+    PERMISSION.GLUCOSE_CREATE,
     PERMISSION.DICT_VIEW,
   ],
   DEVICE_ADMIN: [
@@ -137,6 +142,7 @@ export const ROLE_PERMISSIONS: Record<RoleCode, PermissionCode[]> = {
     PERMISSION.ROLE_MANAGE,
     PERMISSION.DEPARTMENT_VIEW,
     PERMISSION.OPERATOR_VIEW,
+    PERMISSION.GLUCOSE_CREATE,
     PERMISSION.DICT_VIEW,
   ],
 };
