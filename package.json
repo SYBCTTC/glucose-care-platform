@@ -19,6 +19,9 @@
     "format": "prettier --write .",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
+    "check": "node scripts/check.mjs",
+    "check:server": "node scripts/check.mjs server",
+    "check:web": "node scripts/check.mjs web",
     "db:generate": "pnpm --filter @gc/server prisma generate",
     "db:migrate": "pnpm --filter @gc/server prisma migrate dev",
     "db:deploy": "pnpm --filter @gc/server prisma migrate deploy",
@@ -36,7 +39,12 @@
     "typescript-eslint": "^8.18.0"
   },
   "lint-staged": {
-    "*.{ts,tsx}": ["eslint --fix", "prettier --write"],
-    "*.{json,md,yml,yaml}": ["prettier --write"]
+    "*.{ts,tsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md,yml,yaml}": [
+      "prettier --write"
+    ]
   }
 }
