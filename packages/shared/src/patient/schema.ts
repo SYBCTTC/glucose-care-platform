@@ -196,7 +196,9 @@ export interface PatientListItem {
   archivedAt: string | null;
   /** 由出生日期计算；未知时为 null */
   age: number | null;
-  /** 最近一次血糖，mmol/L */
+  /** 最近一次血糖结果类型，取值见 DICT_TYPE.GLUCOSE_RESULT（'0'~'9'） */
+  lastGlucoseResultType: string | null;
+  /** 最近一次血糖值，mmol/L；非数值类型（'3'~'9'）为 null */
   lastGlucoseValue: number | null;
   /** 最近一次血糖时段，取值见 TIME_SLOTS.code */
   lastGlucoseMealContext: string | null;

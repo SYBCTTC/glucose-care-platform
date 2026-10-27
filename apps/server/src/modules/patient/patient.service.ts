@@ -80,7 +80,7 @@ const PATIENT_PUBLIC_SELECT = Prisma.validator<Prisma.PatientSelect>()({
   glucoseRecords: {
     orderBy: { measuredAt: 'desc' },
     take: 1,
-    select: { valueMmolL: true, mealContext: true, measuredAt: true },
+    select: { resultType: true, valueMmolL: true, mealContext: true, measuredAt: true },
   },
 });
 
@@ -104,7 +104,8 @@ function toListItem(row: PatientPublicRow): PatientListItem {
     dischargeAt: formatDateTime(row.dischargeAt),
     archivedAt: formatDateTime(row.archivedAt),
     age: calcAge(row.birthDate),
-    lastGlucoseValue: lastGlucose ? Number(lastGlucose.valueMmolL) : null,
+    lastGlucoseResultType: lastGlucose?.resultType ?? null,
+    lastGlucoseValue: lastGlucose?.valueMmolL ? Number(lastGlucose.valueMmolL) : null,
     lastGlucoseMealContext: lastGlucose?.mealContext ?? null,
     lastGlucoseMeasuredAt: formatDateTime(lastGlucose?.measuredAt ?? null),
   };
