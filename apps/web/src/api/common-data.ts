@@ -1,3 +1,4 @@
+import type { DictItemOption, DictType } from '@gc/shared';
 import { http } from './client';
 
 /** 科室下拉项 */
@@ -37,4 +38,9 @@ export function fetchStaff(): Promise<StaffOption[]> {
 
 export function fetchDevices(): Promise<DeviceOption[]> {
   return http.get<DeviceOption[]>('/devices');
+}
+
+/** 动态字典项（公共数据，如血糖监测结果 DY-RESULT） */
+export function fetchDictItems(dictType: DictType): Promise<DictItemOption[]> {
+  return http.get<DictItemOption[]>(`/dicts/${dictType}`);
 }
