@@ -232,3 +232,15 @@ export interface PatientUpdateResult {
   changedFields: string[];
   item: PatientListItem;
 }
+
+/**
+ * 办理住院（重新入院）结果：状态流转 DISCHARGED → INPATIENT。
+ * - fromStatus / toStatus：供审计留痕，只有状态码，不含患者信息
+ * - item：流转后的列表项，前端直接替换该行，避免整页重查
+ */
+export interface PatientAdmitResult {
+  id: string;
+  fromStatus: PatientStatus;
+  toStatus: PatientStatus;
+  item: PatientListItem;
+}
