@@ -5,6 +5,7 @@
 import { PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import dayjs from 'dayjs';
+import { DICT_TYPE } from '@gc/shared';
 
 const prisma = new PrismaClient();
 
@@ -280,6 +281,31 @@ async function main(): Promise<void> {
       where: { key: config.key },
       update: { value: config.value },
       create: config,
+    });
+  }
+
+  // ---------- 动态字典（公共数据 DY-RESULT：血糖监测结果） ----------
+  // 0/2（偏低/偏高）由后台按阈值自动判定，checkable=false 不进录入选项；
+  // 5~9（拒检/外出/请假/已吃饭/未进食）不计入统计，counted=false。
+  const glucoseResults = [
+    { code: '0', label: '偏低', color: '#4BB2ED', checkable: false, counted: true },
+    { code: '1', label: '正常', color: '#389E0D', checkable: true, counted: true },
+    { code: '2', label: '偏高', color: '#FF1516', checkable: false, counted: true },
+    { code: '3', label: 'Low', color: '#4BB2ED', checkable: true, counted: true },
+    { code: '4', label: 'High', color: '#FF1516', checkable: true, counted: true },
+    { code: '5', label: '拒检', color: '#3C3C3C', checkable: true, counted: false },
+    { code: '6', label: '外出', color: '#3C3C3C', checkable: true, counted: false },
+    { code: '7', label: '请假', color: '#3C3C3C', checkable: true, counted: false },
+    { code: '8', label: '已吃饭', color: '#3C3C3C', checkable: true, counted: false },
+    { code: '9', label: '未进食', color: '#3C3C3C', checkable: true, counted: false },
+  ];
+  for (const [index, item] of glucoseResults.entries()) {
+    const dictType = DICT_TYPE.GLUCOSE_RESULT;
+    const data = { ...item, sortOrder: index, enabled: true };
+    await prisma.dictItem.upsert({
+      where: { dictType_code: { dictType, code: item.code } },
+      update: data,
+      create: { dictType, ...data },
     });
   }
 

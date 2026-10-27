@@ -273,3 +273,30 @@ model SystemConfig {
   description String?  @db.VarChar(255)
   updatedAt   DateTime @updatedAt
 }
+
+/// 动态字典（公共数据）：登录后一次性下发，前端 useCommonDataStore 缓存。
+/// 字典是数据不是代码：新增/调整取值改数据即可，不再发版；前端禁止硬编码 label/color。
+model DictItem {
+  id       String @id @default(uuid()) @db.Uuid
+  /// 字典类型，取值见 @gc/shared 的 DICT_TYPE（如 GLUCOSE_RESULT）
+  dictType String @db.VarChar(32)
+  /// 字典码：入库与接口传输用；血糖监测结果为 '0'~'9'
+  code     String @db.VarChar(32)
+  /// 展示文案（中文或英文标签，如 偏低 / Low / 拒检）
+  label    String @db.VarChar(64)
+  /// 展示色，前端直接取用；色值登记见 docs/UI-DESIGN-TOKENS.md 5.1
+  color    String? @db.VarChar(16)
+  /// 是否可由用户选择：偏低/偏高由后台按阈值判定，不出现在录入选项里
+  checkable Boolean @default(true)
+  /// 是否计入血糖统计（拒检/外出/请假/已吃饭/未进食不计入）
+  counted  Boolean @default(true)
+  /// 同类型内展示顺序，升序
+  sortOrder Int    @default(0)
+  enabled   Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([dictType, code])
+  @@index([dictType, sortOrder])
+}
