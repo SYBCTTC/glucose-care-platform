@@ -14,7 +14,7 @@
   1. 患者档案管理
   2. **血糖数据查看**（列表 / 趋势图 / 统计报表 / 导出）
   3. **血糖仪设备管理**（注册、绑定患者、状态监控、校准记录）
-- **当前数据来源**：**医护手工录入**（`channel = MANUAL`）
+- **当前数据来源**：**医护手工录入**（尚无 `channel` 字段，见 §4.5）
 - **未来扩展**：接入血糖仪自动上传（`DEVICE`）、厂商平台 API（`VENDOR_API`）、CGM 持续监测（`CGM`）
 - **部署环境**：**医院内网服务器**，需满足**等级保护三级**要求
 
@@ -82,47 +82,53 @@ packages/
 
 ### 4.1 单位
 - **数据库统一存储 `mmol/L`**（字段 `valueMmolL`，精度 1 位小数）
-- 同时保留 `rawValue` + `rawUnit`（原始值与单位，便于审计）
+- `rawValue` + `rawUnit`（原始值与单位）：**当前 schema 未实现**，恢复需走 schema 评审；接口只收 `mmol/L`
 - 换算：**1 mmol/L = 18 mg/dL**；`mg/dL → mmol/L` 除以 18
 - 换算函数**只允许**使用 `packages/shared/src/glucose/units.ts`，**禁止在别处硬编码 18**
 
 ### 4.2 时间
 - `measuredAt`：**血糖实际测量时间**（手工录入时由医护填写），业务主时间
-- `receivedAt`：服务器接收时间，仅用于排查
+- `receivedAt`：服务器接收时间，仅用于排查（**当前 schema 无此字段**，排查用 `createdAt`）
 - 数据库统一存 **UTC**（`timestamptz`），前端用 dayjs 按本地时区展示
 - **禁止**用 `new Date()` 作为 `measuredAt` 的默认值（AI 高频错误）
 - 内网服务器时间必须 NTP 同步（运维项）
 
 ### 4.3 取值范围与异常
 - 合法范围：**0.6 ~ 33.3 mmol/L**（含边界；与结果类型 `Low`(< 0.6) / `High`(> 33.3) 阈值对齐，边界值仍属合法读数）
-- 超范围**不入库**，写入异常记录并标记 `status = PENDING_REVIEW`，等待人工确认
+- 超范围**不入库**：由 `createGlucoseSchema`（`packages/shared/src/glucose/schema.ts`）直接拒绝（10001）；当前**无 `status` 字段**，无 `PENDING_REVIEW` 流程
 - 默认告警阈值：低血糖 `< 3.9 mmol/L`，高血糖 `> 16.7 mmol/L`（阈值需可配置，从系统配置读取，**禁止硬编码在业务代码**）
 
 ### 4.4 录入上下文（BGM 必填）
-- `mealContext` 必填，落库**时段码**（`TimeSlot.code`）：普通 `FASTING`/`BREAKFAST_PRE`/`BREAKFAST_POST`/`LUNCH_PRE`/`LUNCH_POST`/`DINNER_PRE`/`DINNER_POST`/`BEDTIME`，特殊 `RANDOM`/`RETEST`，强化 `INTENSIVE_AM`/`INTENSIVE_PM`/`INTENSIVE_NIGHT`
+- `mealContext` **应用层必填**（`createGlucoseSchema` 强制），落库**时段码**（`TimeSlot.code`）：普通 `FASTING`/`BREAKFAST_PRE`/`BREAKFAST_POST`/`LUNCH_PRE`/`LUNCH_POST`/`DINNER_PRE`/`DINNER_POST`/`BEDTIME`，特殊 `RANDOM`/`RETEST`，强化 `INTENSIVE_AM`/`INTENSIVE_PM`/`INTENSIVE_NIGHT`
+- 库字段 `GlucoseRecord.mealContext` 为 `String?`（`schema.prisma:156`），是给设备上报/历史数据留位；**不得因库可空就放宽前端或接口校验**
 - 时段的**名称/起止时间/类型/控糖目标**是动态数据（表 `TimeSlot`，接口 `GET /time-slots`，前端 `useCommonDataStore().timeSlots`）；code 是契约，名称可改，**禁止按名称匹配**
+- 已知取舍：`createGlucoseSchema` 的 code 白名单来自 `@gc/shared` 的 `TIME_SLOTS`（静态），库里新增时段必须同步 shared，否则提交被 10001 拒绝（见 `docs/COMMON-DATA.md` 已知约束）
 - 手工录入时 `operatorId` 必须记录当前医护 ID（**留痕**）
 
-### 4.5 去重
-- 每条记录必须有 `dedupeKey`
-- 手工录入：`manual:{patientId}:{measuredAtISO}`
-- 设备上传：`device:{deviceId}:{measuredAtISO}`
+### 4.5 去重（**当前未实现，属目标态**）
+> 现状：`GlucoseRecord`（`schema.prisma:148`）无 `dedupeKey`，服务端无唯一约束兜底，
+> 同一患者同一 `measuredAt` 重复提交会落**两条记录**。这是已知缺口，不是允许的行为。
+
+- 落地前必须先走 Prisma schema + migration 人工评审，**不得在业务代码里假装该字段存在**
+- 规格（恢复时按此实现）：手工录入 `manual:{patientId}:{measuredAtISO}`，设备上传 `device:{deviceId}:{measuredAtISO}`
 - 唯一约束冲突时**静默跳过**（幂等），不得抛错
 
-### 4.6 CGM 扩展预留（现在就要留好，不要返工）
-- `GlucoseRecord.kind`：`BGM`（当前） / `CGM`（未来）
-- `GlucoseRecord.rawPayload Json?`：承载 CGM 的趋势箭头、传感器 ID、采样间隔等扩展字段，**避免频繁改表**
-- 汇总表 `GlucoseDailySummary` 已建，预留 TIR（目标范围内时间占比）等 CGM 核心指标字段
-- 数据接入必须走 `GlucoseIngestionService` 统一入口，未来新增 CGM adapter 不得改动上层
-- 分区预案见 `apps/server/prisma/sql/glucose_record_partition.sql`：
-  **触发条件** = 启用 CGM 或单表超过 5000 万行时才执行，当前 BGM 规模**不要分区**
+### 4.6 CGM 扩展（**当前未预留，属目标态**）
+> 现状（2026-10-22 重构后简化重建，见 `docs/ARCHITECTURE.md:43-60`）：`GlucoseRecord` 仅
+> `resultType / valueMmolL / mealContext / measuredAt / operatorId / testStrip / remark`；
+> **没有** `kind`、`rawPayload`、`GlucoseDailySummary`，**没有** `GlucoseIngestionService`
+> （现为 `GlucoseService`），`prisma/sql/glucose_record_partition.sql` **不存在**。
+
+- 上线 CGM 前一次性补齐 schema（`kind` / `rawPayload Json?` / 汇总表 / 分区预案），走人工评审，**禁止按本节直接加字段**
+- 数据接入统一入口以届时实际服务为准，新增 CGM adapter 不得改动上层
+- 分区**触发条件** = 启用 CGM 或单表超过 5000 万行；当前 BGM 规模**不要分区**；执行前先补该 SQL 文件
 
 ---
 
 ## 5. 安全、权限与合规（最高优先级，人工把关）
 
 ### 5.1 权限（RBAC + 数据行级）
-- 角色：`DOCTOR 医生 / NURSE 护士 / HEAD_NURSE 护士长 / DEVICE_ADMIN 设备管理员 / SYS_ADMIN 系统管理员`
+- 角色（以 `@gc/shared` 的 `ROLE_CODE` 为准）：`DOCTOR` 医生 / `NURSE` 护士 / `NURSE_HEAD` 护士长（**不是 `HEAD_NURSE`**；shared 常量 key 为 `ROLE_CODE.HEAD_NURSE`，值是 `NURSE_HEAD`）/ `DEVICE_ADMIN` 设备管理员 / `SYS_ADMIN` 系统管理员
 - **护士只能看本科室患者**，医生看管辖患者，设备管理员看设备不看患者数据
 - **权限校验必须在后端**，前端隐藏按钮只是体验
 - **所有患者数据查询必须统一经过"数据权限过滤"**，禁止每个接口各自写 where 条件

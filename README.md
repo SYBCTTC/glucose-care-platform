@@ -78,9 +78,12 @@ AGENTS.md    给 AI 的总纲，任何代码生成前必读
 
 ## 五、CGM 扩展路径
 
+> 下列 CGM 项均为**目标态**：`kind` / `rawPayload` / `GlucoseDailySummary` / 分区 SQL 目前都不存在，
+> 上线前需一次性补 schema + migration 并人工评审（详见 `AGENTS.md` §4.6）。
+
 | 阶段 | 动作 |
 |---|---|
-| 现在（BGM） | 单表 + 索引即可，数据入口 `GlucoseService.createManualRecord` |
+| 现在（BGM） | 单表 + 索引即可，数据入口 `GlucoseService.create` |
 | 启用 CGM 时 | 1) 新增 adapter 走 `GlucoseIngestionService` 统一入口<br>2) `kind = CGM`，扩展字段写 `rawPayload`<br>3) 启用 `GlucoseDailySummary` 的 TIR/CV 指标<br>4) 单表 > 5000 万行时执行 `apps/server/prisma/sql/glucose_record_partition.sql` 做按月分区 |
 
 ## 六、内网交付注意事项
