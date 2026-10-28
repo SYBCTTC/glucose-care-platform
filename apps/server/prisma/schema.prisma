@@ -166,6 +166,8 @@ model GlucoseRecord {
   patient  Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
   operator User?   @relation("GlucoseOperator", fields: [operatorId], references: [id])
 
+  /// 唯一约束兜底：同一患者同一检测时间只允许一条记录；重复提交由服务端按幂等返回 skipped=true
+  @@unique([patientId, measuredAt])
   @@index([patientId, measuredAt(sort: Desc)])
   @@index([operatorId])
 }
