@@ -209,7 +209,12 @@ export default function GlucoseCreateModal({
     setSubmitting(true);
     try {
       const result = await createGlucose(patient.id, payload);
-      void message.success('血糖添加成功');
+      if (result.skipped) {
+        // 唯一约束兜底：该检测时间已有记录，本次未落库，不能提示"添加成功"
+        void message.warning('该检测时间已有血糖记录，本次未重复保存');
+      } else {
+        void message.success('血糖添加成功');
+      }
       onSuccess(result);
       onClose();
     } catch (error) {

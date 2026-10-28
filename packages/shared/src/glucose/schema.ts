@@ -142,9 +142,13 @@ export type CreateGlucoseInput = z.infer<typeof createGlucoseSchema>;
 /**
  * 添加血糖结果。
  * `item` 为该患者更新后的列表项，前端直接替换卡片/表格里的行，避免整页重查。
+ * `skipped` 为 true 表示该患者该检测时间已有记录（唯一约束 patientId + measuredAt 命中），
+ * 本次提交按幂等跳过**未落库**，返回的是已有记录；前端不得提示"添加成功"。
  */
 export interface GlucoseCreateResult {
   id: string;
+  /** 是否因重复（同患者同检测时间）而跳过写入 */
+  skipped: boolean;
   /** 落库的结果类型（「检测」已被判定为 0/1/2） */
   resultType: string;
   valueMmolL: number | null;

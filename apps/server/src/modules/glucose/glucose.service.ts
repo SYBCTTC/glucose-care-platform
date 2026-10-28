@@ -31,6 +31,27 @@ function resolveResultType(valueMmolL: number): string {
   return '2';
 }
 
+/** 写入/回读共用的血糖记录摘要字段 */
+const GLUCOSE_RECORD_SUMMARY_SELECT = {
+  id: true,
+  resultType: true,
+  valueMmolL: true,
+  measuredAt: true,
+} as const;
+
+/** 血糖记录摘要（写入返回 或 唯一约束命中后回读） */
+type GlucoseRecordSummary = {
+  id: string;
+  resultType: string;
+  valueMmolL: Prisma.Decimal | null;
+  measuredAt: Date;
+};
+
+/** 是否 Prisma 唯一约束冲突（P2002），用于血糖重复提交的幂等兜底 */
+function isUniqueConstraintViolation(error: unknown): boolean {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
+}
+
 @Injectable()
 export class GlucoseService {
   constructor(private readonly prisma: PrismaService) {}
@@ -69,18 +90,15 @@ export class GlucoseService {
     // Zod 已保证「检测」时血糖值必填，其余类型血糖值/试纸为空
     const valueMmolL = isDetect ? (input.valueMmolL as number) : null;
 
-    const record = await this.prisma.glucoseRecord.create({
-      data: {
-        patientId,
-        resultType: isDetect ? resolveResultType(valueMmolL as number) : input.resultType,
-        valueMmolL: valueMmolL === null ? null : new Prisma.Decimal(valueMmolL.toFixed(1)),
-        mealContext: input.mealContext,
-        measuredAt: input.measuredAt,
-        operatorId: input.operatorId,
-        testStrip: isDetect ? (input.testStrip ?? null) : null,
-        remark: input.remark?.trim() ? input.remark.trim() : null,
-      },
-      select: { id: true, resultType: true, valueMmolL: true, measuredAt: true },
+    const { record, skipped } = await this.createOrSkipDuplicate({
+      patientId,
+      resultType: isDetect ? resolveResultType(valueMmolL as number) : input.resultType,
+      valueMmolL: valueMmolL === null ? null : new Prisma.Decimal(valueMmolL.toFixed(1)),
+      mealContext: input.mealContext,
+      measuredAt: input.measuredAt,
+      operatorId: input.operatorId,
+      testStrip: isDetect ? (input.testStrip ?? null) : null,
+      remark: input.remark?.trim() ? input.remark.trim() : null,
     });
 
     const row = await this.prisma.patient.findUnique({
@@ -93,11 +111,45 @@ export class GlucoseService {
 
     return {
       id: record.id,
+      skipped,
       resultType: record.resultType,
       valueMmolL: record.valueMmolL === null ? null : Number(record.valueMmolL),
       measuredAt: formatDateTime(record.measuredAt) ?? '',
       item: toListItem(row),
     };
+  }
+
+  /**
+   * 写入血糖记录；命中唯一约束 `(patientId, measuredAt)` 时按**幂等**处理。
+   *
+   * 重复提交（连点、网络重试）不抛错，回读已有记录并置 `skipped = true`，
+   * 由前端提示"已有记录，未重复保存"。其他写库错误原样抛出，避免掩盖故障。
+   */
+  private async createOrSkipDuplicate(
+    data: Prisma.GlucoseRecordUncheckedCreateInput,
+  ): Promise<{ record: GlucoseRecordSummary; skipped: boolean }> {
+    try {
+      const record = await this.prisma.glucoseRecord.create({
+        data,
+        select: GLUCOSE_RECORD_SUMMARY_SELECT,
+      });
+      return { record, skipped: false };
+    } catch (error) {
+      if (!isUniqueConstraintViolation(error)) {
+        throw error;
+      }
+      const existing = await this.prisma.glucoseRecord.findUnique({
+        where: {
+          patientId_measuredAt: { patientId: data.patientId, measuredAt: data.measuredAt },
+        },
+        select: GLUCOSE_RECORD_SUMMARY_SELECT,
+      });
+      if (!existing) {
+        // 唯一约束命中却回读不到：并发删除等异常情况，保留原始错误便于排查
+        throw error;
+      }
+      return { record: existing, skipped: true };
+    }
   }
 
   /** 记录者必须是存在且在职的用户；否则按字段级校验错误返回 */

@@ -61,7 +61,7 @@ function createService() {
   const prisma = {
     patient: { findUnique: vi.fn() },
     user: { findFirst: vi.fn().mockResolvedValue({ id: 'u-nurse' }) },
-    glucoseRecord: { create: vi.fn() },
+    glucoseRecord: { create: vi.fn(), findUnique: vi.fn() },
   };
   return { prisma, service: new GlucoseService(prisma as unknown as PrismaService) };
 }
@@ -194,5 +194,58 @@ describe('GlucoseService.create — 添加血糖', () => {
       code: ERROR_CODES.VALIDATION_FAILED,
     });
     expect(prisma.glucoseRecord.create).not.toHaveBeenCalled();
+  });
+
+  it('正常录入 skipped=false', async () => {
+    const result = await service.create(deptUser, 'p-1', createInput());
+
+    expect(result.skipped).toBe(false);
+    expect(prisma.glucoseRecord.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('同患者同检测时间重复提交：命中唯一约束后幂等跳过，返回已有记录且不抛错', async () => {
+    prisma.glucoseRecord.create.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+        code: 'P2002',
+        clientVersion: '5.22.0',
+        meta: { target: ['patientId', 'measuredAt'] },
+      }),
+    );
+    prisma.glucoseRecord.findUnique.mockResolvedValueOnce({
+      id: 'g-existing',
+      resultType: '1',
+      valueMmolL: new Prisma.Decimal('6.1'),
+      measuredAt,
+    });
+
+    const result = await service.create(deptUser, 'p-1', createInput({ valueMmolL: 8.9 }));
+
+    expect(result.skipped).toBe(true);
+    expect(result.id).toBe('g-existing');
+    // 返回的是已有记录的值，而不是本次提交值
+    expect(result.valueMmolL).toBe(6.1);
+    expect(result.item.id).toBe('p-1');
+    expect(prisma.glucoseRecord.findUnique).toHaveBeenCalledWith({
+      where: { patientId_measuredAt: { patientId: 'p-1', measuredAt } },
+      select: { id: true, resultType: true, valueMmolL: true, measuredAt: true },
+    });
+  });
+
+  it('唯一约束命中但回读不到记录时保留原始错误，不掩盖故障', async () => {
+    const conflict = new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+      code: 'P2002',
+      clientVersion: '5.22.0',
+    });
+    prisma.glucoseRecord.create.mockRejectedValueOnce(conflict);
+    prisma.glucoseRecord.findUnique.mockResolvedValueOnce(null);
+
+    await expect(service.create(deptUser, 'p-1', createInput())).rejects.toBe(conflict);
+  });
+
+  it('写库出现非唯一约束错误时原样抛出', async () => {
+    prisma.glucoseRecord.create.mockRejectedValueOnce(new Error('connection reset'));
+
+    await expect(service.create(deptUser, 'p-1', createInput())).rejects.toThrow('connection reset');
+    expect(prisma.glucoseRecord.findUnique).not.toHaveBeenCalled();
   });
 });
