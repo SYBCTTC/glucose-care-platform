@@ -105,13 +105,14 @@ packages/
 - 已知取舍：`createGlucoseSchema` 的 code 白名单来自 `@gc/shared` 的 `TIME_SLOTS`（静态），库里新增时段必须同步 shared，否则提交被 10001 拒绝（见 `docs/COMMON-DATA.md` 已知约束）
 - 手工录入时 `operatorId` 必须记录当前医护 ID（**留痕**）
 
-### 4.5 去重（**当前未实现，属目标态**）
-> 现状：`GlucoseRecord`（`schema.prisma:148`）无 `dedupeKey`，服务端无唯一约束兜底，
-> 同一患者同一 `measuredAt` 重复提交会落**两条记录**。这是已知缺口，不是允许的行为。
+### 4.5 去重（唯一约束兜底，已落地 2026-10-28）
+> 实现：`@@unique([patientId, measuredAt])`（唯一索引 `GlucoseRecord_patientId_measuredAt_key`）。
+> **没有** `dedupeKey` 字段，也不要再拼 `manual:{...}` / `device:{...}` 键。
 
-- 落地前必须先走 Prisma schema + migration 人工评审，**不得在业务代码里假装该字段存在**
-- 规格（恢复时按此实现）：手工录入 `manual:{patientId}:{measuredAtISO}`，设备上传 `device:{deviceId}:{measuredAtISO}`
-- 唯一约束冲突时**静默跳过**（幂等），不得抛错
+- 同一患者同一 `measuredAt` 只允许一条记录；重复提交（连点、网络重试）命中 P2002 时**幂等跳过**，不得抛错
+- 命中时接口返回 `skipped: true` 并回读已有记录；前端必须提示"未重复保存"，**不得提示成功**
+- 迁移遇历史重复组会**直接失败并报出组数**，不静默删除医疗记录，需人工确认后清理
+- 将来若要允许"同一时间点多来源各一条"（设备+手工），必须先改本约束，属契约变更
 
 ### 4.6 CGM 扩展（**当前未预留，属目标态**）
 > 现状（2026-10-22 重构后简化重建，见 `docs/ARCHITECTURE.md:43-60`）：`GlucoseRecord` 仅
