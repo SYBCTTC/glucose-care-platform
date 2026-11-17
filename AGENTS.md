@@ -84,7 +84,8 @@ packages/
 - **数据库统一存储 `mmol/L`**（字段 `valueMmolL`，精度 1 位小数）
 - `rawValue` + `rawUnit`（原始值与单位）：**当前 schema 未实现**，恢复需走 schema 评审；接口只收 `mmol/L`
 - 换算：**1 mmol/L = 18 mg/dL**；`mg/dL → mmol/L` 除以 18
-- 换算函数**只允许**使用 `packages/shared/src/glucose/units.ts`，**禁止在别处硬编码 18**
+- 换算函数**只允许**放在 `packages/shared/src/glucose/`（该目录当前**仅有 `schema.ts`，尚无换算函数**）；
+  需要支持 `mg/dL` 时先在此新建换算入口并走共享包流程，**禁止在别处硬编码 18**
 
 ### 4.2 时间
 - `measuredAt`：**血糖实际测量时间**（手工录入时由医护填写），业务主时间
