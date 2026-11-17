@@ -34,7 +34,12 @@ function row(overrides: Record<string, unknown> = {}) {
 }
 
 function createService() {
-  const prisma = { timeSlot: { findMany: vi.fn().mockResolvedValue([]) } };
+  const prisma = {
+    timeSlot: {
+      findMany: vi.fn().mockResolvedValue([]),
+      findFirst: vi.fn().mockResolvedValue(null),
+    },
+  };
   return { prisma, service: new TimeSlotService(prisma as unknown as PrismaService) };
 }
 
@@ -96,5 +101,44 @@ describe('TimeSlotService.list — 时段公共数据', () => {
     for (const call of prisma.timeSlot.findMany.mock.calls) {
       expect(call[0].where).not.toHaveProperty('departmentId');
     }
+  });
+});
+
+describe('TimeSlotService.findByCode — 录入前的时段可用性校验', () => {
+  let service: TimeSlotService;
+  let prisma: ReturnType<typeof createService>['prisma'];
+
+  beforeEach(() => {
+    ({ service, prisma } = createService());
+  });
+
+  it('按 code 精确查询，只取校验需要的两列', async () => {
+    await service.findByCode(deptUser, 'FASTING');
+
+    expect(prisma.timeSlot.findFirst).toHaveBeenCalledWith({
+      where: { code: 'FASTING' },
+      select: { code: true, enabled: true },
+    });
+  });
+
+  it('停用项也要查出来：由调用方区分「不存在」与「已停用」', async () => {
+    prisma.timeSlot.findFirst.mockResolvedValue({ code: 'FASTING', enabled: false });
+
+    expect(await service.findByCode(deptUser, 'FASTING')).toEqual({
+      code: 'FASTING',
+      enabled: false,
+    });
+  });
+
+  it('code 不存在返回 null', async () => {
+    prisma.timeSlot.findFirst.mockResolvedValue(null);
+
+    expect(await service.findByCode(deptUser, 'NOPE')).toBeNull();
+  });
+
+  it('时段是全院基础数据：无患者数据范围的角色同样可查', async () => {
+    await service.findByCode(noneUser, 'FASTING');
+
+    expect(prisma.timeSlot.findFirst.mock.calls[0][0].where).not.toHaveProperty('departmentId');
   });
 });

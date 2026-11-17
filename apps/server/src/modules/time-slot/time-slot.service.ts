@@ -52,4 +52,19 @@ export class TimeSlotService {
       }),
     );
   }
+
+  /**
+   * 按 code 取时段（**含停用项**），供录入类接口做运行时校验；返回 null 表示库里没有这个 code。
+   *
+   * 时段可用性只能查库判断：`@gc/shared` 的静态 `TIME_SLOTS` 已降级为 seed 数据源，
+   * 拿它做白名单会在"库里新增/停用了时段"时误判。
+   * 与 list() 同样走 DICT 数据范围（buildScopeWhere 对 DICT 返回 {}，即全院可见），保持口径一致。
+   */
+  async findByCode(
+    user: AuthenticatedUser,
+    code: string,
+  ): Promise<{ code: string; enabled: boolean } | null> {
+    const where = { ...buildScopeWhere(user, RESOURCE.DICT), code } as Prisma.TimeSlotWhereInput;
+    return this.prisma.timeSlot.findFirst({ where, select: { code: true, enabled: true } });
+  }
 }

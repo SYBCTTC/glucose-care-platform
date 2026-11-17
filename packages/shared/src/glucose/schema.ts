@@ -1,6 +1,5 @@
 import { z } from 'zod';
 import { dateTimeStringSchema } from '../date';
-import { TIME_SLOTS } from '../dict/time-slots';
 import type { PatientListItem } from '../patient/schema';
 
 /**
@@ -8,7 +7,9 @@ import type { PatientListItem } from '../patient/schema';
  * 安全与业务约定：
  *  1. 存储唯一单位 mmol/L，入参只接受 mmol/L，不接受 mg/dL；
  *  2. `0`/`1`/`2`（偏低/正常/偏高）由服务端按阈值判定，**禁止由前端提交**；
- *  3. `3`~`9`（Low/High/拒检/外出/请假/已吃饭/未进食）是人工选择的结果类型，无血糖值。
+ *  3. `3`~`9`（Low/High/拒检/外出/请假/已吃饭/未进食）是人工选择的结果类型，无血糖值；
+ *  4. `mealContext` 是动态数据（表 `TimeSlot`）的 code，本契约只校验格式，
+ *     "是否存在且启用"由服务端查库判定，不通过返回 `10001` + 字段级 details。
  */
 
 /** 血糖合法范围（mmol/L，含边界），与 AGENTS.md 4.3 一致 */
@@ -73,11 +74,14 @@ const testStripSchema = z
   .max(TEST_STRIP_MAX, `试纸数量不能大于 ${TEST_STRIP_MAX}`);
 
 /**
- * 时段码白名单：时段本身是动态数据（表 TimeSlot），但 **code 是契约**（落库值），
- * 因此这里用静态清单校验；新增时段必须同时补 @gc/shared 的 TIME_SLOTS 与库数据，
- * 否则接口会以「检测时段不在字典范围内」拒绝（10001）。
+ * 时段码长度上限，与 `TimeSlot.code @db.VarChar(32)` / `GlucoseRecord.mealContext @db.VarChar(32)` 对齐。
+ *
+ * 这里**只做格式校验，不做白名单**：时段是动态数据（表 `TimeSlot`，接口 `GET /time-slots`），
+ * code 是否存在、是否启用只能查库判断。服务端 `GlucoseService` 在写库前做运行时校验，
+ * 不通过返回 `10001` + `{ field: 'mealContext' }`。
+ * 曾用 `@gc/shared` 的静态 `TIME_SLOTS` 做白名单，导致库里新增时段而未同步 shared 时误拒合法提交。
  */
-const TIME_SLOT_CODES = TIME_SLOTS.map((slot) => slot.code);
+export const MEAL_CONTEXT_MAX = 32;
 
 /**
  * 添加血糖（POST /patients/:id/glucose）入参。
@@ -93,11 +97,12 @@ export const createGlucoseSchema = z
       (value) => value.getTime() <= Date.now() + 60_000,
       '检测时间不能晚于当前时间',
     ),
-    /** 检测时段，取值见 TIME_SLOTS.code（含「随机」） */
+    /** 检测时段码，取值见 TimeSlot.code（含「随机」RANDOM）；是否存在且启用由服务端查库校验 */
     mealContext: z
-      .string()
+      .string({ invalid_type_error: '请选择检测时段' })
       .trim()
-      .refine((code) => TIME_SLOT_CODES.includes(code), '检测时段不在字典范围内'),
+      .min(1, '请选择检测时段')
+      .max(MEAL_CONTEXT_MAX, '检测时段不合法'),
     /** 「检测」或 3~9；0/1/2 由服务端判定 */
     resultType: z.enum(GLUCOSE_ENTRY_RESULT_TYPES, {
       errorMap: () => ({ message: '检测结果类型不合法' }),

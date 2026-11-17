@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import {
-  getFallbackTimeSlots,
-  pickTimeSlotByTime,
-  TIME_SLOT_CATEGORY,
-  TIME_SLOTS,
-  timeToMinutes,
-} from './time-slots';
+import { pickTimeSlotByTime, TIME_SLOT_CATEGORY, TIME_SLOTS, timeToMinutes } from './time-slots';
+import type { TimeSlotOption } from './time-slots';
 
-const slots = getFallbackTimeSlots();
+/**
+ * 测试夹具：把 seed 清单补成接口下发形态。
+ * 运行时已无静态兜底（getFallbackTimeSlots 已移除），这里仅为构造 pickTimeSlotByTime 的入参。
+ */
+const slots: TimeSlotOption[] = TIME_SLOTS.map((slot) => ({
+  ...slot,
+  timeScope: slot.startTime && slot.endTime ? `${slot.startTime}-${slot.endTime}` : null,
+  enabled: true,
+}));
 
 describe('timeToMinutes', () => {
   it('正常时间转分钟数', () => {

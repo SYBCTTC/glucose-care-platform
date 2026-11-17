@@ -5,8 +5,13 @@
  * 前端登录后随公共数据一次性加载进 `useCommonDataStore().timeSlots`。
  * 本文件保留三类内容：
  *  1. `TIME_SLOT_CATEGORY`：type 取值语义（0 强化 / 1 普通 / 4 特殊）；
- *  2. `TIME_SLOTS`：默认时段，作 seed 灌库数据源 + 动态数据缺失时的兜底 label；
- *  3. `pickTimeSlotByTime`：按检测时间求所属普通时段（录入默认值，后续报表归组复用）。
+ *  2. `TIME_SLOTS`：**仅 seed 灌库数据源**（`apps/server/prisma/seed.ts`），运行时一律以库数据为准；
+ *  3. `pickTimeSlotByTime`：按检测时间求所属普通时段（录入默认值，后续报表归组复用），入参必须是接口下发的时段。
+ *
+ * ⚠️ 本文件**不再提供任何静态兜底**（原 `getFallbackTimeSlots` / `getTimeSlotLabel` 已移除）：
+ *  - 时段可用性由服务端查 `TimeSlot` 表运行时校验，静态清单兜底会让"库里已停用/已改名"的时段
+ *    在前端看起来仍可选，提交后才被拒，反而更难排查；
+ *  - 用静态名称兜底历史记录的 code，会掩盖库数据缺失。取不到名称时直接展示 code，问题可见。
  *
  * 口径（与业务确认过）：
  *  - 只有**普通时段**要求 00:00~24:00 全覆盖、不重叠、不跨零点，区间左闭右开 `[startTime, endTime)`；
@@ -49,14 +54,18 @@ export interface TimeSlotOption {
   enabled: boolean;
 }
 
-/** 默认时段（seed 灌库用，也是动态数据不可用时的兜底） */
+/** seed 灌库用的时段形态（`timeScope` 是派生字段、`enabled` 由库默认值给出，均不在 seed 里写） */
 export type TimeSlotSeed = Omit<TimeSlotOption, 'timeScope' | 'enabled'>;
 
 /**
- * 默认时段清单：普通时段覆盖 00:00~24:00 且首尾相接，特殊/强化无区间。
+ * 默认时段清单：**仅供 `apps/server/prisma/seed.ts` 幂等 upsert 灌库**。
+ * 普通时段覆盖 00:00~24:00 且首尾相接，特殊/强化无区间。
  *
  * 区间与控糖目标按常见口径给出（空腹/餐前 4.4~7.0，餐后 4.4~10.0，睡前 5.0~8.3），
  * 属**待业务校准的初始值**：上线前由临床确认后在库里直接调整数据即可，无需改代码。
+ *
+ * ⚠️ 禁止在运行时用它做校验或展示兜底：库里的时段可能已新增、改名或停用，
+ * 以本清单为准会与库数据漂移。校验走服务端查 `TimeSlot` 表，展示走 `GET /time-slots`。
  */
 export const TIME_SLOTS: TimeSlotSeed[] = [
   // 普通时段：00:00 → 24:00 首尾相接，左闭右开
@@ -193,20 +202,6 @@ export const TIME_SLOTS: TimeSlotSeed[] = [
     sortOrder: 130,
   },
 ];
-
-/** 内置默认时段的接口形态：动态数据不可用时兜底，保证录入/展示不被阻塞 */
-export function getFallbackTimeSlots(): TimeSlotOption[] {
-  return TIME_SLOTS.map((slot) => ({
-    ...slot,
-    timeScope: slot.startTime && slot.endTime ? `${slot.startTime}-${slot.endTime}` : null,
-    enabled: true,
-  }));
-}
-
-/** 兜底：按 code 取时段名（动态数据缺失时用，保证历史记录不展示裸 code） */
-export function getTimeSlotLabel(code: string): string {
-  return TIME_SLOTS.find((slot) => slot.code === code)?.name ?? code;
-}
 
 /** 'HH:mm'（两位时分）→ 当日分钟数；非法格式（含 24:00 以外的越界）返回 null */
 export function timeToMinutes(time: string): number | null {

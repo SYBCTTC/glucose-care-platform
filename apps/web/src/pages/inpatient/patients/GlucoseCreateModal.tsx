@@ -277,6 +277,9 @@ export default function GlucoseCreateModal({
           <Select
             options={timeSlotOptions}
             placeholder="请选择检测时段"
+            // 时段接口失败时不再用静态清单兜底（见 store/common-data.ts），
+            // 这里明确告知原因，避免被误读成"库里没有可选时段"
+            notFoundContent="时段数据未加载，请刷新页面重试"
             // 手动选择后不再被时间自动推荐覆盖
             onChange={() => {
               mealContextTouched.current = true;

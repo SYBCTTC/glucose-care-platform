@@ -2,8 +2,10 @@ import { ERROR_CODES, formatDateTime, GLUCOSE_ENTRY_DETECT } from '@gc/shared';
 import type { CreateGlucoseInput } from '@gc/shared';
 import { Prisma } from '@prisma/client';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { BusinessException } from '../../common/exceptions/business.exception';
 import type { PrismaService } from '../../common/prisma/prisma.service';
 import type { AuthenticatedUser } from '../../common/types';
+import type { TimeSlotService } from '../time-slot/time-slot.service';
 import { GlucoseService } from './glucose.service';
 
 /** 本科室护士：可录入本科室住院患者的血糖 */
@@ -63,15 +65,27 @@ function createService() {
     user: { findFirst: vi.fn().mockResolvedValue({ id: 'u-nurse' }) },
     glucoseRecord: { create: vi.fn(), findUnique: vi.fn() },
   };
-  return { prisma, service: new GlucoseService(prisma as unknown as PrismaService) };
+  // 时段默认存在且启用；单个用例用 mockResolvedValueOnce 覆盖为停用或不存在
+  const timeSlots = {
+    findByCode: vi.fn().mockResolvedValue({ code: 'FASTING', enabled: true }),
+  };
+  return {
+    prisma,
+    timeSlots,
+    service: new GlucoseService(
+      prisma as unknown as PrismaService,
+      timeSlots as unknown as TimeSlotService,
+    ),
+  };
 }
 
 describe('GlucoseService.create — 添加血糖', () => {
   let service: GlucoseService;
   let prisma: ReturnType<typeof createService>['prisma'];
+  let timeSlots: ReturnType<typeof createService>['timeSlots'];
 
   beforeEach(() => {
-    ({ service, prisma } = createService());
+    ({ service, prisma, timeSlots } = createService());
     // 同一方法被查两次：先查状态/科室，再查列表项；按 select 形状区分
     prisma.patient.findUnique.mockImplementation(
       (args: { select?: Record<string, unknown> } | undefined) =>
@@ -192,6 +206,39 @@ describe('GlucoseService.create — 添加血糖', () => {
 
     await expect(service.create(deptUser, 'p-1', createInput())).rejects.toMatchObject({
       code: ERROR_CODES.VALIDATION_FAILED,
+    });
+    expect(prisma.glucoseRecord.create).not.toHaveBeenCalled();
+  });
+
+  it('检测时段查库校验：库里存在且启用即放行，不再受静态清单限制', async () => {
+    timeSlots.findByCode.mockResolvedValueOnce({ code: 'CUSTOM_SLOT', enabled: true });
+
+    await service.create(deptUser, 'p-1', createInput({ mealContext: 'CUSTOM_SLOT' }));
+
+    expect(timeSlots.findByCode).toHaveBeenCalledWith(deptUser, 'CUSTOM_SLOT');
+    expect(prisma.glucoseRecord.create.mock.calls[0][0].data.mealContext).toBe('CUSTOM_SLOT');
+  });
+
+  it('检测时段在库里不存在时按字段级校验错误返回（10001），且不写库', async () => {
+    timeSlots.findByCode.mockResolvedValueOnce(null);
+
+    const error = await service.create(deptUser, 'p-1', createInput()).catch((e: unknown) => e);
+
+    expect(error).toMatchObject({ code: ERROR_CODES.VALIDATION_FAILED });
+    expect((error as BusinessException).getResponse()).toMatchObject({
+      details: [{ field: 'mealContext', message: '检测时段不存在' }],
+    });
+    expect(prisma.glucoseRecord.create).not.toHaveBeenCalled();
+  });
+
+  it('检测时段已停用时拒绝新录入（10001），且不写库', async () => {
+    timeSlots.findByCode.mockResolvedValueOnce({ code: 'FASTING', enabled: false });
+
+    const error = await service.create(deptUser, 'p-1', createInput()).catch((e: unknown) => e);
+
+    expect(error).toMatchObject({ code: ERROR_CODES.VALIDATION_FAILED });
+    expect((error as BusinessException).getResponse()).toMatchObject({
+      details: [{ field: 'mealContext', message: '检测时段已停用' }],
     });
     expect(prisma.glucoseRecord.create).not.toHaveBeenCalled();
   });

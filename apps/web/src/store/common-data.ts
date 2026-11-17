@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { DICT_TYPE, getFallbackTimeSlots, getTimeSlotLabel } from '@gc/shared';
+import { DICT_TYPE } from '@gc/shared';
 import type { DictItemOption, DictType, TimeSlotOption } from '@gc/shared';
 import {
   fetchDepartments,
@@ -32,7 +32,7 @@ interface CommonDataState {
   getStaffName: (id: string) => string;
   /** 取某类字典项；未加载或类型未下发时返回空数组，调用方不用判空 */
   dictItems: (dictType: DictType) => DictItemOption[];
-  /** 按 code 取时段名；库里没有时回退内置默认，保证历史记录不展示裸 code */
+  /** 按 code 取时段名；库里查不到时返回 code 本身（不用静态清单掩盖数据缺失） */
   getTimeSlotName: (code: string) => string;
 }
 
@@ -63,10 +63,12 @@ export const useCommonDataStore = create<CommonDataState>((set, get) => ({
         fetchStaff(),
         fetchDevices(),
         fetchDictItems(DICT_TYPE.GLUCOSE_RESULT),
-        // 时段单独容错：接口异常时回退内置默认，避免连累科室/人员/设备全部拿不到
+        // 时段单独容错：接口异常时置空，避免连累科室/人员/设备全部拿不到。
+        // 不再回退静态清单——那会让库里已停用/已改名的时段在前端看起来仍可选，提交后才被服务端拒。
+        // 置空后录入弹窗的时段下拉为空并给出提示，是可见的降级，好过静默用错数据。
         fetchTimeSlots().catch((error: unknown) => {
-          console.warn('[common-data] 时段加载失败，回退内置默认时段', error);
-          return getFallbackTimeSlots();
+          console.warn('[common-data] 时段加载失败，时段下拉将不可用', error);
+          return [] as TimeSlotOption[];
         }),
       ]);
       set({
@@ -91,6 +93,7 @@ export const useCommonDataStore = create<CommonDataState>((set, get) => ({
 
   dictItems: (dictType) => get().dicts[dictType] ?? [],
 
-  getTimeSlotName: (code) =>
-    get().timeSlots.find((slot) => slot.code === code)?.name ?? getTimeSlotLabel(code),
+  // GET /time-slots 会一并下发停用项，历史记录的 code 正常都能取到名称；
+  // 真取不到说明库数据有问题，展示裸 code 比用静态名称掩盖更容易被发现。
+  getTimeSlotName: (code) => get().timeSlots.find((slot) => slot.code === code)?.name ?? code,
 }));

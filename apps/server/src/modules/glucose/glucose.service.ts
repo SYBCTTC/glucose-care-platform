@@ -14,6 +14,7 @@ import { BusinessException } from '../../common/exceptions/business.exception';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import type { AuthenticatedUser } from '../../common/types';
 import { PATIENT_PUBLIC_SELECT, toListItem } from '../patient/patient.service';
+import { TimeSlotService } from '../time-slot/time-slot.service';
 
 /**
  * 按阈值判定数值型结果类型（0 偏低 / 1 正常 / 2 偏高）。
@@ -54,7 +55,10 @@ function isUniqueConstraintViolation(error: unknown): boolean {
 
 @Injectable()
 export class GlucoseService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly timeSlots: TimeSlotService,
+  ) {}
 
   /**
    * 添加血糖（手工录入）。
@@ -65,7 +69,9 @@ export class GlucoseService {
    *  3. 记录者只校验"用户存在且在职"，不校验角色/科室：
    *     操作人下拉是本科室医护（DY-OPERATOR），但系统管理员等账号不在其中，
    *     默认值（当前登录账号）不能因此被拒；审计日志仍记录真实操作人与记录者；
-   *  4. 结果类型 0/1/2 一律由服务端判定，前端只能提交「检测」或 3~9。
+   *  4. 结果类型 0/1/2 一律由服务端判定，前端只能提交「检测」或 3~9；
+   *  5. 检测时段是动态数据（表 TimeSlot），写库前查库校验 code 存在且启用，
+   *     不通过按字段级校验错误返回（10001 + field=mealContext），**不落库**。
    */
   async create(
     user: AuthenticatedUser,
@@ -85,6 +91,7 @@ export class GlucoseService {
     }
 
     await this.assertOperatorExists(input.operatorId);
+    await this.assertTimeSlotUsable(user, input.mealContext);
 
     const isDetect = input.resultType === GLUCOSE_ENTRY_DETECT;
     // Zod 已保证「检测」时血糖值必填，其余类型血糖值/试纸为空
@@ -162,5 +169,24 @@ export class GlucoseService {
       const details: FieldError[] = [{ field: 'operatorId', message: '记录者不存在或已停用' }];
       throw new BusinessException(ERROR_CODES.VALIDATION_FAILED, undefined, details);
     }
+  }
+
+  /**
+   * 检测时段必须在 `TimeSlot` 表里存在且 `enabled`；否则按字段级校验错误返回。
+   *
+   * 时段是动态数据，可用性只能查库判断：`@gc/shared` 的静态 `TIME_SLOTS` 已降级为 seed 数据源，
+   * 拿它做白名单会在"库里新增了时段"时误拒合法提交。
+   * 停用项仍由 `GET /time-slots` 下发（历史血糖要按 code 回显名称），但**不得用于新录入**。
+   * 本校验在写库之前，失败不产生任何数据。
+   */
+  private async assertTimeSlotUsable(user: AuthenticatedUser, code: string): Promise<void> {
+    const slot = await this.timeSlots.findByCode(user, code);
+    if (slot?.enabled) {
+      return;
+    }
+    const details: FieldError[] = [
+      { field: 'mealContext', message: slot ? '检测时段已停用' : '检测时段不存在' },
+    ];
+    throw new BusinessException(ERROR_CODES.VALIDATION_FAILED, undefined, details);
   }
 }
