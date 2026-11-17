@@ -107,7 +107,7 @@
 - `pnpm lint` / 前后端 `tsc --noEmit` / `pnpm test` 全绿。
 - 接口实测（sys.admin）：建档成功；重复住院号 `40002`；护士填医生 `10001(nurseId)`；`status=DISCHARGED` → `10001`；`hba1c=100.5` → `10001`。
 - 数据权限实测（nurse.li，DEPARTMENT）：向心内科建档 `30002`，向本科室内分泌科建档成功。
-- 落库核对：`gender=UNSPECIFIED`、`diabetesType=TYPE_2`、`hba1c=7.5`、`nurseId`/`doctorId` 关联正确、`nameMasked=欧*明`、身份证/手机号仅存密文与脱敏值。
+- 落库核对：`gender=UNSPECIFIED`、`diabetesType=TYPE_2`、`hba1c=7.5`、`nurseId`/`doctorId` 关联正确、`nameMasked=欧阳*`（复姓保留前两字，脱敏统一走 `@gc/shared`）、身份证/手机号仅存密文与脱敏值。
 - 审计核对：`PATIENT_CREATE` 成功/失败各留痕。
 
 ## 9. 待确认项
@@ -123,9 +123,14 @@
    本条建议的修法即为最终实现；同时修掉 `detail.requestId` 误存控制器类名的问题。
    存量审计行不回改（append-only），按 `createdAt` 分界解读。
 
-3. **仍未修 → 已给出三个方案待需求人选择**：建档后审计 `targetType/targetId` 为空。
-   拦截器只从 URL `params.id` 取值（`audit-log.interceptor.ts:117-118`），`POST /patients` 没有 `:id`，
-   新患者 ID 只在**响应体**里。
+3. ~~建档后审计 `targetType/targetId` 为空~~
+   ✅ **已按方案 A 实现**（2026-11-17，需求人选定）。原问题：拦截器只从 URL `params.id` 取值，
+   `POST /patients` 没有 `:id`，新患者 ID 只在**响应体**里。
+   实现要点：`@Audit` 增加 `AuditOptions { targetType?, targetIdFrom? }`，元数据合并为单个
+   `AUDIT_META_KEY`（`SetMetadata` 返回类型带 `KEY` 属性，组合两个装饰器需类型断言，不如一次存全）；
+   拦截器新增 `resolvePath` 手写点号遍历（不用 `eval` / `new Function`），只接受非空字符串；
+   `params.id` 优先，取不到才回退 `targetIdFrom`；`targetType` 未显式声明时沿用"有 ID 即 `PATIENT`"的旧口径。
+   下表保留作决策记录。
 
    范围核实（2026-11-17）：全仓带 `@Audit` 的路由共 6 个，其中 5 个路径含 `:id` 且**都是患者相关**
    （`PATIENT_VIEW` / `PATIENT_UPDATE` / `PATIENT_MANAGE` / `GLUCOSE_CREATE`），只有 `PATIENT_CREATE` 取不到 ID。
@@ -138,5 +143,11 @@
    | B | service 创建成功后自己调 `AuditService` 补写一条带 `targetId` 的审计 | 精确，还能记录变更前后关键字段 | 与拦截器机制并存 → 两套写入路径，容易漏写或重复写；service 被审计关注点污染，违反分层职责 | 中 |
    | C | 拦截器隐式约定：响应体里有 `data.id` 就当 `targetId` | 零配置 | 隐式约定不可控：列表接口的 `data.id`、嵌套对象的 `id` 语义都不同，容易误取；出问题难排查 | 小但不推荐 |
 
-   推荐 **A**：与现有 `AUDIT_DETAIL_ALLOW_LIST` 的白名单思路一致（显式声明、集中管控），
-   且能一次解决 `targetType` 硬编码。属审计逻辑改动，按 `AGENTS.md` §6-5 需人工评审后实施。
+   选 **A** 的理由：与现有 `AUDIT_DETAIL_ALLOW_LIST` 的白名单思路一致（显式声明、集中管控），
+   且顺带解决 `targetType` 硬编码——现在给设备/字典的 `:id` 路由加 `@Audit` 时显式传 `targetType` 即可，
+   不会再被误记成 `PATIENT`。
+
+   验证：拦截器单测 19 → 31 项，新增覆盖建档取到 `data.id`、多层路径 `data.item.id`、
+   `params.id` 优先不被覆盖、未声明时保持旧行为（两者皆空）、显式 `targetType` 无 ID 时仍写入、
+   路径不存在/中途非对象/取到数字/取到对象/取到空串五种情况均留空不抛错、
+   `__proto__.toString` 不被当成 ID 也不污染对象、失败路径 payload 为 null 时留空且原异常仍抛出。

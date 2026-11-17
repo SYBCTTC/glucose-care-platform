@@ -148,12 +148,20 @@ packages/
   项目规范要求业务错误一律抛 `BusinessException`，全仓无人抛 `ForbiddenException`，
   按类型判会让越权全部落成 `FAILED`、审计表筛不出越权尝试。失败时 `detail.errorCode` 带具体码
 - `detail.requestId` 必须与响应头 `X-Request-Id` 同值（取自 `request.requestId`），用于串联审计行、服务端日志与用户报障
+- `targetId` 默认取 URL `params.id`；**创建类接口没有 `:id`**，必须显式声明从响应信封取，
+  如 `@Audit('PATIENT_CREATE', { targetType: 'PATIENT', targetIdFrom: 'data.id' })`，否则审计对象恒为空、事后无法按患者追溯。
+  给非患者对象的 `:id` 路由加 `@Audit` 时也必须显式传 `targetType`，否则会被误记成 `'PATIENT'`
 - **查询患者血糖数据属于"敏感操作"，必须逐条留痕**
 - 审计日志表 **append-only**：只增，不改，不删（数据库层回收 UPDATE/DELETE 权限）
 - 留存 **≥ 180 天**，导出与删除操作同样留痕
 
 ### 5.3 个人信息保护
-- 患者姓名、身份证号、手机号：**加密存储**，列表接口默认返回**脱敏**值（`张*三`、`138****1234`）
+- 患者姓名、身份证号、手机号：**加密存储**，列表接口默认返回**脱敏**值（`张**`、`138****1234`）
+- 脱敏**唯一实现是 `packages/shared/src/mask`**（`import { maskName, maskPhone, maskIdCard } from '@gc/shared'`）：
+  姓名只保留姓氏（复姓保留前两字，`欧阳明`→`欧阳*`）、身份证保留前 3 后 4、手机号保留前 3 后 4。
+  **禁止另写脱敏函数**（`field-crypto` 曾有一套同名不同规则的副本，2026-11-17 已删除）。
+  两条不变量：脱敏值**绝不等于原值**、**输出长度等于输入长度**。
+  ⚠️ `*Masked` 是**落库字段**，改脱敏规则必须同时跑 `pnpm db:remask -- --apply` 刷新存量，否则新旧格式混杂
 - 加密方案（2026-11-17 起）：**确定性 AES-256-GCM**，密钥取环境变量 `PATIENT_FIELD_KEY`（经 HKDF 派生加密钥与 nonce 钥）。
   **唯一实现是 `apps/server/src/common/crypto/field-crypto.ts`，`prisma/seed.ts` 也走它**，禁止另写一份
 - 为什么必须**确定性**（nonce 由明文派生，同明文→同密文）：患者列表的姓名筛选靠密文等值匹配

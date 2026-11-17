@@ -33,12 +33,25 @@ globs:
 - 只认数字码：Prisma 的 `PrismaClientKnownRequestError.code` 是 `'P2002'` 这类字符串，不得当业务码
 - `detail.requestId` 必须取 `request.requestId`（`RequestIdMiddleware` 生成，与响应头 `X-Request-Id` 同值）。
   **不是** `context.getClass().name`——那是修掉的旧 bug，会导致审计行无法与日志、用户报障关联
+
+### `targetType` / `targetId` 取值（2026-11-17 起）
+- 默认从 URL `params.id` 取；未显式声明 `targetType` 时，取到 ID 即记 `'PATIENT'`（沿用旧口径）
+- **创建类接口 URL 没有 `:id`**，新对象 ID 只在响应信封里，必须显式声明：
+  `@Audit('PATIENT_CREATE', { targetType: 'PATIENT', targetIdFrom: 'data.id' })`
+- `targetIdFrom` 是相对**响应信封** `{ code, message, data }` 的点号路径（拦截器在 `ResponseInterceptor` 外层，
+  看到的是已包装的信封）。取值用手写遍历，**禁止 `eval` / `new Function`**
+- 只接受非空字符串：路径写错时表现为审计字段留空（可发现），而不是写进一个错误的值（难发现）
+- 给**非患者**对象的 `:id` 路由加 `@Audit` 时**必须显式传 `targetType`**，否则会被误记成 `'PATIENT'`
 - 存量审计行不回改：`db8f363` 之前的行越权仍记 `FAILED`、`requestId` 仍是类名、无 `errorCode`，按 `createdAt` 分界解读
 
 ## 个人信息
 - 姓名/身份证/手机号：加密存储 + 列表脱敏
 - **加密唯一实现**：`apps/server/src/common/crypto/field-crypto.ts`，`prisma/seed.ts` 也走它，
   **禁止另写一份**（seed 曾自带 `cipher()` 副本，会绕过加密写 base64）
+- **脱敏唯一实现**：`packages/shared/src/mask`（从 `@gc/shared` 导入）。
+  `field-crypto` 曾有一套同名但规则不同的副本，2026-11-17 已删除，**禁止重新实现**。
+  规则与两条不变量（不得回显原值、输出长度等于输入长度）见 `permissions.md` 第 6 条。
+  改脱敏规则必须同时跑 `pnpm db:remask -- --apply` 刷新存量 `*Masked`（落库字段）
 - 算法：**确定性 AES-256-GCM**（SIV 式，nonce 由明文派生），密钥取 `PATIENT_FIELD_KEY`。
   必须确定性——姓名筛选靠密文等值匹配，随机 IV 会让搜索失效。**禁止改成随机 IV**，
   除非同时加独立盲索引列（表结构变更，需评审）

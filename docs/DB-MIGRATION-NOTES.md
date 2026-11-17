@@ -112,6 +112,18 @@ SELECT action::text, COUNT(*) FROM "AuditLog" GROUP BY action ORDER BY 2 DESC;
 | 脚本 | 用途 | 执行 |
 |---|---|---|
 | `prisma/reencrypt-patient-fields.ts` | 把 `Patient.*Cipher` / `User.phoneCipher` 的旧方案密文重加密为当前的确定性 AES-256-GCM | `pnpm db:reencrypt`（试运行）→ `pnpm db:reencrypt -- --apply`（写库） |
+| `prisma/remask-patient-fields.ts` | 按 `@gc/shared` 当前脱敏规则重算 `Patient.nameMasked` / `idCardMasked` / `phoneMasked` | `pnpm db:remask`（试运行）→ `pnpm db:remask -- --apply`（写库） |
+
+**`db:remask` 什么时候必须跑**：任何改动脱敏规则之后。`*Masked` 是**落库字段**而非读取时计算，
+不跑就会新旧格式混杂（列表里一部分 `张**`、一部分 `张*丰`）。
+脱敏值一律由**密文解出的明文**重算，不从旧脱敏值反推——反推会继承旧规则的泄漏。
+因此库里是 AES 密文时**必须先配 `PATIENT_FIELD_KEY`**；未配密钥且出现解密失败行时脚本以退出码 1 报错，
+不会假装成功。
+
+**2026-11-17 的执行记录**（脱敏统一到 `@gc/shared` 后）：扫描 1001 行，更新 114 行
+（`nameMasked` 111 条三字名由 `张*丰` 改 `张**`、`idCardMasked` 4 条由前 3 后 2 改前 3 后 4），
+`phoneMasked` 3 条 11 位号码两种规则一致故未变，解密失败 0；二次试运行 0 行变更（幂等）。
+只读复核 1008 个字段全部满足四条不变量：等于当前规则重算值、不等于明文、长度与明文一致、含遮掩符。
 
 **什么时候必须跑**：首次配置 `PATIENT_FIELD_KEY` 之后；或加密算法/密文前缀版本号变更之后。
 不跑的后果：存量行仍是 `enc:<base64>`（等于明文），而新写入是 AES，**姓名等值查询会漏掉存量行**

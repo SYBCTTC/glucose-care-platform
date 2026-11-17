@@ -158,6 +158,6 @@
 | 异常值复核 | schema 评审 | 原 P3-5；需给 `GlucoseRecord` 加状态字段，并登记 `41002`。`41006 GLUCOSE_RECORD_LOCKED` 已提前占位（`8e22a4b`）但无代码抛出 |
 | 导出框架（异步任务 + 水印 + 审批留痕） | P5、P6 | 原 P3-6 与 P5 导出共用；需登记 `41008` |
 | ~~血糖阈值改为读 `SystemConfig`~~ | ~~P5-3~~ | ✅ **已完成**（2026-11-17，`f97fe85`）：`SystemConfigService` 读取并校验，`DEFAULT_ALERT_RANGE` 已删除 |
-| 审计 `targetId` 支持从响应体取（建档留痕） | 审计 | `POST /patients` 无 `:id`，审计 `targetId` 为空；三个候选方案见 `docs/specs/patient-create.md` §9-3，推荐方案 A |
+| ~~审计 `targetId` 支持从响应体取（建档留痕）~~ | ~~审计~~ | ✅ **已完成**（2026-11-17，方案 A）：`@Audit` 支持 `targetType` / `targetIdFrom`，建档审计已能落到新患者 ID |
+| ~~统一两套脱敏实现~~ | ~~安全~~ | ✅ **已完成**（2026-11-17）：统一到 `@gc/shared` 的 `mask`，删除 `field-crypto` 副本，并修掉 shared 原有的明文回显与复姓误判缺陷；存量 `*Masked` 已用 `pnpm db:remask` 刷新 |
 | 详情页明文回显（含访问留痕） | 安全 | `decryptField` 已具备解密能力但无接口调用；按 `AGENTS.md` §5.3 必须同时加审计，需单独出规格 |
-| 统一两套脱敏实现 | 安全 | `@gc/shared` 的 `mask` 与 `field-crypto` 的 `mask*` 同名不同规则，前者是死代码；`*Masked` 是落库字段，换实现会让存量行与新行格式不一致，需先裁定 |
