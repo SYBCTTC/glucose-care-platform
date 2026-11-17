@@ -78,7 +78,7 @@ SELECT action::text, COUNT(*) FROM "AuditLog" GROUP BY action ORDER BY 2 DESC;
 
 | # | 事项 | 现状 | 影响 |
 |---|---|---|---|
-| 1 | 审计 `detail` 是否记录 `skipped` | 去重跳过时仍写一条 `GLUCOSE_CREATE` 且 `result = SUCCESS`，`skipped` 不在 `AUDIT_DETAIL_ALLOW_LIST` 中 | 审计有记录、库里没有数据，事后只能靠字段推断；改动属审计逻辑，需人工评审 |
+| 1 | 审计 `detail` 是否记录 `skipped` | ✅ **已决策并落地**（2026-11-17，方案 A，提交 `629b16c`）：`skipped` 已加入 `AUDIT_DETAIL_ALLOW_LIST`，`result` 仍为 `SUCCESS`，三值语义不变 | 审计 `detail.skipped` 可区分"写入了"与"未重复保存"；已补拦截器单测 4 项 + 真实链路验证 |
 | 2 | 库漂移清理（见 §2） | 草案已出并复核（§3），待人工批准；2 项应改 schema、1 项动库 | 每次 `migrate dev` 都会提示重置，容易误操作 |
 | 3 | `TIME_SLOTS` 静态白名单 | 库里新增时段而 shared 未同步时，提交会被 10001 拒 | 属契约变更，需排期改为查 `TimeSlot` 表运行时校验 |
 
