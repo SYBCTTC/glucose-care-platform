@@ -2,9 +2,10 @@ import { ERROR_CODES, formatDateTime, GLUCOSE_ENTRY_DETECT } from '@gc/shared';
 import type { CreateGlucoseInput } from '@gc/shared';
 import { Prisma } from '@prisma/client';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { BusinessException } from '../../common/exceptions/business.exception';
+import { BusinessException } from '../../common/exceptions/business.exception';
 import type { PrismaService } from '../../common/prisma/prisma.service';
 import type { AuthenticatedUser } from '../../common/types';
+import type { SystemConfigService } from '../system/system-config.service';
 import type { TimeSlotService } from '../time-slot/time-slot.service';
 import { GlucoseService } from './glucose.service';
 
@@ -69,12 +70,18 @@ function createService() {
   const timeSlots = {
     findByCode: vi.fn().mockResolvedValue({ code: 'FASTING', enabled: true }),
   };
+  // 阈值默认与 seed 一致（3.9 / 16.7）；单个用例可覆盖，用于验证"改配置即改判定"
+  const systemConfig = {
+    getGlucoseAlertThreshold: vi.fn().mockResolvedValue({ low: 3.9, high: 16.7 }),
+  };
   return {
     prisma,
     timeSlots,
+    systemConfig,
     service: new GlucoseService(
       prisma as unknown as PrismaService,
       timeSlots as unknown as TimeSlotService,
+      systemConfig as unknown as SystemConfigService,
     ),
   };
 }
@@ -83,9 +90,10 @@ describe('GlucoseService.create — 添加血糖', () => {
   let service: GlucoseService;
   let prisma: ReturnType<typeof createService>['prisma'];
   let timeSlots: ReturnType<typeof createService>['timeSlots'];
+  let systemConfig: ReturnType<typeof createService>['systemConfig'];
 
   beforeEach(() => {
-    ({ service, prisma, timeSlots } = createService());
+    ({ service, prisma, timeSlots, systemConfig } = createService());
     // 同一方法被查两次：先查状态/科室，再查列表项；按 select 形状区分
     prisma.patient.findUnique.mockImplementation(
       (args: { select?: Record<string, unknown> } | undefined) =>
@@ -103,7 +111,8 @@ describe('GlucoseService.create — 添加血糖', () => {
     });
   });
 
-  it('「检测」按阈值判定结果类型：< 3.9 偏低，3.9~16.7 正常，> 16.7 偏高', async () => {
+  it('「检测」按 SystemConfig 阈值判定：< low 偏低，low~high 正常，> high 偏高（含边界）', async () => {
+    // 阈值取自 systemConfig 模拟（3.9 / 16.7，与 seed 一致），不是代码里的常量
     for (const [value, expected] of [
       [0.6, '0'],
       [3.9, '1'],
@@ -123,6 +132,56 @@ describe('GlucoseService.create — 添加血糖', () => {
       expect(args.data.resultType).toBe(expected);
       expect(args.data.valueMmolL).toBeInstanceOf(Prisma.Decimal);
     }
+  });
+
+  it('改配置即改判定：阈值调成 5.0/12.0 后，同一个 8.9 仍正常，但 4.5 变偏低、13.0 变偏高', async () => {
+    systemConfig.getGlucoseAlertThreshold.mockResolvedValue({ low: 5.0, high: 12.0 });
+
+    for (const [value, expected] of [
+      [4.5, '0'],
+      [5.0, '1'],
+      [8.9, '1'],
+      [12.0, '1'],
+      [13.0, '2'],
+    ] as const) {
+      prisma.glucoseRecord.create.mockResolvedValueOnce({
+        id: 'g-1',
+        resultType: expected,
+        valueMmolL: new Prisma.Decimal(value.toFixed(1)),
+        measuredAt,
+      });
+      await service.create(deptUser, 'p-1', createInput({ valueMmolL: value }));
+      const calls = prisma.glucoseRecord.create.mock.calls;
+      expect(calls[calls.length - 1][0].data.resultType).toBe(expected);
+    }
+  });
+
+  it('阈值读取失败（配置缺失/非法）时拒绝写入，不退回任何默认常量', async () => {
+    systemConfig.getGlucoseAlertThreshold.mockRejectedValueOnce(
+      new BusinessException(ERROR_CODES.INTERNAL_ERROR),
+    );
+
+    await expect(service.create(deptUser, 'p-1', createInput())).rejects.toMatchObject({
+      code: ERROR_CODES.INTERNAL_ERROR,
+    });
+    expect(prisma.glucoseRecord.create).not.toHaveBeenCalled();
+  });
+
+  it('选择 3~9 时不读系统配置（无需阈值判定，省一次查询）', async () => {
+    prisma.glucoseRecord.create.mockResolvedValueOnce({
+      id: 'g-3',
+      resultType: '5',
+      valueMmolL: null,
+      measuredAt,
+    });
+
+    await service.create(
+      deptUser,
+      'p-1',
+      createInput({ resultType: '5', valueMmolL: null, testStrip: null }),
+    );
+
+    expect(systemConfig.getGlucoseAlertThreshold).not.toHaveBeenCalled();
   });
 
   it('选择 3~9 时不落血糖值与试纸，resultType 原样入库', async () => {

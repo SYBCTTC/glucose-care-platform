@@ -12,6 +12,7 @@ import { PatientModule } from './modules/patient/patient.module';
 import { DictModule } from './modules/dict/dict.module';
 import { GlucoseModule } from './modules/glucose/glucose.module';
 import { TimeSlotModule } from './modules/time-slot/time-slot.module';
+import { SystemModule } from './modules/system/system.module';
 import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
@@ -32,6 +33,8 @@ import { PrismaModule } from './common/prisma/prisma.module';
     DictModule,
     GlucoseModule,
     TimeSlotModule,
+    // 系统参数（SystemConfig）：血糖告警阈值等，只读；维护接口属 ROADMAP P5-3
+    SystemModule,
   ],
   providers: [
     // 顺序即执行顺序：先鉴权 → 再权限校验 → 再强制改密拦截 → 最后审计留痕

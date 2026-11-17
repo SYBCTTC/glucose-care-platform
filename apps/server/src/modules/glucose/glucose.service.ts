@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import {
-  DEFAULT_ALERT_RANGE,
   ERROR_CODES,
   formatDateTime,
   GLUCOSE_ENTRY_DETECT,
@@ -14,19 +13,23 @@ import { BusinessException } from '../../common/exceptions/business.exception';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import type { AuthenticatedUser } from '../../common/types';
 import { PATIENT_PUBLIC_SELECT, toListItem } from '../patient/patient.service';
+import type { GlucoseAlertThreshold } from '../system/system-config.service';
+import { SystemConfigService } from '../system/system-config.service';
 import { TimeSlotService } from '../time-slot/time-slot.service';
 
 /**
  * 按阈值判定数值型结果类型（0 偏低 / 1 正常 / 2 偏高）。
  *
- * 阈值暂用 @gc/shared 的 DEFAULT_ALERT_RANGE 占位常量，
- * 接口就绪后应改为读取 SystemConfig（alert.low / alert.high），禁止分散硬编码。
+ * 阈值来自 `SystemConfig`（`glucose.low_threshold` / `glucose.high_threshold`），
+ * 由 `SystemConfigService` 读取并校验合法性；**禁止**在此硬编码，
+ * 也禁止引入默认常量兜底（原 `@gc/shared` 的 `DEFAULT_ALERT_RANGE` 已删除）。
+ * 区间口径：`value < low` → '0'，`low <= value <= high` → '1'，`value > high` → '2'。
  */
-function resolveResultType(valueMmolL: number): string {
-  if (valueMmolL < DEFAULT_ALERT_RANGE.low) {
+function resolveResultType(valueMmolL: number, threshold: GlucoseAlertThreshold): string {
+  if (valueMmolL < threshold.low) {
     return '0';
   }
-  if (valueMmolL <= DEFAULT_ALERT_RANGE.high) {
+  if (valueMmolL <= threshold.high) {
     return '1';
   }
   return '2';
@@ -58,6 +61,7 @@ export class GlucoseService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly timeSlots: TimeSlotService,
+    private readonly systemConfig: SystemConfigService,
   ) {}
 
   /**
@@ -70,6 +74,8 @@ export class GlucoseService {
    *     操作人下拉是本科室医护（DY-OPERATOR），但系统管理员等账号不在其中，
    *     默认值（当前登录账号）不能因此被拒；审计日志仍记录真实操作人与记录者；
    *  4. 结果类型 0/1/2 一律由服务端判定，前端只能提交「检测」或 3~9；
+   *     判定阈值读 `SystemConfig`（`glucose.low_threshold` / `glucose.high_threshold`），
+   *     配置缺失或非法时抛 10000 拒绝写入，**不退回任何默认常量**；
    *  5. 检测时段是动态数据（表 TimeSlot），写库前查库校验 code 存在且启用，
    *     不通过按字段级校验错误返回（10001 + field=mealContext），**不落库**。
    */
@@ -96,10 +102,14 @@ export class GlucoseService {
     const isDetect = input.resultType === GLUCOSE_ENTRY_DETECT;
     // Zod 已保证「检测」时血糖值必填，其余类型血糖值/试纸为空
     const valueMmolL = isDetect ? (input.valueMmolL as number) : null;
+    // 只有「检测」需要按阈值分类；3~9 是人工选择的结果类型，不必读系统配置
+    const resultType = isDetect
+      ? resolveResultType(valueMmolL as number, await this.systemConfig.getGlucoseAlertThreshold())
+      : input.resultType;
 
     const { record, skipped } = await this.createOrSkipDuplicate({
       patientId,
-      resultType: isDetect ? resolveResultType(valueMmolL as number) : input.resultType,
+      resultType,
       valueMmolL: valueMmolL === null ? null : new Prisma.Decimal(valueMmolL.toFixed(1)),
       mealContext: input.mealContext,
       measuredAt: input.measuredAt,

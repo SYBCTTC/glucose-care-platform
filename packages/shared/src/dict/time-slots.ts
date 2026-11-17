@@ -250,13 +250,9 @@ export function pickTimeSlotByTime(slots: TimeSlotOption[], time: string): TimeS
   return null;
 }
 
-/**
- * 默认预警范围（mmol/L）。
- * 原属 SystemConfig（低血糖 < low，高血糖 > high），现阶段以常量占位；
- * 接口就绪后应改为读取 SystemConfig（key: alert.low / alert.high），禁止在业务代码硬编码。
- * 注意：与时段控糖目标（TimeSlot.valueDown/valueUp）不是同一概念，后者按时段细化。
- */
-export const DEFAULT_ALERT_RANGE = {
-  low: 3.9,
-  high: 16.7,
-} as const;
+// 此处曾有 `DEFAULT_ALERT_RANGE = { low: 3.9, high: 16.7 }` 占位常量，已于 2026-11-17 删除。
+// 血糖告警阈值一律存 `SystemConfig` 表（key: `glucose.low_threshold` / `glucose.high_threshold`），
+// 由服务端 `SystemConfigService.getGlucoseAlertThreshold()` 读取并校验。
+// **禁止**在共享包或业务代码里重新引入默认阈值常量：那会让"改配置不生效"这类问题无声发生，
+// 而血糖判定结果直接进病历。配置读不到时服务端抛 10000 拒绝写入，不退回默认值。
+// 注意：全局告警阈值与时段控糖目标（`TimeSlot.valueDown` / `valueUp`）不是同一概念，后者按时段细化。
