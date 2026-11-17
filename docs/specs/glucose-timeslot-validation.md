@@ -1,14 +1,15 @@
 # 检测时段改为运行时校验（去静态白名单）
 
-> 状态：**待评审**（2026-11-17 提出，尚未实现）
+> 状态：✅ **已实现**（2026-11-17 评审通过并落地，提交 `67804a4`）
 > 来源：`docs/DB-MIGRATION-NOTES.md` §4 待决策第 3 项
-> 按 `docs/FEATURE-SPEC-TEMPLATE.md` 填写。**属契约变更**（要动 `packages/shared` 的共享 Zod），批准后再实现。
+> 按 `docs/FEATURE-SPEC-TEMPLATE.md` 填写。属契约变更（动了 `packages/shared` 的共享 Zod），已按规格先行流程评审。
+> §11 的 4 项待确认已由需求人裁定，结论见该节。
 
 ### 0. 元信息 ⭐
 
 | 项 | 内容 |
 |---|---|
-| 阶段号 | 待确认（见 §11-4：ROADMAP 里 P3 标注"已整体移除"，但血糖模块实际已重建） |
+| 阶段号 | **P2-10 血糖录入**的后续增强（血糖业务跟着患者走，原 P3 号段已并入 P2，见 `docs/ROADMAP.md`） |
 | 模块 | `glucose` + `shared` + `time-slot` |
 | 优先级 | P2 |
 | 依赖 | 已落地的 `TimeSlot` 表（`4553fc6`）与 `GET /time-slots`（`e2971b9`）；无新依赖 |
@@ -32,10 +33,10 @@
 
 - 不改 `TimeSlot` 表结构，**不产生迁移**
 - 不改 `GET /time-slots` 契约与 `TimeSlotOption` 形状
-- 不动 `TIME_SLOTS` 静态常量的既有两个用途（seed 数据源 + 动态数据缺失时的兜底 label）
+- ~~不动 `TIME_SLOTS` 静态常量~~ → **评审后改为降级并移除兜底**，见 §11-3
 - 不做时段管理页（新增/停用仍走 `seed.ts` 或 DBA）
 - 不引入缓存层（理由见 §9）
-- 不改前端组件（理由见 §6）
+- ~~不改前端组件~~ → 评审后 `GlucoseCreateModal` 加了一行空态提示、`store/common-data.ts` 去掉静态兜底，见 §11-3
 
 ### 2. 数据模型变更
 
@@ -86,7 +87,7 @@
 | 数据范围 | 不变：`@RequireDataScope(RESOURCE.PATIENT)` + `assertInScope`。`TimeSlot` 是**院内公共基础数据**，查它不引入新的数据权限（对照 `TimeSlotService.list` 用 `buildScopeWhere(user, RESOURCE.DICT)`，对 DICT 返回 `{}`，即全院可见） |
 | 脱敏字段 | 无新增；时段名称非个人信息 |
 | 加密字段 | 无 |
-| 审计 | 动作仍为 `GLUCOSE_CREATE`；时段校验失败是 `10001`（非 `3xxxx`），按现有口径不落 DENIED 审计；`AUDIT_DETAIL_ALLOW_LIST` 不变（已含 `mealContext`、`skipped`） |
+| 审计 | 动作仍为 `GLUCOSE_CREATE`，`AUDIT_DETAIL_ALLOW_LIST` 不变（已含 `mealContext`、`skipped`）。时段校验失败时 `AuditLogInterceptor` 会落一条 **`result='FAILED'`** 的审计（拦截器对非 `ForbiddenException` 一律记 FAILED，`ForbiddenException` 才记 DENIED），`detail` 含请求里的白名单字段 + `error:'denied_or_failed'`，**不含错误消息文本**。已实测：3 次提交（1 成功 + 2 被拒）产生 3 条 `GLUCOSE_CREATE` 审计行 |
 
 ⚠️ 实现方式待评审（§11-1）：`GlucoseService` 直接 `prisma.timeSlot.findUnique`，
 还是走 `TimeSlotModule` 导出的 `TimeSlotService`。`AGENTS.md` §3 要求跨模块调用走 module 导出，
@@ -94,14 +95,16 @@
 
 ### 6. 前端交互 ⭐
 
-- **无需改动**。`GlucoseCreateModal` 的时段下拉已只渲染 `timeSlots.filter(slot => slot.enabled)`
+- **下拉逻辑无需改动**。`GlucoseCreateModal` 的时段下拉已只渲染 `timeSlots.filter(slot => slot.enabled)`
   （第 88-102 行），数据来自 `useCommonDataStore().timeSlots`（`GET /time-slots`），
   正常操作**不可能**产生无效或停用的 code
 - 服务端 `10001` 已被 `handleSubmit` 的 catch 映射到表单项（第 222-229 行），
   `mealContext` 的错误会挂在"检测时段"这一行，符合 `error-codes` 规则第 6 条
-- 唯一可感知变化：极端情况（弹窗打开后时段被停用）下，错误从"提交前本地拦截"变为"提交后字段级提示"
+- 可感知变化一：极端情况（弹窗打开后时段被停用）下，错误从"提交前本地拦截"变为"提交后字段级提示"
+- 可感知变化二（评审后新增，见 §11-3）：`/time-slots` 接口失败时下拉为空并提示
+  「时段数据未加载，请刷新页面重试」，不再用静态清单兜底；`getTimeSlotName` 取不到名称时返回 code 本身
 - 按钮级权限：不涉及
-- 可访问性：无 UI 变化
+- 可访问性：无变化（空态提示走 antd `notFoundContent`）
 
 ### 7. 错误码与前端行为 ⭐
 
@@ -145,15 +148,15 @@
 - [ ] 共享包三步已执行并验证副本：`pnpm --filter @gc/shared build` → `pnpm sync:shared` → 清 `apps/web/node_modules/.vite` 并重启（见 `.codebuddy/rules/shared-package.md`）
 - [ ] 文档同步 4 处：`AGENTS.md` §4.4 已知取舍、`docs/COMMON-DATA.md` 已知约束、`.codebuddy/rules/glucose-domain.md` BGM 节、`docs/DB-MIGRATION-NOTES.md` §4 第 3 项
 
-### 11. 待确认项
+### 11. 评审结论（2026-11-17 需求人裁定，均已实现）
 
-1. **实现方式**：`GlucoseService` 直接 `prisma.timeSlot.findUnique`（与现有直查 patient/user 一致），
-   还是 `GlucoseModule` import `TimeSlotModule` 并注入 `TimeSlotService`（更贴合 `AGENTS.md` §3 的跨模块约定，
-   但需 `TimeSlotModule` 导出该 service，且 `list()` 返回的是全量 DTO，用于单点校验偏重）？
-2. **停用语义**：停用时段是否只有"历史可展示、新录入拒绝"这一种语义？
-   是否需要第三种（如允许录入但给警示）？
-3. **静态常量降级**：是否把 `TIME_SLOTS` 明确降级为"仅 seed 源"，并移除 `getTimeSlotLabel` 的静态兜底
-   （当前兜底会用静态名称掩盖库数据缺失）？本 spec 默认**不动**，如需一并处理请指出。
-4. **阶段号与 ROADMAP**：`docs/ROADMAP.md` 把 P3 标为"已整体移除（2026-10-22）"，
-   但血糖模块实际已重建（`modules/glucose`、`modules/time-slot`、录入弹窗、唯一约束去重均在）。
-   本 spec 的阶段号需你确认；ROADMAP 的 P3/P4 进度也建议一并校正（属另一件事，未纳入本次范围）。
+1. **实现方式 → 走 `GlucoseModule` 模式**：`TimeSlotModule` 导出 `TimeSlotService`，
+   `GlucoseModule` 导入并注入；`TimeSlotService` 新增 `findByCode(user, code)` 做单点查询
+   （不复用返回全量 DTO 的 `list()`），与 `list()` 同样走 `buildScopeWhere(RESOURCE.DICT)`。
+2. **停用语义 → 只有「历史可展示、新录入拒绝」**，不设第三种（不做"允许录入但警示"）。
+3. **静态常量 → 降级并移除兜底**（超出本 spec 原默认的"不动"）：`TIME_SLOTS` 明确为仅 seed 数据源；
+   `getFallbackTimeSlots` 与 `getTimeSlotLabel` **一并删除**。
+   连带影响：`/time-slots` 接口失败时前端时段下拉为空并提示「时段数据未加载，请刷新页面重试」，
+   不再回退静态清单——静态兜底会让库里已停用/已改名的时段看起来仍可选，提交后才被拒。
+4. **阶段号 → P2-10**：血糖业务跟着患者走，`docs/ROADMAP.md` 已按实际代码重估，
+   原 P3 号段保留不复用（避免其他文档与 `routes.tsx` 里的 P4/P5 引用失效）。

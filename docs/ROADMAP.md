@@ -1,200 +1,160 @@
-# 项目开发计划 P0–P6（唯一权威路线图）
+# 开发路线图（ROADMAP）
 
-> 用途：后续所有开发按本表推进。**README 第八节"待办"已并入本表，以本文档编号为准。**
-> 状态更新规则：每完成一项，把 ✅/进展写回本文件，并在 PR/提交说明中引用阶段号（如 `P4-患者建档`）。
+> 本文件是**进度总览**。功能规格见 `docs/specs/`，错误码见 `docs/ERROR-CODES.md`，
+> 权限与数据范围见 `docs/PERMISSION-DESIGN.md`，领域口径见 `AGENTS.md` §4，公共数据见 `docs/COMMON-DATA.md`。
+> 接口契约**没有独立文档**，以 `apps/server/src/modules/*/**.controller.ts` 的路由与 `packages/shared/src/**/schema.ts` 的 Zod 为准。
+>
+> 最后核对：**2026-11-17**，按实际代码逐项复核（后端 9 个模块 / 17 个路由、前端 17 个页面文件、
+> 12 个迁移、12 个数据模型）。每项都标了依据，便于复核。
+>
+> **本次重估的两个结构性调整**
+>
+> 1. **血糖业务跟着患者走**：血糖不再是独立阶段。录入已实现并挂在患者下
+>    （`POST /patients/:id/glucose`、前端 `pages/inpatient/patients/GlucoseCreateModal.tsx`），
+>    因此原 P3 的已完成部分并入 P2；**P3 号段保留不复用**，避免其他文档与代码里的 P4/P5 引用失效
+>    （如 `routes.tsx` 的 Placeholder 文案、`ERROR-CODES.md` 的 P5 导出依赖）。
+> 2. 原「P3 已整体移除（2026-10-22）」的说明**作废**：`GlucoseRecord` 表、`glucose` 模块、
+>    `GLUCOSE_CREATE` 权限点均已存在。当时移除的是旧设计里的**独立血糖模块**
+>    （查询/汇总/导出/数据管理），那部分仍未实现，转入下方「待立项」。
 
-## 总览
+## 阶段总览
 
-| 阶段 | 主题 | 进度 | 状态 |
+| 阶段 | 名称 | 状态 | 完成度 |
 |---|---|---|---|
-| P0 | 工程底座与规范 | 100% | ✅ 完成 |
-| P1 | 认证与会话 | 100%（双因子待院方确认） | ✅ 完成 | — |
-| P2 | 权限体系（功能 + 数据） | 75% | 🟡 服务端 + 前端路由守卫完成；剩按钮守卫、JWT 瘦身、变更生效 |
-| P3 | 血糖核心业务（BGM） | 已移除 | ⚪ 2026-10-22 整体移除（路由/页面/API/权限点/表） |
-| P4 | 患者管理 | 0% | ⬜ 未开始（后端接口 + 前端页面 + 真实加密） |
-| P5 | 设备管理与导出 | 0% | ⬜ 未开始 |
-| P6 | 审计、系统管理与生产交付 | 8% | ⬜ 仅阈值配置与 Swagger 生产关闭落地 |
+| P1 | 基础框架与安全 | ✅ 已完成 | 100% |
+| P2 | 患者管理（**含血糖录入**） | 🔄 进行中 | 70% |
+| P3 | ~~血糖（独立阶段）~~ | ⚪ 已并入 P2，号段保留 | — |
+| P4 | 设备与实时数据 | 🔄 起步 | 10% |
+| P5 | 系统管理 | 🔄 起步（仅只读下发） | 10% |
+| P6 | 审计日志与合规 | 🔄 写入已落地，查询未开始 | 10% |
+| P7 | 部署与交付 | ⚪ 未开始 | 0% |
 
-整体完成度约 **50%**（可控范围内）。
-
-```mermaid
-flowchart LR
-    P0[P0 底座] --> P1[P1 认证] --> P2[P2 权限] --> P3[P3 血糖] --> P4[P4 患者] --> P5[P5 设备+导出] --> P6[P6 审计+交付]
-    style P0 fill:#c8e6c9
-    style P1 fill:#dcedc8
-    style P2 fill:#fff9c4
-    style P3 fill:#fff9c4
-    style P4 fill:#eeeeee
-    style P5 fill:#eeeeee
-    style P6 fill:#eeeeee
-```
+图例：✅ 已完成 · 🔄 进行中 · ⚠️ 部分完成 · ❌ 未开始 · ⚪ 不适用
 
 ---
 
-## P0 工程底座与规范 —— ✅ 100%
+## P1. 基础框架与安全 —— ✅ 100%
 
-| 交付物 | 位置 |
-|---|---|
-| pnpm workspace + TS/ESLint/Vitest 门禁 | 根 `package.json`、`eslint.config.mjs` |
-| 共享契约包 `@gc/shared` | `packages/shared`（Zod 契约、单位换算、角色权限字典、错误码、脱敏） |
-| UI 设计令牌与主题 | `docs/UI-DESIGN-TOKENS.md`、`apps/web/src/styles/tokens.ts` |
-| 数据模型 7 张表 | `apps/server/prisma/schema.prisma`（Department/User/Role/UserRole/Patient/Device/PatientDeviceBinding/AuditLog/SystemConfig） |
-| 迁移 + 脱敏演示数据 | `prisma/migrations`、`prisma/seed.ts` |
-| 架构与合规文档 | `docs/ARCHITECTURE.md`、`docs/COMPLIANCE-CHECKLIST.md` |
-| AI 强制规则 | `.codebuddy/rules/*`（错误码、权限、共享包流程、血糖领域、安全审计、UI 令牌） |
-
-**验收**：`pnpm lint && pnpm typecheck && pnpm test && pnpm build` 全绿 ✅
+| 编号 | 功能 | 状态 | 依据 |
+|---|---|---|---|
+| P1-1 | Monorepo 脚手架 | ✅ | `apps/server`（NestJS）+ `apps/web`（Vite/React）+ `packages/shared` |
+| P1-2 | 数据库与 Prisma | ✅ | 12 个迁移、12 个模型；嵌入式 PostgreSQL 本地开发 |
+| P1-3 | 认证与会话 | ✅ | `POST /auth/login`、`/auth/logout`、`GET /auth/profile`、`POST /auth/change-password` |
+| P1-4 | 权限与数据范围 | ✅ | `PermissionsGuard` + `@RequirePermissions` / `@RequireDataScope`；前端 `PermissionRoute` |
 
 ---
 
-## P1 认证与会话 —— ✅ 100%
+## P2. 患者管理（含血糖录入）—— 🔄 70%
 
-### 已完成
-- 登录 / 登出 / `profile`；JWT（当前内嵌 `permissions/roles/dataScope`）
-- 登录失败 5 次锁定 30 分钟（基于审计表统计，无额外状态表）
-- 会话空闲 30 分钟自动登出（前后端一致）
-- 统一错误码落地（`20001/20002/20003`…）+ `requestId` + 响应拦截器
-- 审计拦截器写 `SUCCESS/DENIED/FAILED`
-- **首次登录强制改密**（2026-10-21 完成）：`User.mustChangePassword` + `MustChangePasswordGuard`
-  （强制期间仅放行改密/登出/profile）+ 改密接口 + 不可关闭弹窗 + 个人资料弹窗
-- **密码策略统一**：长度 8–64，小写/大写/数字/符号四类至少三项，不得包含用户名或姓名
-  （共享实现 `packages/shared/src/auth/password.ts`，登录与改密共用）
+| 编号 | 功能 | 状态 | 依据 / 缺口 |
+|---|---|---|---|
+| P2-1 | 患者查询（住院/出院） | ✅ | `GET /patients/inpatient`、`GET /patients/discharged`；`PatientTable` / `PatientCardGrid` / `PatientFilter` |
+| P2-2 | 患者详情 | ⚠️ 后端完成 | `GET /patients/:id`（`PATIENT_VIEW` + 审计）已有；**前端无独立详情页**，信息在列表弹窗与 `LastGlucose` 中展示 |
+| P2-3 | 患者建档 | ✅ | `POST /patients`（`PATIENT_CREATE` + 审计）；`PatientCreateModal` |
+| P2-4 | 患者编辑 | ✅ | `PATCH /patients/:id`（`PATIENT_UPDATE` + 审计，`detail.changedFields` 记变更字段名）；`PatientEditModal` |
+| P2-5 | 入院办理 | ✅ | `POST /patients/:id/admit`（`PATIENT_MANAGE` 审计）。**原 ROADMAP 未列此项** |
+| P2-6 | 患者出院 | ❌ | 无出院接口。`PatientStatus` 已有 `DISCHARGED`，出院列表查询已可用，只差状态流转接口 |
+| P2-7 | 批量导入 | ❌ | — |
+| P2-8 | 虚拟病区 | ⚠️ | 页面、筛选与查询已通（`useVirtualWardQuery` + `VirtualWardFilter` / `VirtualWardToolbar`）；**列表 UI 未开发**（页面内已自标注） |
+| P2-9 | 卡片视图 | ✅ | `PatientCardGrid` |
+| P2-10 | **血糖录入**（原 P3-1） | ✅ | `POST /patients/:id/glucose`（`GLUCOSE_CREATE` + 审计）；`GlucoseCreateModal` + `LastGlucose`；结果类型 `0/1/2` 服务端判定；唯一约束 `(patientId, measuredAt)` 幂等去重（`data.skipped`）；检测时段查 `TimeSlot` 表运行时校验 |
 
-### 未完成（等院方确认后启动）
-| 任务 | 说明 | 涉及 |
+> 完成度按 10 项计：6 项 ✅ + 2 项 ⚠️（各计半）+ 2 项 ❌ = **70%**。
+
+---
+
+## P3. 血糖 —— ⚪ 已并入 P2（号段保留，不复用）
+
+血糖业务**跟着患者走**，不再作为独立阶段：
+
+- **已实现**（计入 P2-10）：手工录入，含结果类型判定、试纸数量、记录者校验、
+  时段查库校验、唯一约束幂等去重、`GLUCOSE_CREATE` 审计。
+- **未实现，转入「待立项」**（原 P3-2 ~ P3-7）：
+
+| 原编号 | 功能 | 状态 | 缺口 |
+|---|---|---|---|
+| P3-2 | 血糖查询 | ❌ | 目前只随患者列表下发最近一条（`LastGlucose`），无独立查询接口与页面 |
+| P3-3 | 日内血糖汇总 | ❌ | `GlucoseDailySummary` 表未建 |
+| P3-4 | 数据管理 | ❌ | 无作废/更正流程 |
+| P3-5 | 异常值复核 | ❌ | `GlucoseRecord` 无 `status` 字段；越界值当前由 `createGlucoseSchema` 直接拒为 `10001`，不入库 |
+| P3-6 | 血糖导出 | ❌ | 依赖 P5 导出框架（异步任务 + 水印 + 审批留痕） |
+| P3-7 | 血糖图表 | ❌ | — |
+
+> 旧设计的 `GLUCOSE_VIEW` / `GLUCOSE_INPUT` / `GLUCOSE_EXPORT` 三个**权限点未恢复**；
+> 它们作为 `AuditAction` 的**历史枚举值**保留在 schema 中（旧审计行仍在引用，
+> 见 `docs/DB-MIGRATION-NOTES.md` §2.3）。错误码 `41xxx` 号段的现状见 `docs/ERROR-CODES.md` §D5。
+
+---
+
+## P4. 设备与实时数据 —— 🔄 10%
+
+| 编号 | 功能 | 状态 | 依据 / 缺口 |
+|---|---|---|---|
+| P4-1 | 设备注册与绑定 | ⚠️ 起步 | `GET /devices` 只读列表已有；`Device` / `PatientDeviceBinding` 表已建；注册/绑定/解绑接口与前端页面（Placeholder）均未做 |
+| P4-2 | 设备数据接收 | ❌ | — |
+| P4-3 | 设备状态监控 | ❌ | — |
+| P4-4 | 设备校准管理 | ❌ | — |
+| P4-5 | 质控液管理 | ❌ | — |
+| P4-6 | 试纸管理 | ❌ | 录入时的 `testStrip`（试纸数量）已落库，但无批次/有效期管理 |
+
+---
+
+## P5. 系统管理 —— 🔄 10%
+
+> 本阶段目前只完成「**只读下发**」这一半：公共数据接口已通，管理（增删改）功能全部未做。
+
+| 编号 | 功能 | 状态 | 依据 / 缺口 |
+|---|---|---|---|
+| P5-1 | 时段设置 | ⚠️ | `GET /time-slots` 已实现（含停用项，供历史血糖回显）；`TimeSlot` 表 + seed 已有；**无维护接口**，前端「目标时段设置」是 Placeholder |
+| P5-2 | 字典管理 | ⚠️ | `GET /dicts/:dictType` 已实现；`DictItem` 表已有；无维护接口 |
+| P5-3 | 系统参数 | ❌ | `SystemConfig` 表已建但无接口；血糖阈值仍用 `@gc/shared` 的 `DEFAULT_ALERT_RANGE` 占位常量 |
+| P5-4 | 人员管理 | ⚠️ | `GET /staff`、`GET /departments` 只读下发已实现；无管理页面（Placeholder） |
+| P5-5 | 角色与权限管理 | ❌ | 角色与权限点是代码内静态定义（`@gc/shared` `roles.ts`），无配置界面 |
+
+---
+
+## P6. 审计日志与合规 —— 🔄 10%
+
+| 编号 | 功能 | 状态 | 依据 / 缺口 |
+|---|---|---|---|
+| P6-1 | 审计日志查询 | ⚠️ | **写入链路已全面落地**：`AuditLogInterceptor` + `@Audit` 覆盖 auth / patient / glucose 各动作，`detail` 走 `AUDIT_DETAIL_ALLOW_LIST` 白名单（不含患者身份信息与自由文本）；**查询接口与页面未做**（`/system/logs` 是 Placeholder） |
+| P6-2 | 审计报表 | ❌ | — |
+| P6-3 | 数据导出 | ❌ | — |
+| P6-4 | 数据留存 | ⚠️ | `AuditLog` 表已建且按 append-only 使用；≥180 天留存/归档/清理策略未实现 |
+
+---
+
+## P7. 部署与交付 —— ⚪ 0%
+
+| 编号 | 功能 | 状态 | 依据 / 缺口 |
+|---|---|---|---|
+| P7-1 | Docker 化部署 | ❌ | 仓库有 `docker-compose.yml`，**无 `Dockerfile`** |
+| P7-2 | CI/CD | ❌ | **无 `.github/workflows`**；目前靠 husky 预提交钩子 + 本地 `pnpm lint/typecheck/test` |
+| P7-3 | 验收测试 | ❌ | 已有单测（server 69 / shared 22 / web 10），无端到端验收用例集 |
+
+> 已具备但不计入本阶段：本地开发环境已脚本化（嵌入式 PostgreSQL + `pnpm dev:up` / `dev:down`）。
+
+---
+
+## 整体进度
+
+**约 40%**（按 32 个功能项加权：P1 4/4、P2 7/10、P4 0.2/6、P5 0.8/5、P6 0.5/4、P7 0/3）
+
+- ✅ 已完成：P1 全部；P2 的查询/建档/编辑/入院/卡片视图/**血糖录入**
+- 🔄 进行中：P2 详情与虚拟病区（各差前端）、P4 设备列表、P5 只读下发、P6 审计写入
+- ⚪ 未开始：患者出院与批量导入、设备数据链路、系统管理（增删改）、审计查询与报表、导出、部署与 CI
+
+> 与上一版（约 35%）的差异来自**按代码复核**而非新增功能：P2 补上了此前漏记的入院办理与血糖录入，
+> P5/P6 从 0%/5% 上调（只读下发接口与审计写入链路其实已落地），P2 详情与虚拟病区从「已完成」下调为「部分」。
+
+---
+
+## 待立项（原 P3 剩余项 + 跨阶段依赖）
+
+| 项 | 依赖 | 备注 |
 |---|---|---|
-| 1. 密码有效期提醒 | 已有 `passwordChangedAt`，到期前 N 天提示/强制更换 | `auth.service` + 前端 |
-| 2. 双因子（OTP/UKey） | 待院方确认方式 | — |
-
-### 已知遗留（P2 解决）
-改密成功后旧 JWT 无法立即失效（令牌不含权限版本）。缓解：`mustChangePassword` 为 true 的旧令牌
-仍会被 `MustChangePasswordGuard` 拦在业务接口之外；彻底解决依赖 P2 的 `pv` 机制。
-
----
-
-## P2 权限体系（功能权限 + 数据权限）—— 🟡 75%
-
-### 已完成（服务端 100%）
-- 权限点 16 个（初始 9 个 + 新增 7 个：ward/alert/quality/quality_manage/staff/staff_manage/role）+ 角色 5 个 + 数据范围 4 档，前后端同源字典
-- `PermissionsGuard` + `@RequirePermissions`
-- **数据权限统一出口**：`buildScopeWhere` / `assertInScope` / `canAccessResource` + `@RequireDataScope`
-- `30006` 角色无患者数据权限；跨科室 `30002`；缺权限点 `30004`
-- `/auth/profile` 下发 `roles` / `dataScope` / `permissionVersion`，`login` 返回 `expiresAt`
-- 脱敏工具 `maskIdCard/maskPhone/maskName/maskPatientNo`
-- 单元测试 18 项（`scope.util.spec.ts`）
-
-### 已完成（前端 P2-1，2026-10-21）
-- **路由守卫** `PermissionRoute` + 403 页：无权限不再进入页面（不跳登录）
-- **路由与菜单同源**：唯一配置 `apps/web/src/routes/routes.tsx` 的 `APP_ROUTES`
-- `SYS_ADMIN` 权限点补全为全部 9 个（原仅 2 个，守卫上线后会连业务页都进不去）
-- 收到 `30004` / `30002` 先重拉一次 `/auth/profile` 再提示（3 秒内只触发一次）
-- 守卫单测 6 项（`permission-route.spec.tsx`）
-- **左侧菜单与默认首页**（2026-10-22）：`APP_ROUTES` 以 `menuGroup` 聚合五大模块
-  （住院/设备/质控/系统/人员），无权限分组自动隐藏；`buildMenuTree` 纯函数 + 单测。
-  **移除工作台**，`/` 重定向至
-  `/inpatient/patients`，登录后默认进入「住院管理 - 患者管理」。
-
-### 未完成
-
-| # | 任务 | 阻断风险 |
-|---|---|---|
-| 2 | **按钮级守卫** `<Auth permission>` 组件 + `usePermission()` | 体验与合规 |
-| 3 | **JWT 瘦身**（方案 B：只带 `sub` + `pv`）+ 服务端权限缓存（进程内，多实例改 Redis） | 权限变更滞后 |
-| 4 | **权限变更即时生效** + 账号停用强制下线（`jti` 黑名单） | 等保"及时终止会话" |
-| 5 | `@RequireAllPermissions`（写操作需全部满足，而非任一） | 细粒度授权 |
-
----
-
-## P3 血糖核心业务（BGM）—— ⚪ 已整体移除（2026-10-22）
-
-> ⚠️ 本模块（录入/查询/汇总/导出/数据管理）已于 2026-10-22 重构中整体移除：路由/页面/API/
-> 权限点（GLUCOSE_VIEW/INPUT/EXPORT）/数据库表（GlucoseRecord、GlucoseDailySummary）均已删除。
-> 以下为历史规划，仅供后续重建血糖功能时参考。
-
-### 已完成（历史）
-- 手工录入：单位换算 → 统一 `mmol/L`、`dedupeKey` 幂等、超阈值自动置 `PENDING_REVIEW`
-- 分页查询、日汇总趋势（ECharts）、阈值从 `SystemConfig` 读取（禁止硬编码）
-- 前端录入页 + 工作台
-
-### 未完成
-
-| # | 任务 | 说明 |
-|---|---|---|
-| 1 | **患者选择器** | 当前手填 `patientId`（`GlucoseEntry.tsx:158`），依赖 P4 患者列表接口 |
-| 2 | **异常值复核** | `PENDING_REVIEW → NORMAL/REJECTED` 接口 + 页面；并发处理用 `41002 GLUCOSE_ALREADY_REVIEWED` |
-| 3 | **记录作废策略** | 明确"只增不改"：作废 = 置状态 + 留痕，禁止物理删除 |
-| 4 | 趋势页增强 | 大字号/打印友好、阈值区间着色、异常点标注 |
-| 5 | 接口集成测试 | 目前仅单元测试，需补 supertest 级用例（录入/幂等/越权/复核） |
-
----
-
-## P4 患者管理 —— 🟡 50%
-
-> 前置：App.tsx 现为 Placeholder；等保要求"列表不返回完整身份信息"。
-
-| # | 任务 | 关键点 |
-|---|---|---|
-| 1 | **真实加密替换占位** | `Patient.*Cipher` 现为 base64 占位（等保硬项）→ AES-256-GCM 或国密 SM4，密钥由环境变量/院方 KMS 注入，**禁止入库** |
-| 2 | 建档接口 ✅ 2026-10-26 | `POST /patients`（权限点 `patient:create`）；住院号唯一（`40002`）、写入 `*Masked`、审计 `PATIENT_CREATE`；责任医护需属所选科室 |
-| 3 | 列表接口 ✅ 2026-10-26 | 分页 + 脱敏 + 关键词（按脱敏值/住院号）+ `buildScopeWhere(RESOURCE.PATIENT)` |
-| 4 | 详情与按需查看 ⬜ | 默认脱敏；查看完整身份信息需 `PATIENT_MANAGE` + 单独接口 + 审计留痕 |
-| 5 | 归档 ⬜ | `archivedAt` 软删除；已归档患者禁止录血糖（`30003 PATIENT_ARCHIVED`） |
-| 6 | 前端页面 🟡 | 列表、卡片、筛选、添加患者弹窗 ✅；详情/编辑/归档待做 |
-
-**验收**：`dr.chen`（心内科）访问内分泌患者返回 `30002`；设备管理员访问返回 `30006`；列表不出现明文身份证。
-
----
-
-## P5 设备管理与导出 —— ⬜ 0%
-
-| # | 任务 | 关键点 |
-|---|---|---|
-| 1 | 设备注册 | SN 唯一（`42002`）、台账字段（采购/保修）、审计 |
-| 2 | 绑定/解绑患者 | 同一设备同时只能绑一个有效患者（partial unique）；`DEVICE_BOUND_TO_OTHER 42003` |
-| 3 | 状态与校准 | `DeviceStatus` 流转、校准过期校验（`42005`） |
-| 4 | 在线状态 | 基于 `lastReportAt` 判定 |
-| 5 | **导出（Excel/PDF）** | 异步任务（`41008 GLUCOSE_EXPORT_RUNNING`）、**水印 + 审批留痕**、限流；PDF 需含导出人与时间 |
-| 6 | 厂商接入预留 | `9xxxx` 错误码已定义；adapter 与验签待厂商协议确定 |
-
----
-
-## P6 审计、系统管理与生产交付 —— ⬜ 8%
-
-### 已完成
-- 阈值配置读取、生产环境自动关闭 Swagger
-
-### 未完成
-
-| # | 任务 | 说明 |
-|---|---|---|
-| 1 | 审计查询页 | 护士长/系统管理员可见；按人/时间/动作/结果筛选；**按错误码统计安全事件**（需 `AuditLog.errorCode` 字段 + 迁移） |
-| 2 | 审计留存清理任务 | ≥180 天；定时清理归档（等保） |
-| 3 | 用户与角色管理 | 增删改、停用、角色分配；`LAST_ADMIN_PROTECTED 43003`、`CANNOT_MODIFY_SELF_ROLE 43004` |
-| 4 | 系统配置页 | 血糖阈值等 `SystemConfig` 可视化维护（改动需审计） |
-| 5 | 生产交付资产 | **当前缺失**：`Dockerfile`（server/web）、Nginx 配置（TLS 终止 + 静态资源）、备份与恢复脚本、健康检查与监控、`docker-compose` 现仅有 DB |
-| 6 | 告警与统计看板 | 高低血糖预警列表、科室统计（README 原 P2 项） |
-| 7 | CGM 演进 | adapter 统一入口、`kind=CGM`、日汇总预计算、按月分区（`prisma/sql/glucose_record_partition.sql`） |
-| 8 | 运维手册 | NTP、备份演练、堡垒机、漏洞扫描等（等保第 7 节） |
-
----
-
-## 建议推进顺序（依赖优先）
-
-```
-P2-1/2 前端路由与按钮守卫  ← 越权入口，先堵
-P3-2/3 异常复核 + 作废策略  ← 业务闭环
-P4-1   真实加密（等保硬项，越晚改迁移成本越高）
-P4-2~6 患者模块
-P5-1~4 设备模块
-P5-5   导出
-P6-1~3 审计与用户管理
-P6-5   生产交付资产
-```
-
-## 非代码事项（需院方/运维确认，不在代码计划内）
-
-- 患者信息采集的告知与同意流程
-- 双因子认证方式（短信/OTP/UKey）
-- 数据保留期限与删除流程（当前仅归档）
-- 服务器 NTP、杀毒、堡垒机、备份演练
-- 生产密钥（JWT_SECRET、数据库口令、字段加密密钥）注入方式
+| 血糖查询 / 图表 / 日内汇总 | 无 | 原 P3-2、P3-3、P3-7；需先定汇总口径与是否建 `GlucoseDailySummary` |
+| 血糖数据管理（作废/更正） | 审计 | 原 P3-4；医疗记录不得物理删除，需设计作废留痕 |
+| 异常值复核 | schema 评审 | 原 P3-5；需给 `GlucoseRecord` 加状态字段，并登记 `41002` |
+| 导出框架（异步任务 + 水印 + 审批留痕） | P5、P6 | 原 P3-6 与 P5 导出共用；需登记 `41008` |
+| 血糖阈值改为读 `SystemConfig` | P5-3 | 当前是 `DEFAULT_ALERT_RANGE` 占位常量 |
