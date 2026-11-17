@@ -4,7 +4,8 @@ import { Reflector } from '@nestjs/core';
 import type { AuditAction } from '@prisma/client';
 import type { Request } from 'express';
 import { catchError, from, map, mergeMap, Observable, throwError } from 'rxjs';
-import { AUDIT_ACTION_KEY, AUDIT_DETAIL_ALLOW_LIST } from '../decorators/audit.decorator';
+import type { AuditMeta, AuditOptions } from '../decorators/audit.decorator';
+import { AUDIT_DETAIL_ALLOW_LIST, AUDIT_META_KEY } from '../decorators/audit.decorator';
 import { BusinessException } from '../exceptions/business.exception';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AuditResult, AuthenticatedUser } from '../types';
@@ -56,12 +57,31 @@ function resolveAuditResult(error: unknown): AuditResult {
 }
 
 /**
+ * 按点号路径从响应体取值，用于 `@Audit(action, { targetIdFrom: 'data.id' })`。
+ *
+ * 手写遍历，**不用 `eval` / `new Function`**（路径来自代码里的字面量，但仍避免动态求值）。
+ * 只接受非空字符串：targetId 是主键，取到数字/对象/空串一律视为"没取到"，
+ * 这样路径写错时表现为审计字段留空（可发现），而不是写进一个错误的值（难发现）。
+ */
+function resolvePath(source: unknown, path: string): string | undefined {
+  let current: unknown = source;
+  for (const segment of path.split('.')) {
+    if (current === null || typeof current !== 'object') {
+      return undefined;
+    }
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return typeof current === 'string' && current.length > 0 ? current : undefined;
+}
+
+/**
  * 审计日志拦截器。
  * 规则：
  *  1. 只处理标注了 @Audit(...) 的接口
  *  2. 只写白名单字段，禁止把患者身份信息写进 detail
  *  3. 审计写入失败不得影响业务结果，但必须打错误日志
  *  4. 越权（3xxxx）记 DENIED，其余异常记 FAILED；失败时 detail 带 errorCode 便于按码统计安全事件
+ *  5. targetId 优先取 URL `params.id`；创建类接口无 `:id`，改按 `targetIdFrom` 从响应信封取
  */
 @Injectable()
 export class AuditLogInterceptor implements NestInterceptor {
@@ -71,24 +91,27 @@ export class AuditLogInterceptor implements NestInterceptor {
   ) {}
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
-    const action = this.reflector.getAllAndOverride<string | undefined>(AUDIT_ACTION_KEY, [
+    const meta = this.reflector.getAllAndOverride<AuditMeta | undefined>(AUDIT_META_KEY, [
       context.getHandler(),
       context.getClass(),
     ]);
-    if (!action) {
+    if (!meta?.action) {
       return next.handle();
     }
+    const { action, ...options } = meta;
 
     const http = context.switchToHttp();
     const request = http.getRequest<AuditableRequest>();
 
     return next.handle().pipe(
       mergeMap((data) =>
-        from(this.write(action as AuditAction, request, 'SUCCESS', data)).pipe(map(() => data)),
+        from(this.write(action as AuditAction, request, 'SUCCESS', data, options)).pipe(
+          map(() => data),
+        ),
       ),
       catchError((error: unknown) =>
         from(
-          this.write(action as AuditAction, request, resolveAuditResult(error), null, error),
+          this.write(action as AuditAction, request, resolveAuditResult(error), null, options, error),
         ).pipe(mergeMap(() => throwError(() => error))),
       ),
     );
@@ -99,6 +122,7 @@ export class AuditLogInterceptor implements NestInterceptor {
     request: AuditableRequest,
     result: AuditResult,
     payload: unknown,
+    options: AuditOptions,
     error?: unknown,
   ): Promise<void> {
     try {
@@ -108,14 +132,22 @@ export class AuditLogInterceptor implements NestInterceptor {
       const body = (request.body ?? {}) as Record<string, unknown>;
       const errorCode = error === undefined ? null : extractErrorCode(error);
 
+      // URL 有 :id 时以它为准（更新/详情/血糖录入）；创建类接口无 :id，
+      // 退回按 targetIdFrom 从响应信封取新对象 ID。失败路径 payload 为 null，自然取不到。
+      const targetId =
+        (typeof params.id === 'string' ? params.id : undefined) ??
+        (options.targetIdFrom ? resolvePath(payload, options.targetIdFrom) : undefined);
+      // 未显式声明 targetType 时沿用旧行为（有 ID 即视为患者），保持存量审计口径不变
+      const targetType = options.targetType ?? (targetId === undefined ? undefined : 'PATIENT');
+
       await this.prisma.auditLog.create({
         data: {
           operatorId: user?.userId,
           operatorName: user?.displayName,
           departmentId: user?.departmentId,
           action,
-          targetType: typeof params.id === 'string' ? 'PATIENT' : undefined,
-          targetId: typeof params.id === 'string' ? params.id : undefined,
+          targetType,
+          targetId,
           targetKey: typeof body.username === 'string' ? body.username : undefined,
           ip: request.ip,
           userAgent: request.headers['user-agent'],

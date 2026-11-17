@@ -5,6 +5,8 @@ import { ERROR_CODES } from '@gc/shared';
 import { Prisma } from '@prisma/client';
 import { firstValueFrom, of, throwError } from 'rxjs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { AuditMeta, AuditOptions } from '../decorators/audit.decorator';
+import { AUDIT_META_KEY } from '../decorators/audit.decorator';
 import { BusinessException } from '../exceptions/business.exception';
 import type { PrismaService } from '../prisma/prisma.service';
 import { AuditLogInterceptor } from './audit-log.interceptor';
@@ -77,9 +79,11 @@ function createContext(request: unknown): ExecutionContext {
   } as unknown as ExecutionContext;
 }
 
-function createInterceptor(action: string | undefined) {
+function createInterceptor(action: string | undefined, options?: AuditOptions) {
+  // 未标注 @Audit 时元数据为 undefined，拦截器据此直接放行
+  const meta: AuditMeta | undefined = action === undefined ? undefined : { action, ...options };
   const reflector = {
-    getAllAndOverride: vi.fn().mockReturnValue(action),
+    getAllAndOverride: vi.fn((key: string) => (key === AUDIT_META_KEY ? meta : undefined)),
   } as unknown as Reflector;
   const prisma = { auditLog: { create: vi.fn().mockResolvedValue({ id: 'a-1' }) } };
   const interceptor = new AuditLogInterceptor(reflector, prisma as unknown as PrismaService);
@@ -253,5 +257,136 @@ describe('AuditLogInterceptor — 失败路径的 result 与 errorCode', () => {
     // 身份信息与自由文本仍不得入 detail
     expect(written.detail.remark).toBeUndefined();
     expect(written.detail.item).toBeUndefined();
+  });
+});
+
+/**
+ * targetId 解析（D11 方案 A）。
+ * 建档接口 POST /patients 路径里没有 :id，新患者 ID 只在响应信封的 data.id，
+ * 此前 targetType/targetId 恒为空，事后无法按患者追溯建档操作。
+ */
+describe('AuditLogInterceptor — targetId 解析', () => {
+  /** 建档请求：URL 无 :id，body 含患者身份信息（不得入 detail） */
+  function createPatientRequest() {
+    return {
+      user,
+      ip: '10.0.0.9',
+      headers: { 'user-agent': 'vitest' },
+      method: 'POST',
+      requestId: 'c8f3c1d2-4e5a-4f6b-8c9d-0e1f2a3b4c5e',
+      route: { path: '/patients' },
+      params: {},
+      query: {},
+      body: { name: '张三', idCard: '110101199003074512', departmentId: 'd-endo' },
+    };
+  }
+
+  /** 建档成功后的响应信封：新患者 ID 在 data.id */
+  const createdEnvelope = {
+    code: 0,
+    message: '操作成功',
+    data: { id: 'p-new-1', item: { id: 'p-nested', nameMasked: '张*' } },
+  };
+
+  async function run(options: AuditOptions | undefined, request: unknown, payload: unknown) {
+    const { interceptor, prisma } = createInterceptor('PATIENT_CREATE', options);
+    await firstValueFrom(
+      interceptor.intercept(createContext(request), handlerOf(payload)),
+    );
+    return prisma.auditLog.create.mock.calls[0][0].data;
+  }
+
+  it('建档无 :id 时按 targetIdFrom 从响应信封取到新患者 ID', async () => {
+    const written = await run(
+      { targetType: 'PATIENT', targetIdFrom: 'data.id' },
+      createPatientRequest(),
+      createdEnvelope,
+    );
+
+    expect(written.targetId).toBe('p-new-1');
+    expect(written.targetType).toBe('PATIENT');
+    // body 里的身份信息仍不得入 detail
+    expect(written.detail.name).toBeUndefined();
+    expect(written.detail.idCard).toBeUndefined();
+  });
+
+  it('支持多层路径（data.item.id）', async () => {
+    const written = await run(
+      { targetType: 'PATIENT', targetIdFrom: 'data.item.id' },
+      createPatientRequest(),
+      createdEnvelope,
+    );
+
+    expect(written.targetId).toBe('p-nested');
+  });
+
+  it('URL 有 :id 时以 params.id 为准，不被 targetIdFrom 覆盖', async () => {
+    const written = await run(
+      { targetType: 'PATIENT', targetIdFrom: 'data.id' },
+      glucoseRequest(),
+      glucoseEnvelope(false),
+    );
+
+    expect(written.targetId).toBe('p-1');
+  });
+
+  it('未声明 targetIdFrom 且无 :id 时，targetType/targetId 均留空（保持旧行为）', async () => {
+    const written = await run(undefined, createPatientRequest(), createdEnvelope);
+
+    expect(written.targetId).toBeUndefined();
+    expect(written.targetType).toBeUndefined();
+  });
+
+  it('显式声明 targetType 但取不到 ID 时，仍写入 targetType', async () => {
+    const written = await run({ targetType: 'DEVICE' }, createPatientRequest(), createdEnvelope);
+
+    expect(written.targetType).toBe('DEVICE');
+    expect(written.targetId).toBeUndefined();
+  });
+
+  it.each([
+    ['路径不存在', 'data.patientId'],
+    ['路径中途非对象', 'data.id.deeper'],
+    ['取到数字而非字符串', 'code'],
+    ['取到对象', 'data'],
+    ['取到空串', 'message'],
+  ])('路径写错或值不可用时留空且不抛错：%s', async (_label, targetIdFrom) => {
+    const written = await run(
+      { targetType: 'PATIENT', targetIdFrom },
+      createPatientRequest(),
+      { ...createdEnvelope, message: '' },
+    );
+
+    expect(written.targetId).toBeUndefined();
+  });
+
+  it('原型链键（__proto__ / constructor）不会被当成 ID，也不污染对象', async () => {
+    const written = await run(
+      { targetType: 'PATIENT', targetIdFrom: '__proto__.toString' },
+      createPatientRequest(),
+      createdEnvelope,
+    );
+
+    expect(written.targetId).toBeUndefined();
+    expect(({} as Record<string, unknown>).targetId).toBeUndefined();
+  });
+
+  it('失败路径 payload 为 null 时留空，且原异常仍被抛出', async () => {
+    const { interceptor, prisma } = createInterceptor('PATIENT_CREATE', {
+      targetType: 'PATIENT',
+      targetIdFrom: 'data.id',
+    });
+    const error = new BusinessException(ERROR_CODES.CROSS_DEPARTMENT_DENIED);
+
+    await expect(
+      firstValueFrom(
+        interceptor.intercept(createContext(createPatientRequest()), failingHandler(error)),
+      ),
+    ).rejects.toBe(error);
+
+    const written = prisma.auditLog.create.mock.calls[0][0].data;
+    expect(written.result).toBe('DENIED');
+    expect(written.targetId).toBeUndefined();
+    expect(written.targetType).toBe('PATIENT');
   });
 });

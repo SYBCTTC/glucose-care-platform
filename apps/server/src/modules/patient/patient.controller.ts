@@ -25,7 +25,9 @@ export class PatientController {
   @Post()
   @RequirePermissions(PERMISSION.PATIENT_CREATE)
   @RequireDataScope(RESOURCE.PATIENT)
-  @Audit('PATIENT_CREATE')
+  // POST 路径无 :id，新患者 ID 只在响应信封里，故显式声明从 data.id 取，
+  // 否则建档审计的 targetType/targetId 恒为空，事后无法按患者追溯建档操作。
+  @Audit('PATIENT_CREATE', { targetType: 'PATIENT', targetIdFrom: 'data.id' })
   async create(
     @Req() request: Request,
     @Body(new ZodValidationPipe(createPatientSchema)) body: CreatePatientInput,
