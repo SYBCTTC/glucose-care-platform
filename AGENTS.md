@@ -103,7 +103,9 @@ packages/
 - `mealContext` **应用层必填**（`createGlucoseSchema` 强制），落库**时段码**（`TimeSlot.code`）：普通 `FASTING`/`BREAKFAST_PRE`/`BREAKFAST_POST`/`LUNCH_PRE`/`LUNCH_POST`/`DINNER_PRE`/`DINNER_POST`/`BEDTIME`，特殊 `RANDOM`/`RETEST`，强化 `INTENSIVE_AM`/`INTENSIVE_PM`/`INTENSIVE_NIGHT`
 - 库字段 `GlucoseRecord.mealContext` 为 `String?`（`schema.prisma:156`），是给设备上报/历史数据留位；**不得因库可空就放宽前端或接口校验**
 - 时段的**名称/起止时间/类型/控糖目标**是动态数据（表 `TimeSlot`，接口 `GET /time-slots`，前端 `useCommonDataStore().timeSlots`）；code 是契约，名称可改，**禁止按名称匹配**
-- 已知取舍：`createGlucoseSchema` 的 code 白名单来自 `@gc/shared` 的 `TIME_SLOTS`（静态），库里新增时段必须同步 shared，否则提交被 10001 拒绝（见 `docs/COMMON-DATA.md` 已知约束）
+- code 的**可用性由服务端查库判定**（2026-11-17 起）：`createGlucoseSchema` 只校验格式（trim 后 1~32，与 `TimeSlot.code VarChar(32)` 对齐），`GlucoseService.assertTimeSlotUsable` 经 `TimeSlotService.findByCode` 校验该 code **存在且 `enabled`**，否则 10001 + `details[{field:'mealContext'}]`
+- 停用时段：**历史可展示、新录入拒绝**（`GET /time-slots` 仍下发停用项供回显名称）
+- `@gc/shared` 的 `TIME_SLOTS` 已降级为**仅 seed 数据源**，静态兜底函数 `getFallbackTimeSlots` / `getTimeSlotLabel` 已删除；**禁止**在运行时用它做校验或展示兜底（会与库数据漂移）
 - 手工录入时 `operatorId` 必须记录当前医护 ID（**留痕**）
 
 ### 4.5 去重（唯一约束兜底，已落地 2026-10-28）

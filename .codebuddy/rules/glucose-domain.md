@@ -36,10 +36,17 @@ globs:
 
 ## BGM 上下文
 `mealContext` 必填，落库**时段码**（`code`）。时段是动态数据（表 `TimeSlot`，接口 `GET /time-slots`，前端 `useCommonDataStore().timeSlots`），
-名称/区间/控糖目标在库里维护；code 是契约，只能取 `@gc/shared` `TIME_SLOTS` 登记过的值（含 `RANDOM` 随机 / `RETEST` 复测），禁止自定义或按名称匹配。
+名称/区间/控糖目标在库里维护；code 是契约，**禁止按名称匹配**。
 普通时段（`type=1`）区间必须 00:00~24:00 全覆盖、不重叠、不跨零点，左闭右开；特殊（`4`）/强化（`0`）无区间。
-已知取舍：`createGlucoseSchema` 的白名单来自静态 `TIME_SLOTS`，库里新增时段必须同步 shared，否则提交被 `10001` 拒；
-改为查 `TimeSlot` 表运行时校验属**契约变更**，需排期（见 `docs/DB-MIGRATION-NOTES.md` §4）。
+
+可用性校验（2026-11-17 起，**查库，不查静态清单**）：
+- `createGlucoseSchema` 只校验格式（trim 后 1~32，与 `TimeSlot.code VarChar(32)` 对齐）
+- `GlucoseService.assertTimeSlotUsable` 经 `TimeSlotService.findByCode` 校验该 code **存在且 `enabled`**，
+  否则 `10001` + `details[{field:'mealContext'}]`，**不写库**
+- 停用时段：**历史可展示、新录入拒绝**（`GET /time-slots` 仍下发停用项，供历史血糖回显名称）
+- `@gc/shared` 的 `TIME_SLOTS` 已降级为**仅 seed 数据源**，`getFallbackTimeSlots` / `getTimeSlotLabel` 已删除；
+  **禁止**在运行时用它做校验或展示兜底（会与库数据漂移）
+- 因此库里新增/停用时段**无需改代码、无需发版**
 
 ## 去重（唯一约束兜底）
 - 实现：`@@unique([patientId, measuredAt])`（索引 `GlucoseRecord_patientId_measuredAt_key`）。

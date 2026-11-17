@@ -2,7 +2,9 @@
 
 > 用途：登记项目内**高频复用、统一维护**的公共数据。后续向 AI 提需求时，直接引用「代号」即可，
 > 无需重复描述取值，也禁止在业务代码里硬编码这些取值。
-> 最后更新：2026-10-27（D-TIMESLOT 由静态字典改为动态数据 DY-TIMESLOT，落库 `TimeSlot`，含起止时间、类型、控糖目标）。
+> 最后更新：**2026-11-17**（`TIME_SLOTS` 降级为仅 seed 源，删除 `getFallbackTimeSlots` / `getTimeSlotLabel` 静态兜底；
+> 时段可用性改由服务端查 `TimeSlot` 表运行时校验）。
+> 上一次：2026-10-27（D-TIMESLOT 由静态字典改为动态数据 DY-TIMESLOT，落库 `TimeSlot`，含起止时间、类型、控糖目标）。
 
 ## 一、使用约定
 
@@ -19,7 +21,7 @@
 | 代号 | 名称 | 来源文件（`@gc/shared`） | 主要导出 | 取值 | 用途 |
 |---|---|---|---|---|---|
 | `D-ROLE` | 系统角色 | `dict/roles.ts` | `ROLE_CODE` / `ROLE_LABELS` / `ROLE_PERMISSIONS` | `DOCTOR`/`NURSE`/`NURSE_HEAD`/`DEVICE_ADMIN`/`SYS_ADMIN` | 人员角色、权限、数据范围 |
-| `D-TIMESLOT` | 时段**码**（契约） | `dict/time-slots.ts` | `TIME_SLOT_CATEGORY` / `TIME_SLOTS`（仅 seed 源 + 兜底） / `pickTimeSlotByTime` / `getTimeSlotLabel` | 普通：`FASTING`/`BREAKFAST_PRE`/`BREAKFAST_POST`/`LUNCH_PRE`/`LUNCH_POST`/`DINNER_PRE`/`DINNER_POST`/`BEDTIME`；特殊：`RANDOM`(随机)/`RETEST`(复测)；强化：`INTENSIVE_AM`/`INTENSIVE_PM`/`INTENSIVE_NIGHT` | **code 是落库契约**（`GlucoseRecord.mealContext`），改名不改码；名称/区间/目标走 `DY-TIMESLOT` |
+| `D-TIMESLOT` | 时段**码**（契约） | `dict/time-slots.ts` | `TIME_SLOT_CATEGORY` / `TIME_SLOTS`（**仅 seed 源**） / `pickTimeSlotByTime` | 普通：`FASTING`/`BREAKFAST_PRE`/`BREAKFAST_POST`/`LUNCH_PRE`/`LUNCH_POST`/`DINNER_PRE`/`DINNER_POST`/`BEDTIME`；特殊：`RANDOM`(随机)/`RETEST`(复测)；强化：`INTENSIVE_AM`/`INTENSIVE_PM`/`INTENSIVE_NIGHT` | **code 是落库契约**（`GlucoseRecord.mealContext`），改名不改码；名称/区间/目标走 `DY-TIMESLOT`；**可用性由服务端查 `TimeSlot` 表校验，不得用本清单做白名单或展示兜底** |
 | `D-ALERT` | 预警范围默认值 | `dict/time-slots.ts` | `DEFAULT_ALERT_RANGE` | `{ low: 3.9, high: 16.7 }`（mmol/L） | 低血糖/高血糖阈值占位；接口就绪后改为读 `SystemConfig`，禁止硬编码 |
 | `D-GENDER` | 性别 | `patient/schema.ts` | `GENDER` / `GENDER_LABELS` / `GENDER_SELECTABLE` | `MALE`(男)/`FEMALE`(女)/`UNSPECIFIED`(未说明)/`UNKNOWN`(未知，历史数据兜底，不进下拉) | 患者建档性别下拉（用 `GENDER_SELECTABLE`） |
 | `D-DIABETES` | 糖尿病类型 | `patient/schema.ts` | `DIABETES_TYPE` / `DIABETES_TYPE_LABELS` | `TYPE_1`(I型糖尿病)/`TYPE_2`(II型糖尿病)/`GESTATIONAL`(妊娠型糖尿病)/`SPECIAL`(特殊型糖尿病)/`OTHER`(其他) | 患者建档糖尿病类型下拉；库内存 code |
@@ -90,7 +92,9 @@
 
 **已知约束：**
 
-- `createGlucoseSchema` 仍用 `@gc/shared` `TIME_SLOTS` 的 code 做静态白名单校验：库里新增时段但未同步 shared → 提交会被 10001 拒绝。
+- 时段可用性由**服务端查库**判定（2026-11-17 起）：`createGlucoseSchema` 只校验格式（trim 后 1~32，与 `TimeSlot.code VarChar(32)` 对齐），`GlucoseService.assertTimeSlotUsable` 经 `TimeSlotService.findByCode` 校验该 code **存在且 `enabled`**，否则 10001 + `details[{field:'mealContext'}]`。**库里新增时段无需改代码、无需发版。**
+- 停用时段：**历史可展示、新录入拒绝**（`GET /time-slots` 仍下发停用项，供历史血糖回显名称）。
+- `@gc/shared` 已**无静态兜底**：`/time-slots` 接口失败时 `useCommonDataStore().timeSlots` 为空，录入弹窗的时段下拉显示「时段数据未加载，请刷新页面重试」；`getTimeSlotName(code)` 取不到名称时返回 code 本身（不用静态名称掩盖库数据缺失）。
 - 公共数据一次性加载（`loaded` 幂等），改时段名/区间后需重新登录或刷新页面才生效。
 
 > **患者不纳入公共数据**（按 2026-10-23 决定）：患者选择走业务接口，不进 `useCommonDataStore`。
