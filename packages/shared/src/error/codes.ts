@@ -54,6 +54,18 @@ export const ERROR_CODES = {
   PATIENT_ALREADY_BOUND: 40003,
   PATIENT_INVALID_STATE: 40004,
 
+  // ---------- 41xxx 血糖 ----------
+  /**
+   * 血糖记录已复核锁定，禁止修改。
+   *
+   * ⚠️ **预留码位，当前无任何代码抛出**（2026-11-17 需求人指定语义后登记）。
+   * 对应功能「异常值复核」尚未实现（`GlucoseRecord` 目前没有 status/锁定字段）。
+   * 实现该功能前：前端不要为它写分支，后端不要拿它表达其它冲突
+   * （并发修改用 `CONCURRENT_CONFLICT`，重复提交按幂等 `skipped` 处理，都不是错误）。
+   * 号段来历见 docs/ERROR-CODES.md §D5。
+   */
+  GLUCOSE_RECORD_LOCKED: 41006,
+
   // ---------- 42xxx 设备 ----------
   DEVICE_NOT_FOUND: 42001,
   DEVICE_SN_DUPLICATE: 42002,
@@ -172,6 +184,13 @@ export const ERROR_CODE_META: Record<ErrorCode, ErrorCodeMeta> = {
   [ERROR_CODES.PATIENT_INVALID_STATE]: {
     httpStatus: 409,
     message: '患者当前状态不允许该操作',
+    action: 'toast-refresh',
+  },
+
+  // ---------- 41xxx 血糖（预留，见 ERROR_CODES.GLUCOSE_RECORD_LOCKED 注释） ----------
+  [ERROR_CODES.GLUCOSE_RECORD_LOCKED]: {
+    httpStatus: 409,
+    message: '该血糖记录已复核锁定，禁止修改',
     action: 'toast-refresh',
   },
 

@@ -63,9 +63,13 @@ export type PermissionCode = (typeof PERMISSION)[keyof typeof PERMISSION];
 export const ROLE_PERMISSIONS: Record<RoleCode, PermissionCode[]> = {
   DOCTOR: [
     PERMISSION.PATIENT_VIEW,
+    // 医生可建档（2026-11-17 需求人决定）。数据范围仍是 DEPARTMENT，
+    // 因此只能建本科室患者：PatientService.create 第一行即 assertInScope(PATIENT, {departmentId})，
+    // 跨科室建档抛 30002 并记 DENIED 审计。未一并授予 PATIENT_UPDATE / PATIENT_ADMIT。
+    PERMISSION.PATIENT_CREATE,
     PERMISSION.PATIENT_INPATIENT_VIEW,
     PERMISSION.PATIENT_DISCHARGED_VIEW,
-    // 医生不授予 PATIENT_ADMIT：入院登记属护理/管理动作，与 PATIENT_CREATE 口径一致
+    // 医生不授予 PATIENT_ADMIT：入院登记属护理/管理动作
     PERMISSION.DEVICE_VIEW,
     PERMISSION.WARD_VIEW,
     PERMISSION.ALERT_VIEW,
