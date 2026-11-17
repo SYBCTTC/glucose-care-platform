@@ -13,7 +13,8 @@
     "test": "vitest run --passWithNoTests",
     "prisma": "prisma",
     "db:seed": "tsx prisma/seed.ts",
-    "db:reencrypt": "tsx prisma/reencrypt-patient-fields.ts"
+    "db:reencrypt": "tsx prisma/reencrypt-patient-fields.ts",
+    "db:remask": "tsx prisma/remask-patient-fields.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

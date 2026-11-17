@@ -202,17 +202,14 @@ export function cipherSchemeOf(stored: string | null | undefined): 'aes' | 'hmac
   return 'unknown';
 }
 
-/** 姓名脱敏：两字及以内保留首字，三字及以上保留首尾 */
-export function maskName(name: string): string {
-  return name.length <= 2 ? `${name.charAt(0)}*` : `${name.charAt(0)}*${name.slice(-1)}`;
-}
-
-/** 手机号脱敏：保留前 3 后 4 */
-export function maskPhone(phone: string): string {
-  return phone.length >= 7 ? `${phone.slice(0, 3)}****${phone.slice(-4)}` : '****';
-}
-
-/** 身份证脱敏：保留前 3 后 2 */
-export function maskIdCard(idCard: string): string {
-  return idCard.length >= 5 ? `${idCard.slice(0, 3)}********${idCard.slice(-2)}` : '********';
-}
+// 脱敏函数（maskName / maskPhone / maskIdCard）已于 2026-11-17 移除，
+// 统一使用 `@gc/shared` 的 `mask` 模块（全仓唯一实现，前后端共用）。
+//
+// 此处曾有一套同名但规则不同的副本，两者对同一输入产出不同结果：
+//   maskIdCard('110101199003074512')  本文件 '110********12'（前3后2） vs shared '110***********4512'（前3后4）
+//   maskName('张三丰')                本文件 '张*丰'（保留首尾）        vs shared '张**'（只保留姓）
+//   maskIdCard('12345')               本文件 '123********45'（长度膨胀且泄漏头尾） vs shared '*****'
+// 保留首尾的写法对三字名只遮一个字，配合科室/床号/住院号足以反推身份，故统一到 shared 的规则。
+//
+// ⚠️ 不要在这里重新加脱敏函数：`*Masked` 是**落库字段**，两套实现并存会让存量行与新行格式不一致。
+// 需要脱敏一律 `import { maskName, maskPhone, maskIdCard } from '@gc/shared'`。

@@ -3,6 +3,9 @@ import {
   ERROR_CODES,
   formatDateOnly,
   formatDateTime,
+  maskIdCard,
+  maskName,
+  maskPhone,
   PATIENT_STATUS,
   RESOURCE,
   ROLE_CODE,
@@ -20,12 +23,7 @@ import type {
   UpdatePatientInput,
 } from '@gc/shared';
 import { Prisma } from '@prisma/client';
-import {
-  encryptDeterministic,
-  maskIdCard,
-  maskName,
-  maskPhone,
-} from '../../common/crypto/field-crypto';
+import { encryptDeterministic } from '../../common/crypto/field-crypto';
 import { assertInScope, buildScopeWhere } from '../../common/data-scope/scope.util';
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { PrismaService } from '../../common/prisma/prisma.service';

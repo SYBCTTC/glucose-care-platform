@@ -27,6 +27,7 @@
     "db:deploy": "pnpm --filter @gc/server prisma migrate deploy",
     "db:seed": "pnpm --filter @gc/server prisma db seed",
     "db:reencrypt": "pnpm --filter @gc/server db:reencrypt",
+    "db:remask": "pnpm --filter @gc/server db:remask",
     "prepare": "husky"
   },
   "devDependencies": {

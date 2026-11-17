@@ -49,7 +49,8 @@ function existingRow(overrides: Record<string, unknown> = {}) {
 function publicRow(overrides: Record<string, unknown> = {}) {
   return {
     id: PATIENT_ID,
-    nameMasked: '张*三',
+    // fixture 用当前脱敏规则的形状（只保留姓氏），避免误导后来人以为还保留末字
+    nameMasked: '张**',
     patientNo: 'H-0001',
     gender: GENDER.MALE,
     birthDate: new Date('1976-10-23T00:00:00.000Z'),
@@ -235,7 +236,9 @@ describe('PatientService.update — 变更集语义', () => {
     const data = prisma.patient.update.mock.calls[0][0].data;
     expect(data.nameCipher).toBeTypeOf('string');
     expect(data.nameCipher).not.toBe('cipher-name-old');
-    expect(data.nameMasked).toBe('张*丰');
+    // 脱敏统一走 @gc/shared：只保留姓氏，不保留末字（原 field-crypto 副本是 '张*丰'，
+    // 三字名只遮一个字，配合科室/床号足以反推身份）
+    expect(data.nameMasked).toBe('张**');
   });
 
   it('完全无变更时返回空 changedFields，且不发起写库', async () => {
@@ -285,7 +288,7 @@ describe('PatientService.detail', () => {
   it('详情只出脱敏值，不返回任何明文字段', async () => {
     const detail = await service.detail(deptUser, PATIENT_ID);
 
-    expect(detail.nameMasked).toBe('张*三');
+    expect(detail.nameMasked).toBe('张**');
     expect(detail.idCardMasked).toBe('110********01');
     expect(detail.phoneMasked).toBe('138****1234');
     expect(detail.nurseId).toBe('nurse-1');

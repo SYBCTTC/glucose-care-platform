@@ -5,13 +5,10 @@
 import { PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import dayjs from 'dayjs';
-import { DICT_TYPE, TIME_SLOTS } from '@gc/shared';
+import { DICT_TYPE, maskIdCard, maskName, maskPhone, TIME_SLOTS } from '@gc/shared';
 import {
   encryptDeterministic as cipher,
   isFieldCryptoConfigured,
-  maskIdCard,
-  maskName,
-  maskPhone,
 } from '../src/common/crypto/field-crypto';
 
 const prisma = new PrismaClient();

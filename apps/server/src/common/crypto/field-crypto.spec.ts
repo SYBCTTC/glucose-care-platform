@@ -5,9 +5,6 @@ import {
   decryptField,
   encryptDeterministic,
   isFieldCryptoConfigured,
-  maskIdCard,
-  maskName,
-  maskPhone,
 } from './field-crypto';
 
 /**
@@ -208,34 +205,5 @@ describe('field-crypto — 启动自检在密钥就绪时放行', () => {
   });
 });
 
-describe('field-crypto — 脱敏规则（未改动，防回归）', () => {
-  it.each([
-    ['张三', '张*'],
-    ['李', '李*'],
-    ['欧阳明', '欧*明'],
-    ['司徒雷登', '司*登'],
-  ])('maskName(%s) = %s', (input, expected) => {
-    expect(maskName(input)).toBe(expected);
-  });
-
-  it.each([
-    ['13800001234', '138****1234'],
-    ['123456', '****'],
-  ])('maskPhone(%s) = %s', (input, expected) => {
-    expect(maskPhone(input)).toBe(expected);
-  });
-
-  it.each([
-    ['110101199003074512', '110********12'],
-    ['1234', '********'],
-  ])('maskIdCard(%s) = %s', (input, expected) => {
-    expect(maskIdCard(input)).toBe(expected);
-  });
-
-  it('脱敏值不含完整明文（等保：列表默认脱敏）', () => {
-    const idCard = '110101199003074512';
-
-    expect(maskIdCard(idCard)).not.toContain('19900307');
-    expect(maskPhone('13800001234')).not.toContain('00001234');
-  });
-});
+// 脱敏规则的测试已移到 packages/shared/src/mask/index.spec.ts：
+// 2026-11-17 起脱敏统一由 @gc/shared 提供，本模块只负责加解密。
