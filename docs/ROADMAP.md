@@ -130,7 +130,7 @@
 |---|---|---|---|
 | P7-1 | Docker 化部署 | ❌ | 仓库有 `docker-compose.yml`，**无 `Dockerfile`** |
 | P7-2 | CI/CD | ❌ | **无 `.github/workflows`**；目前靠 husky 预提交钩子 + 本地 `pnpm lint/typecheck/test` |
-| P7-3 | 验收测试 | ❌ | 已有单测（server 69 / shared 22 / web 10），无端到端验收用例集 |
+| P7-3 | 验收测试 | ❌ | 已有单测（server 151 / shared 59 / web 10，2026-11-17），无端到端验收用例集 |
 
 > 已具备但不计入本阶段：本地开发环境已脚本化（嵌入式 PostgreSQL + `pnpm dev:up` / `dev:down`）。
 
@@ -161,3 +161,4 @@
 | ~~审计 `targetId` 支持从响应体取（建档留痕）~~ | ~~审计~~ | ✅ **已完成**（2026-11-17，方案 A）：`@Audit` 支持 `targetType` / `targetIdFrom`，建档审计已能落到新患者 ID |
 | ~~统一两套脱敏实现~~ | ~~安全~~ | ✅ **已完成**（2026-11-17）：统一到 `@gc/shared` 的 `mask`，删除 `field-crypto` 副本，并修掉 shared 原有的明文回显与复姓误判缺陷；存量 `*Masked` 已用 `pnpm db:remask` 刷新 |
 | 详情页明文回显（含访问留痕） | 安全 | `decryptField` 已具备解密能力但无接口调用；按 `AGENTS.md` §5.3 必须同时加审计，需单独出规格 |
+| **换强随机密钥 + 密钥强度校验** | 安全 / 运维 | ❌ **上线前必做**：当前开发库用的是 8 位纯小写密钥（熵上限约 38 bit），要求 ≥ 32 位随机串。代码层未做强度校验，任何非空串都接受。是否给 `assertFieldCryptoReady` 加"生产环境短于 32 位拒绝启动"待裁定。详见 `docs/COMPLIANCE-CHECKLIST.md` §4 |
