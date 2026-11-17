@@ -112,6 +112,31 @@
 
 ## 9. 待确认项
 
-1. 医生（`DOCTOR`）是否需要建档权限？当前未授予，开通只需在 `ROLE_PERMISSIONS.DOCTOR` 增加 `PATIENT_CREATE`。
-2. 越权（`30002`）在审计表中记为 `FAILED` 而非 `DENIED`：审计拦截器用 `error instanceof ForbiddenException` 判断，而业务异常是 `BusinessException`。建议后续单独修（按 `3xxxx` 码段判 `DENIED`）。
-3. 建档后审计 `targetType/targetId` 为空：拦截器只从 URL `params.id` 取值。建议后续让 `@Audit` 支持从响应体取对象 ID。
+1. ~~医生（`DOCTOR`）是否需要建档权限？~~
+   ✅ **已确认并实现**（2026-11-17，提交 `8e22a4b`）：`ROLE_PERMISSIONS.DOCTOR` 已加 `PATIENT_CREATE`。
+   数据范围未放宽——`DOCTOR` 仍是 `DEPARTMENT`，`create` 第一行的 `assertInScope` 保证只能建本科室患者，
+   跨科室抛 `30002` 并记 `DENIED` 审计。未一并授予 `PATIENT_UPDATE` / `PATIENT_ADMIT`。
+   前端无需改动：`PatientToolbar` 已按 `hasPermission(PATIENT_CREATE)` 控制按钮。
+
+2. ~~越权（`30002`）在审计表中记为 `FAILED` 而非 `DENIED`~~
+   ✅ **已修**（2026-11-17，提交 `db8f363`）：改为按 `3xxxx` 码段判 `DENIED`，`detail` 增加 `errorCode`。
+   本条建议的修法即为最终实现；同时修掉 `detail.requestId` 误存控制器类名的问题。
+   存量审计行不回改（append-only），按 `createdAt` 分界解读。
+
+3. **仍未修 → 已给出三个方案待需求人选择**：建档后审计 `targetType/targetId` 为空。
+   拦截器只从 URL `params.id` 取值（`audit-log.interceptor.ts:117-118`），`POST /patients` 没有 `:id`，
+   新患者 ID 只在**响应体**里。
+
+   范围核实（2026-11-17）：全仓带 `@Audit` 的路由共 6 个，其中 5 个路径含 `:id` 且**都是患者相关**
+   （`PATIENT_VIEW` / `PATIENT_UPDATE` / `PATIENT_MANAGE` / `GLUCOSE_CREATE`），只有 `PATIENT_CREATE` 取不到 ID。
+   因此 `targetType` 硬编码 `'PATIENT'` 目前**恰好没错**，但属潜在隐患：
+   将来给设备或字典的 `:id` 路由加 `@Audit` 就会误记成 `PATIENT`。
+
+   | 方案 | 做法 | 优点 | 缺点 | 工作量 |
+   |---|---|---|---|---|
+   | **A（推荐）** | `@Audit` 增加可选参数声明 ID 来源，如 `@Audit('PATIENT_CREATE', { targetType: 'PATIENT', targetIdFrom: 'data.id' })`；拦截器在成功路径按**点号路径**从响应体取值（手写 split 遍历，不用 `eval` / `new Function`） | 声明式、集中在装饰器；对所有 create 类接口通用（患者/设备/字典）；顺带解决 `targetType` 硬编码；业务代码零改动 | 只覆盖成功路径（失败时本就没有新 ID，可接受）；需实现并单测路径取值 | 小：装饰器 + 拦截器 + 单测 |
+   | B | service 创建成功后自己调 `AuditService` 补写一条带 `targetId` 的审计 | 精确，还能记录变更前后关键字段 | 与拦截器机制并存 → 两套写入路径，容易漏写或重复写；service 被审计关注点污染，违反分层职责 | 中 |
+   | C | 拦截器隐式约定：响应体里有 `data.id` 就当 `targetId` | 零配置 | 隐式约定不可控：列表接口的 `data.id`、嵌套对象的 `id` 语义都不同，容易误取；出问题难排查 | 小但不推荐 |
+
+   推荐 **A**：与现有 `AUDIT_DETAIL_ALLOW_LIST` 的白名单思路一致（显式声明、集中管控），
+   且能一次解决 `targetType` 硬编码。属审计逻辑改动，按 `AGENTS.md` §6-5 需人工评审后实施。

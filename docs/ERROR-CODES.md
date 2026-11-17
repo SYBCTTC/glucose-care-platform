@@ -157,20 +157,29 @@
 > `GlucoseRecord` 没有 `status` 字段，`PENDING_REVIEW` 未实现。
 > 重复提交靠唯一约束 `(patientId, measuredAt)` 幂等跳过，**不得**为它新增错误码（见本文件 §8 约定）。
 
-#### `41xxx` 预留（规划中，**尚未登记进 `codes.ts`**）
+#### `41xxx` 血糖域（41006 已登记，其余仍为预留）
 
-| code | 名称 | HTTP | 语义 | 前置条件 |
+| code | 名称 | HTTP | 语义 | 状态 |
 |---|---|---|---|---|
-| 41002 | `GLUCOSE_ALREADY_REVIEWED` | 409 | 异常值已被他人复核（并发冲突） | 需先给 `GlucoseRecord` 加状态字段，走 schema 评审 |
-| 41006 | 待定 | 409 | 血糖域冲突类（§E 曾把它归入 409 类，具体语义无历史记录） | 语义待对应功能立项时定义 |
-| 41008 | `GLUCOSE_EXPORT_RUNNING` | 409 | 已有导出任务进行中 | 依赖 P5 导出（异步任务 + 水印 + 审批留痕） |
+| 41002 | `GLUCOSE_ALREADY_REVIEWED` | 409 | 异常值已被他人复核（并发冲突） | 预留。需先给 `GlucoseRecord` 加状态字段，走 schema 评审 |
+| 41006 | `GLUCOSE_RECORD_LOCKED` | 409 | 该血糖记录已复核锁定，禁止修改 | ✅ **已登记进 `codes.ts`**（2026-11-17，提交 `8e22a4b`），`action: toast-refresh`。但**当前无任何代码抛出**——`GlucoseRecord` 没有 status/锁定字段，异常值复核功能未实现 |
+| 41008 | `GLUCOSE_EXPORT_RUNNING` | 409 | 已有导出任务进行中 | 预留。依赖 P5 导出（异步任务 + 水印 + 审批留痕） |
 
 > `41001`、`41003~41005`、`41007`、`41009+` 为血糖域保留号段，语义待对应功能立项时定义。
 >
-> ⚠️ **实现某项功能时再登记对应错误码**（先改本表，再改 `packages/shared/src/error/codes.ts`），
+> ⚠️ **原则上实现某项功能时再登记对应错误码**（先改本表，再改 `packages/shared/src/error/codes.ts`），
 > 不要提前把未使用的码写进码表：2026-10-22 移除旧血糖模块时，为规划功能预建的
 > `EntryChannel` / `GlucoseKind` / `GlucoseUnit` / `MealContext` / `RecordStatus` 五个枚举
 > 在库里残留了近一个月，直到 2026-11-17 才清理（见 `docs/DB-MIGRATION-NOTES.md` §2）。
+>
+> **41006 是需求人明确要求提前占位的例外**（2026-11-17）。为降低"占位码被误用"的风险：
+> - 语义由需求人指定，不是 AI 推测（git 全历史查无定义，只在基线提交的 409 冲突类分组出现过一次）；
+> - `codes.ts` 的注释里写明"预留码位、当前无任何代码抛出"，并指明并发修改该用 `CONCURRENT_CONFLICT`、
+>   重复提交按幂等 `skipped` 处理，都不是本码；
+> - 实现复核功能前，前端不要为它写分支。
+>
+> 注意 `ERROR_CODE_META` 是 `Record<ErrorCode, ErrorCodeMeta>`，TS 强制每个码必须有 `message` 与 `httpStatus`，
+> 因此**无法登记一个真正空的占位**——占位必然连带定下语义，这是本条例外需要需求人拍板的原因。
 
 ### D6. 设备 `42xxx`
 
@@ -261,17 +270,20 @@
 | 9 | 5xx 屏蔽真实原因 | ✅ 按推荐 | `HttpExceptionFilter` 对 5xx 覆写 `message = errorMeta(code).message`，只留 `requestId` |
 | 11 | 双语 | ✅ 按推荐仅中文 | 内网单语言 |
 
-### F.2 仍未决（新一轮开发前建议先定）
+### F.2 三项未决项的处置（2026-11-17 需求人裁定，均已落地）
 
-| # | 项 | 现状 | 建议 |
-|---|---|---|---|
-| 8 | 接口级限流码 | `codes.ts` 无 `RATE_LIMITED`（`10007` 是 `REQUEST_TIMEOUT`，语义不同） | 内网 < 2000 账号，暂不需要；若做导出/批量导入再登记 `10011` |
-| 10 | **错误码写入审计独立字段** | ❌ 未实现，且缺口比原判断大：`AuditLogInterceptor` 用 `error instanceof ForbiddenException` 判 `DENIED`，但**全仓无任何守卫/service 抛 `ForbiddenException`**（一律 `BusinessException`）。实测审计表 `SUCCESS 209 / FAILED 44 / DENIED 1`，**越权事件全部记为 `FAILED`**；`detail` 只有固定串 `error:'denied_or_failed'`，不含错误码 → **无法从审计表筛出越权尝试**（`AGENTS.md` §5.1 要求越权留痕） | 改为按 `3xxxx` 码段判 `DENIED`，并把 `code` 写进 `detail`（或加独立列，属 schema 变更需评审） |
-| 12 | 需补充的业务码 | `41xxx` 血糖号段仅在 §D5 预留，未登记进 `codes.ts` | 实现对应功能时再登记；`41006` 语义无历史记录，需你给出定义 |
+| # | 项 | 结论 |
+|---|---|---|
+| 8 | 接口级限流码 | ✅ **不需要**（需求人决定）。⚠️ 同时更正本文档上一版的错误表述：`RATE_LIMITED: 10012` **早已在 `codes.ts` 里**（`httpStatus 429, action 'wait'`），上一版写「`codes.ts` 无 `RATE_LIMITED`」是错的。现状是**码已登记但无任何代码抛出**（未接入限流中间件）；`10011` 是 `MAINTENANCE`，与限流无关 |
+| 10 | 错误码写入审计 | ✅ **已实现**（提交 `db8f363`）：`AuditLogInterceptor` 改为按 `3xxxx` 码段判 `DENIED`（不再依赖 `ForbiddenException`），`detail` 增加 `errorCode`。越权尝试现在可直接从审计表筛出 |
+| 12 | 需补充的业务码 | ✅ `41006 GLUCOSE_RECORD_LOCKED` 已按需求人给定的语义登记（提交 `8e22a4b`），见 §D5。`41002` / `41008` 仍为预留 |
 
-> 另一处相关缺口（不属错误码但同源）：审计 `detail.requestId` 存的是 `context.getClass().name`（实测样例 `"AuthController"`），
-> **不是** `RequestIdMiddleware` 生成的 UUID，因此审计行无法与服务端日志、用户报障的 `X-Request-Id` 关联。
-> 拦截器已持有 `request` 对象，改为 `request.requestId` 即可，属等保可追溯性缺口。
+> 同源的另一处缺口也已修复（提交 `db8f363`）：审计 `detail.requestId` 原存 `context.getClass().name`
+> （实测样例 `"AuthController"`），现改取 `request.requestId`，与响应头 `X-Request-Id` 同值，
+> 可据此串联审计行、服务端日志与用户报障。
+>
+> ⚠️ **存量审计行不回改**（append-only）：`db8f363` 之前的行里，越权仍记为 `FAILED`、
+> `requestId` 仍是控制器类名、且无 `errorCode`。按 `createdAt` 分界解读历史数据。
 
 ---
 

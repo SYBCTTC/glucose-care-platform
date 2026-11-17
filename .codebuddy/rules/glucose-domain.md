@@ -31,8 +31,16 @@ globs:
 ## 取值与异常
 - 合法区间 `[0.6, 33.3] mmol/L`，边界含（与 `Low < 0.6` / `High > 33.3` 对齐）
 - 越界 → 由 `createGlucoseSchema` 直接拒绝（`10001`），**不入库**；当前**无 `status` 字段、无 `PENDING_REVIEW` 复核流程**
-- 阈值（低 < 3.9、高 > 16.7）现为 `@gc/shared` 的 `DEFAULT_ALERT_RANGE` 占位常量，
-  接口就绪后改为读 `SystemConfig`（`alert.low` / `alert.high`），**禁止在业务代码硬编码**
+- 告警阈值**已落地到数据库**（2026-11-17）：存 `SystemConfig` 表，key 为
+  `glucose.low_threshold` / `glucose.high_threshold`（seed 默认 `3.9` / `16.7`），
+  由 `SystemConfigService.getGlucoseAlertThreshold()` 读取。
+  ⚠️ 键名不是 `alert.low` / `alert.high`（本条旧版写错了），以 `SYSTEM_CONFIG_KEY` 常量为准
+- `@gc/shared` 的 `DEFAULT_ALERT_RANGE` 占位常量**已删除，禁止重新引入**，也禁止在业务代码硬编码阈值
+- 判定口径：`value < low` → `'0'` 偏低，`low <= value <= high` → `'1'` 正常，`value > high` → `'2'` 偏高
+- 只有结果类型为「检测」时才读配置；`3~9` 是人工选择的类型，无需阈值
+- **配置缺失/非法/`low >= high` 时抛 `10000` 拒绝写入，不退回任何默认值**：
+  按错误阈值分类比拒绝录入更危险，结果类型直接进病历
+- 阈值不做内存缓存（改动即时生效）；等 P5-3 维护接口落地再考虑带失效通知的缓存
 
 ## BGM 上下文
 `mealContext` 必填，落库**时段码**（`code`）。时段是动态数据（表 `TimeSlot`，接口 `GET /time-slots`，前端 `useCommonDataStore().timeSlots`），

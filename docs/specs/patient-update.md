@@ -159,9 +159,14 @@
    ✅ **已于 2026-11-17 解决**（提交 `3813f93`）：三个历史值已补回 `schema.prisma` 并按实库 `pg_enum` 顺序重排，
    注明"仅用于读取旧审计行，新代码禁止使用"；库漂移清零，`prisma.auditLog.groupBy()` 已可正常调用（本次核对即用它统计 `result` 分布）。
    处置过程见 `docs/DB-MIGRATION-NOTES.md` §2.3 / §4。
-6. **仍未修（2026-11-17 复核确认）**：上文第 2、4 项提到的审计语义问题范围比原判断更大——
-   `AuditLogInterceptor` 用 `error instanceof ForbiddenException` 判 `DENIED`，但**全仓没有任何守卫或 service 抛 `ForbiddenException`**
-   （`PermissionsGuard` / `JwtAuthGuard` / `MustChangePasswordGuard` / `assertInScope` 一律抛 `BusinessException`），
-   实测审计表 `SUCCESS 209 / FAILED 44 / DENIED 1`，即**越权事件实际全部记为 `FAILED`**，且 `detail` 不含错误码，
-   无法从审计表筛出越权尝试。另 `detail.requestId` 存的是 `context.getClass().name`（如 `AuthController`）而非请求 UUID，
-   无法与 `RequestIdMiddleware` 生成的 `X-Request-Id` 及服务端日志关联。两项均属等保可追溯性缺口，待决策。
+6. ~~**仍未修（2026-11-17 复核确认）**：`AuditLogInterceptor` 用 `error instanceof ForbiddenException` 判 `DENIED`……
+   实测审计表 `SUCCESS 209 / FAILED 44 / DENIED 1`，越权全部记为 `FAILED`；`detail.requestId` 存的是控制器类名。~~
+   ✅ **两项均已修**（2026-11-17，提交 `db8f363`）：
+   - `DENIED` 改按 **`3xxxx` 错误码号段**判定（`resolveAuditResult`），不再依赖异常类型；`detail` 增加 `errorCode`。
+     越权尝试现在可直接从审计表筛出。保留 `ForbiddenException` 分支作框架层兜底。
+   - `detail.requestId` 改取 `request.requestId`，与响应头 `X-Request-Id` 同值，可串联审计行、服务端日志与用户报障。
+   - 拦截器单测 4 → 19 项，覆盖 3xxxx 记 DENIED、非授权类记 FAILED、29999/40000 边界、Prisma 字符串 code 不被误当业务码、
+     失败时仍写 targetId 与白名单字段、异常原样抛出不被吞。
+   - ⚠️ **存量审计行不回改**（append-only）：`db8f363` 之前的行越权仍记 `FAILED`、`requestId` 仍是类名、无 `errorCode`，
+     按 `createdAt` 分界解读历史数据。
+   - 上文第 4 项提到的 `PATIENT_CREATE` 的 `targetId` 为空**仍未修**，三个候选方案见 `docs/specs/patient-create.md` §9-3。

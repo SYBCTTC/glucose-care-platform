@@ -41,13 +41,19 @@ throw new BusinessException(ERROR_CODES.ACCOUNT_LOCKED, `账号已锁定 ${minut
 ## 易错点
 
 - **登录失败（20001）与会话失效（20002）都是 401**，必须按 `code` 区分，不能只判断 HTTP 401（否则密码输错会误跳登录）。
-- 血糖域（`41xxx`）**目前一个码都没实现**：`packages/shared/src/error/codes.ts`（唯一码表）里没有任何 `41xxx`。
-  血糖业务已重建但**挂在患者下**（`POST /patients/:id/glucose`），错误一律复用既有码——
+- 血糖域（`41xxx`）**目前没有任何码被抛出**：码表里只有 `41006 GLUCOSE_RECORD_LOCKED` 一个占位（见下文），
+  无代码使用。血糖业务已重建但**挂在患者下**（`POST /patients/:id/glucose`），错误一律复用既有码——
   患者不存在/已归档 `40001`、非住院 `40004`、跨科室 `30002`、时段或记录者不合法 `10001` + 字段级 `details`。
   血糖越界（超出 `0.6 ~ 33.3 mmol/L`）由 `createGlucoseSchema` 拒为 `10001`，**不入库、无 `PENDING_REVIEW` 复核流程**
   （`GlucoseRecord` 没有 `status` 字段）。
 - **重复提交不是错误**：唯一约束 `(patientId, measuredAt)` 命中时返回 `code 0` + `data.skipped=true`，
   前端提示「未重复保存」；禁止为它新增错误码，也禁止提示成功。
-- `41002` / `41006` / `41008` 是 `docs/ERROR-CODES.md` §D5 的**预留号段**，实现对应功能时才登记进码表。
+- `41002` / `41008` 是 `docs/ERROR-CODES.md` §D5 的**预留号段**，实现对应功能时才登记进码表。
   不要提前写进 `codes.ts`：旧血糖模块为规划功能预建的 5 个枚举在库里残留了近一个月才清理
   （见 `docs/DB-MIGRATION-NOTES.md` §2）。
+- **`41006 GLUCOSE_RECORD_LOCKED` 是例外**：需求人 2026-11-17 明确要求提前占位，已登记（409 / `toast-refresh`）。
+  但**当前无任何代码抛出**（`GlucoseRecord` 没有 status/锁定字段）。实现异常值复核功能前：
+  前端不要为它写分支；后端不要拿它表达其它冲突——并发修改用 `10008 CONCURRENT_CONFLICT`，
+  重复提交按幂等 `skipped` 处理（不是错误）。
+- 注意 `ERROR_CODE_META` 是 `Record<ErrorCode, ErrorCodeMeta>`，TS 强制每个码必须有 `message` 与 `httpStatus`，
+  **无法登记真正空的占位**——占位必然连带定下语义，所以这类需求必须先由需求人给出语义。

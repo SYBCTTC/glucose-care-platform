@@ -37,8 +37,11 @@
 | 项 | 落地位置 | 状态 |
 |---|---|---|
 | 传输加密（HTTPS/TLS） | Nginx 终止 TLS | 待运维配置 |
-| 患者敏感字段加密存储 | `Patient.*Cipher` 字段 | **占位实现，需替换为 AES/SM4** |
-| 列表脱敏展示 | `Patient.*Masked` 字段 | 已设计，患者模块待实现 |
+| 患者敏感字段加密存储 | `Patient.*Cipher` + `common/crypto/field-crypto.ts` | ✅ **已实现**（2026-11-17，提交 `d0ede03`）：确定性 AES-256-GCM，密钥取自 `PATIENT_FIELD_KEY`（HKDF 派生加密钥与 nonce 钥）。**生产部署前必须配置该环境变量**，否则启动被 `assertFieldCryptoReady` 拦下；存量数据需跑 `pnpm db:reencrypt -- --apply` |
+| 加密算法选型留痕 | `field-crypto.ts` 文件头注释 | 采用**确定性**（SIV 式，nonce 由明文派生）而非随机 IV：患者列表的姓名筛选依赖密文等值匹配。已知代价是同明文密文相同，可看出"两条记录同名"；需求人 2026-11-17 已知悉并接受。要消除需改随机 IV + 独立盲索引列（表结构变更） |
+| 密钥管理 | 环境变量 `PATIENT_FIELD_KEY` | ⚠️ **待运维**：密钥不得进仓库；换钥会让存量密文全部失效（`reencrypt` 脚本不支持 re-key，需先用旧钥导出再用新钥导入） |
+| 列表脱敏展示 | `Patient.*Masked` 字段 | 已实现（患者列表接口默认返回脱敏值） |
+| 详情页展示完整明文 | — | ❌ **未实现**：`decryptField` 已具备解密能力但无接口调用。按 `AGENTS.md` §5.3，回显明文必须同时加"访问即留痕"审计，属独立需求需单独出规格 |
 | 审计日志不落敏感明文 | `AUDIT_DETAIL_ALLOW_LIST` 白名单 | 已实现 |
 | 数据库备份加密 | — | 待运维配置 |
 

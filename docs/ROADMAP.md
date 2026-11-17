@@ -107,7 +107,7 @@
 |---|---|---|---|
 | P5-1 | 时段设置 | ⚠️ | `GET /time-slots` 已实现（含停用项，供历史血糖回显）；`TimeSlot` 表 + seed 已有；**无维护接口**，前端「目标时段设置」是 Placeholder |
 | P5-2 | 字典管理 | ⚠️ | `GET /dicts/:dictType` 已实现；`DictItem` 表已有；无维护接口 |
-| P5-3 | 系统参数 | ❌ | `SystemConfig` 表已建但无接口；血糖阈值仍用 `@gc/shared` 的 `DEFAULT_ALERT_RANGE` 占位常量 |
+| P5-3 | 系统参数 | ⚠️ | `SystemConfig` 表已建；**血糖阈值已落地读取**（2026-11-17，`f97fe85`）：新增 `modules/system/SystemConfigService`，`DEFAULT_ALERT_RANGE` 占位常量已删除，配置缺失/非法时拒绝写入。仍**无维护接口与管理页面**（改阈值目前只能改库或改 seed） |
 | P5-4 | 人员管理 | ⚠️ | `GET /staff`、`GET /departments` 只读下发已实现；无管理页面（Placeholder） |
 | P5-5 | 角色与权限管理 | ❌ | 角色与权限点是代码内静态定义（`@gc/shared` `roles.ts`），无配置界面 |
 
@@ -155,6 +155,9 @@
 |---|---|---|
 | 血糖查询 / 图表 / 日内汇总 | 无 | 原 P3-2、P3-3、P3-7；需先定汇总口径与是否建 `GlucoseDailySummary` |
 | 血糖数据管理（作废/更正） | 审计 | 原 P3-4；医疗记录不得物理删除，需设计作废留痕 |
-| 异常值复核 | schema 评审 | 原 P3-5；需给 `GlucoseRecord` 加状态字段，并登记 `41002` |
+| 异常值复核 | schema 评审 | 原 P3-5；需给 `GlucoseRecord` 加状态字段，并登记 `41002`。`41006 GLUCOSE_RECORD_LOCKED` 已提前占位（`8e22a4b`）但无代码抛出 |
 | 导出框架（异步任务 + 水印 + 审批留痕） | P5、P6 | 原 P3-6 与 P5 导出共用；需登记 `41008` |
-| 血糖阈值改为读 `SystemConfig` | P5-3 | 当前是 `DEFAULT_ALERT_RANGE` 占位常量 |
+| ~~血糖阈值改为读 `SystemConfig`~~ | ~~P5-3~~ | ✅ **已完成**（2026-11-17，`f97fe85`）：`SystemConfigService` 读取并校验，`DEFAULT_ALERT_RANGE` 已删除 |
+| 审计 `targetId` 支持从响应体取（建档留痕） | 审计 | `POST /patients` 无 `:id`，审计 `targetId` 为空；三个候选方案见 `docs/specs/patient-create.md` §9-3，推荐方案 A |
+| 详情页明文回显（含访问留痕） | 安全 | `decryptField` 已具备解密能力但无接口调用；按 `AGENTS.md` §5.3 必须同时加审计，需单独出规格 |
+| 统一两套脱敏实现 | 安全 | `@gc/shared` 的 `mask` 与 `field-crypto` 的 `mask*` 同名不同规则，前者是死代码；`*Masked` 是落库字段，换实现会让存量行与新行格式不一致，需先裁定 |

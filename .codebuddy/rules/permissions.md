@@ -43,11 +43,25 @@ globs: ["apps/server/**", "apps/web/**", "packages/shared/**"]
 5. **多角色取并集**：权限点取并集（`resolvePermissions`），数据范围取**最宽松档**（`resolveDataScope`）；
    无有效角色 → `NONE`（最小权限兜底），非法角色码直接忽略。
 
-6. **敏感字段默认脱敏**：身份证/手机号/姓名一律走 `packages/shared/src/mask`，
-   列表与详情默认返回脱敏值；返回完整值必须单独接口 + 权限点 + 审计留痕。
+6. **敏感字段默认脱敏**：列表与详情默认返回脱敏值；返回完整值必须单独接口 + 权限点 + 审计留痕。
+
+   ⚠️ **当前存在两套同名脱敏实现，规则不一致，待需求人裁定（2026-11-17 发现）**：
+
+   | 实现 | 谁在用 | `maskIdCard('110101199003074512')` | `maskName('欧阳明')` |
+   |---|---|---|---|
+   | `apps/server/src/common/crypto/field-crypto.ts` | **实际生效**：`patient.service.ts` 建档/编辑、`prisma/seed.ts` | `110********12`（前 3 后 2） | `欧*明`（无复姓检测） |
+   | `packages/shared/src/mask`（已从 `@gc/shared` 导出） | **无任何代码引用** | `110***********4512`（前 3 后 4） | `欧阳*`（有复姓检测） |
+
+   本条原先写"一律走 `packages/shared/src/mask`"，但那个模块实际是死代码。
+   **在裁定前不要擅自统一**：`*Masked` 是**落库字段**而非读取时计算，换实现会让 1001 条存量行
+   与新行格式不一致。新增脱敏需求时先问清用哪套，不要从 `@gc/shared` 顺手 import
+   （名字相同、行为不同，极易踩错）。
 
 7. **越权必须落审计**：`30002`（跨科室）、`30006`（角色无患者数据权限）、`30004`（缺权限点）
    都会被审计拦截器记为 `DENIED`，等保检查重点。
+   判定依据是**错误码号段 `3xxxx`**（`AuditLogInterceptor.resolveAuditResult`），不是异常类型；
+   `detail.errorCode` 带具体码。2026-11-17 之前按 `instanceof ForbiddenException` 判，
+   而全仓无人抛该异常，导致越权全记 `FAILED`——已修，**不要改回去**。
 
 8. **过渡期约定**：JWT 目前仍内嵌 `permissions / roles / dataScope`（方案 B 落地前）。
    改权限需重新登录才生效；P2 将改为「JWT 只带 `sub` + `pv`，权限由服务端缓存解析」。

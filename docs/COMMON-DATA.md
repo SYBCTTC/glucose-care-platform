@@ -22,7 +22,7 @@
 |---|---|---|---|---|---|
 | `D-ROLE` | 系统角色 | `dict/roles.ts` | `ROLE_CODE` / `ROLE_LABELS` / `ROLE_PERMISSIONS` | `DOCTOR`/`NURSE`/`NURSE_HEAD`/`DEVICE_ADMIN`/`SYS_ADMIN` | 人员角色、权限、数据范围 |
 | `D-TIMESLOT` | 时段**码**（契约） | `dict/time-slots.ts` | `TIME_SLOT_CATEGORY` / `TIME_SLOTS`（**仅 seed 源**） / `pickTimeSlotByTime` | 普通：`FASTING`/`BREAKFAST_PRE`/`BREAKFAST_POST`/`LUNCH_PRE`/`LUNCH_POST`/`DINNER_PRE`/`DINNER_POST`/`BEDTIME`；特殊：`RANDOM`(随机)/`RETEST`(复测)；强化：`INTENSIVE_AM`/`INTENSIVE_PM`/`INTENSIVE_NIGHT` | **code 是落库契约**（`GlucoseRecord.mealContext`），改名不改码；名称/区间/目标走 `DY-TIMESLOT`；**可用性由服务端查 `TimeSlot` 表校验，不得用本清单做白名单或展示兜底** |
-| `D-ALERT` | 预警范围默认值 | `dict/time-slots.ts` | `DEFAULT_ALERT_RANGE` | `{ low: 3.9, high: 16.7 }`（mmol/L） | 低血糖/高血糖阈值占位；接口就绪后改为读 `SystemConfig`，禁止硬编码 |
+| ~~`D-ALERT`~~ | 预警范围 | **已移出共享包**（2026-11-17） | ~~`DEFAULT_ALERT_RANGE`~~ 已删除 | `SystemConfig` 表：`glucose.low_threshold=3.9` / `glucose.high_threshold=16.7`（mmol/L） | 低血糖/高血糖阈值。**不再是前端可取的字典常量**，由服务端 `SystemConfigService` 读取判定，前端拿不到也不该拿；禁止硬编码或重新引入默认常量 |
 | `D-GENDER` | 性别 | `patient/schema.ts` | `GENDER` / `GENDER_LABELS` / `GENDER_SELECTABLE` | `MALE`(男)/`FEMALE`(女)/`UNSPECIFIED`(未说明)/`UNKNOWN`(未知，历史数据兜底，不进下拉) | 患者建档性别下拉（用 `GENDER_SELECTABLE`） |
 | `D-DIABETES` | 糖尿病类型 | `patient/schema.ts` | `DIABETES_TYPE` / `DIABETES_TYPE_LABELS` | `TYPE_1`(I型糖尿病)/`TYPE_2`(II型糖尿病)/`GESTATIONAL`(妊娠型糖尿病)/`SPECIAL`(特殊型糖尿病)/`OTHER`(其他) | 患者建档糖尿病类型下拉；库内存 code |
 | `D-PATSTATUS` | 患者住院状态 | `patient/schema.ts` | `PATIENT_STATUS` / `PATIENT_STATUS_LABELS` | `INPATIENT`(住院患者)/`DISCHARGED`(出院患者) | 患者管理 Tab、列表状态展示 |
@@ -62,7 +62,7 @@
 | `type` | `0` 强化 / `1` 普通 / `4` 特殊，见 `TIME_SLOT_CATEGORY` |
 | `startTime` / `endTime` | `HH:mm`；**普通时段要求 00:00~24:00 全覆盖、不重叠、不跨零点**，区间左闭右开 `[start, end)`，`24:00` 表示当日终点 |
 | `timeScope` | 派生字段 `${startTime}-${endTime}`，服务端拼接、不落库；无区间为 `null` |
-| `valueDown` / `valueUp` | 该时段控糖目标（mmol/L）；特殊/强化为空。注意：与 `D-ALERT`（全局预警阈值）不是同一概念 |
+| `valueDown` / `valueUp` | 该时段控糖目标（mmol/L）；特殊/强化为空。注意：与全局告警阈值（`SystemConfig` 的 `glucose.low_threshold` / `glucose.high_threshold`）不是同一概念，且**当前未接入任何判定**（见下文时段区间口径） |
 
 - 特殊时段（随机/复测）与强化时段**不要求区间**，`startTime/endTime/timeScope/valueDown/valueUp` 均为 `null`。
 - 展示顺序只由 `sortOrder` 决定：普通（10~80）→ 特殊（90~100）→ 强化（110~130）；服务端不按 `type` 分组，前端分组只是 UI 呈现。
@@ -84,11 +84,17 @@
 | `RANDOM` / `RETEST` | 随机 / 复测 | — | — |
 | `INTENSIVE_AM` / `_PM` / `_NIGHT` | 强化-上午 / 下午 / 夜间 | — | — |
 
-**待临床确认（可能是错的，别当既定口径用）：**
+**时段区间口径（2026-11-17 需求人确认，按既定口径使用）：**
 
-- 只有 8 个普通时段码又要求 24h 全覆盖 → `12:00-17:00` 只能归「午餐后」，下午 5 小时都算午餐后。若不可接受需新增时段码（属 `code` 契约变更）。
-- `FASTING` 覆盖 00:00-07:00 整个夜间，凌晨起床前的读数都归空腹。
-- `valueDown/valueUp` 目前是纯数据字段，**未接入任何判定**；低/高血糖仍按 `D-ALERT`。
+- ✅ **已确认**：只有 8 个普通时段码又要求 24h 全覆盖 → `12:00-17:00` 归「午餐后」，下午 5 小时都算午餐后。
+  需求人接受当前设定，不新增时段码。将来若临床提出异议，新增时段码属 `code` 契约变更，需走评审。
+- ✅ **已确认**：`FASTING` 覆盖 `00:00-07:00` 整个夜间，凌晨起床前的读数都归空腹。需求人接受当前设定。
+- ⏸️ **保持现状（2026-11-17 需求人决定先不改动）**：`valueDown` / `valueUp`（分时段控糖目标）目前是
+  **纯数据字段，未接入任何判定**。低/高血糖判定走**全局告警阈值**，即 `SystemConfig` 的
+  `glucose.low_threshold` / `glucose.high_threshold`（seed 默认 `3.9` / `16.7`），
+  由 `SystemConfigService` 读取，**不是**按时段细化。
+  ⚠️ 因此"早餐后超 10.0 才算高"这类分时段期望**当前不成立**；接入 `valueDown/valueUp` 属独立需求，
+  需先出规格（会改变结果类型判定口径，影响历史数据可比性）。
 
 **已知约束：**
 
@@ -105,7 +111,7 @@
 ## 五、提取示例（后续提需求时这样引用）
 
 - "添加血糖表单的**结果选项**用 `DY-RESULT`（`dictItems(DICT_TYPE.GLUCOSE_RESULT)`，RadioGroup 只渲染 `checkable=true` 的项，并在最前面加一个不在字典里的「检测」占位项），**操作人**用 `DY-OPERATOR`（默认带出 `CURRENT_USER`，若当前账号不在其中则前端临时补一条，不写回 DY-OPERATOR）。"
-- "患者血糖展示按 `DY-TIMESLOT` 的时段作为表头（普通时段 + 特殊时段，强化按检测时间落点归入普通时段），超 `D-ALERT` 范围标红；录入弹窗的「检测时段」取 `useCommonDataStore().timeSlots`，并按检测时间自动选中。"
+- "患者血糖展示按 `DY-TIMESLOT` 的时段作为表头（普通时段 + 特殊时段，强化按检测时间落点归入普通时段），**按服务端返回的 `resultType` 着色**（`'0'` 偏低 / `'2'` 偏高标红），不要在前端拿阈值自己比——阈值在 `SystemConfig` 里、前端取不到；录入弹窗的「检测时段」取 `useCommonDataStore().timeSlots`，并按检测时间自动选中。"
 - "设备列表的状态列用 `D-DEVSTATUS` 映射中文；设备选择用 `DY-DEVICE`（`useCommonDataStore().devices`）。"
 - "建档表单的性别用 `D-GENDER`（可选值取 `GENDER_SELECTABLE`），糖尿病类型用 `D-DIABETES`，责任医生用 `DY-DOCTOR`（`staffByRole('DOCTOR')`），责任护士用 `DY-OPERATOR`，科室用 `DY-DEPT`。"
 - "糖化血红蛋白：范围常量 `HBA1C_MIN/HBA1C_MAX/HBA1C_UNIT`（`patient/schema.ts`），0~100、最多 1 位小数、单位 `%`，禁止在页面写死范围和单位。"

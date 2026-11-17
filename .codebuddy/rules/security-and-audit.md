@@ -13,6 +13,8 @@ globs:
 - 角色枚举只能用 `@gc/shared` 的 `RoleCode`
 - **所有患者数据查询必须经过统一的数据权限过滤器**，禁止各自写 where
 - 护士 → 本科室患者；医生 → 管辖患者；设备管理员 → 仅设备
+- 医生**可建档**（`PATIENT_CREATE`，2026-11-17 授予），但数据范围仍是 `DEPARTMENT`，
+  只能建本科室患者；未授予 `PATIENT_UPDATE` / `PATIENT_ADMIT`
 - 越权返回 403 + 写审计日志
 
 ## 审计（硬要求）
@@ -21,8 +23,31 @@ globs:
 - **append-only**：禁止提供 UPDATE / DELETE 接口
 - 留存 ≥ 180 天
 
+### `result` 三值语义（2026-11-17 起真正生效，改拦截器前必读）
+- `DENIED` **按错误码号段判定**：`3xxxx`（授权与数据权限）→ `DENIED`，其余异常 → `FAILED`。
+  见 `AuditLogInterceptor` 的 `resolveAuditResult`
+- **禁止改回按异常类型判**（`error instanceof ForbiddenException`）：项目规范要求业务错误一律抛
+  `BusinessException`，全仓无任何守卫/service 抛 `ForbiddenException`，按类型判会让该分支不可达、
+  越权全部落成 `FAILED`，审计表就筛不出越权尝试（这是 2026-11-17 修掉的真实缺陷，实测 `DENIED` 仅 1 行）
+- 失败时 `detail.errorCode` 必须带具体码；取不到码时**不写该键**，不要塞 `null`
+- 只认数字码：Prisma 的 `PrismaClientKnownRequestError.code` 是 `'P2002'` 这类字符串，不得当业务码
+- `detail.requestId` 必须取 `request.requestId`（`RequestIdMiddleware` 生成，与响应头 `X-Request-Id` 同值）。
+  **不是** `context.getClass().name`——那是修掉的旧 bug，会导致审计行无法与日志、用户报障关联
+- 存量审计行不回改：`db8f363` 之前的行越权仍记 `FAILED`、`requestId` 仍是类名、无 `errorCode`，按 `createdAt` 分界解读
+
 ## 个人信息
 - 姓名/身份证/手机号：加密存储 + 列表脱敏
+- **加密唯一实现**：`apps/server/src/common/crypto/field-crypto.ts`，`prisma/seed.ts` 也走它，
+  **禁止另写一份**（seed 曾自带 `cipher()` 副本，会绕过加密写 base64）
+- 算法：**确定性 AES-256-GCM**（SIV 式，nonce 由明文派生），密钥取 `PATIENT_FIELD_KEY`。
+  必须确定性——姓名筛选靠密文等值匹配，随机 IV 会让搜索失效。**禁止改成随机 IV**，
+  除非同时加独立盲索引列（表结构变更，需评审）
+- 密文前缀带版本号（`enc:aes256gcm:v1:` / 历史 `enc:hmac:` / 开发兜底 `enc:`），换算法时靠它共存与迁移
+- 生产必须配 `PATIENT_FIELD_KEY`：缺失时加密静默降级成 base64（等于明文入库），
+  故 `main.ts` 的 `assertFieldCryptoReady` 在生产拒绝启动。存量数据配钥后跑 `pnpm db:reencrypt -- --apply`
+- `decryptField` 解密失败一律返回 `null` 并打警告，**不抛错**（展示路径不该让列表接口 500），
+  也**绝不返回错误明文**
+- 明文回显到详情页**尚未实现**：接入时必须同时加"访问即留痕"审计，属独立需求需单独出规格
 - 列表接口默认不返回完整身份信息
 - 导出必须留痕（导出人、时间、范围、条数）
 

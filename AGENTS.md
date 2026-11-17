@@ -97,7 +97,10 @@ packages/
 ### 4.3 取值范围与异常
 - 合法范围：**0.6 ~ 33.3 mmol/L**（含边界；与结果类型 `Low`(< 0.6) / `High`(> 33.3) 阈值对齐，边界值仍属合法读数）
 - 超范围**不入库**：由 `createGlucoseSchema`（`packages/shared/src/glucose/schema.ts`）直接拒绝（10001）；当前**无 `status` 字段**，无 `PENDING_REVIEW` 流程
-- 默认告警阈值：低血糖 `< 3.9 mmol/L`，高血糖 `> 16.7 mmol/L`（阈值需可配置，从系统配置读取，**禁止硬编码在业务代码**）
+- 告警阈值**存 `SystemConfig` 表**（key `glucose.low_threshold` / `glucose.high_threshold`，seed 默认 `3.9` / `16.7 mmol/L`），
+  由 `SystemConfigService.getGlucoseAlertThreshold()` 读取（2026-11-17 落地）。
+  **禁止硬编码，也禁止引入默认常量兜底**——原 `@gc/shared` 的 `DEFAULT_ALERT_RANGE` 已删除，不要重新加回来。
+  配置缺失/非法/`low >= high` 时服务端抛 `10000` **拒绝写入**，不退回默认值：按错误阈值分类比拒绝录入更危险，结果类型直接进病历
 
 ### 4.4 录入上下文（BGM 必填）
 - `mealContext` **应用层必填**（`createGlucoseSchema` 强制），落库**时段码**（`TimeSlot.code`）：普通 `FASTING`/`BREAKFAST_PRE`/`BREAKFAST_POST`/`LUNCH_PRE`/`LUNCH_POST`/`DINNER_PRE`/`DINNER_POST`/`BEDTIME`，特殊 `RANDOM`/`RETEST`，强化 `INTENSIVE_AM`/`INTENSIVE_PM`/`INTENSIVE_NIGHT`
@@ -140,13 +143,26 @@ packages/
 
 ### 5.2 审计日志（等保三级硬要求）
 - 记录：操作人 / 时间 / IP / 操作类型 / 对象（患者 ID）/ 变更前后的关键字段 / 结果
+- `result` 三值语义（2026-11-17 起真正生效）：`SUCCESS` / `DENIED` / `FAILED`。
+  **`DENIED` 按错误码号段判定**（`3xxxx` = 授权与数据权限），不是按异常类型——
+  项目规范要求业务错误一律抛 `BusinessException`，全仓无人抛 `ForbiddenException`，
+  按类型判会让越权全部落成 `FAILED`、审计表筛不出越权尝试。失败时 `detail.errorCode` 带具体码
+- `detail.requestId` 必须与响应头 `X-Request-Id` 同值（取自 `request.requestId`），用于串联审计行、服务端日志与用户报障
 - **查询患者血糖数据属于"敏感操作"，必须逐条留痕**
 - 审计日志表 **append-only**：只增，不改，不删（数据库层回收 UPDATE/DELETE 权限）
 - 留存 **≥ 180 天**，导出与删除操作同样留痕
 
 ### 5.3 个人信息保护
 - 患者姓名、身份证号、手机号：**加密存储**，列表接口默认返回**脱敏**值（`张*三`、`138****1234`）
-- 最小必要：详情页才展示完整信息，且访问即留痕
+- 加密方案（2026-11-17 起）：**确定性 AES-256-GCM**，密钥取环境变量 `PATIENT_FIELD_KEY`（经 HKDF 派生加密钥与 nonce 钥）。
+  **唯一实现是 `apps/server/src/common/crypto/field-crypto.ts`，`prisma/seed.ts` 也走它**，禁止另写一份
+- 为什么必须**确定性**（nonce 由明文派生，同明文→同密文）：患者列表的姓名筛选靠密文等值匹配
+  （`where.nameCipher = encryptDeterministic(query.name)`），随机 IV 会让搜索直接失效。
+  已知代价：能看出"两条记录同名"。要消除需改随机 IV + 独立盲索引列，属表结构变更需评审
+- 生产环境**必须**配置 `PATIENT_FIELD_KEY`：缺失时加密会静默降级成 base64（等于明文入库），
+  故 `main.ts` 的 `assertFieldCryptoReady` 在生产直接拒绝启动。存量数据在配置密钥后需跑 `pnpm db:reencrypt -- --apply`
+- 最小必要：详情页才展示完整信息，且访问即留痕。
+  ⚠️ **当前未实现**：`decryptField` 已具备解密能力但无任何接口调用；接入明文回显时必须同时加"访问即留痕"审计，属独立需求需单独出规格
 - 导出 Excel/PDF 必须：走审批流程（或至少记录导出人/时间/范围）、文件加患者信息时附水印
 
 ### 5.4 账号与会话

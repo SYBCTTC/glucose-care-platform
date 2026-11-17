@@ -103,3 +103,35 @@ SELECT action::text, COUNT(*) FROM "AuditLog" GROUP BY action ORDER BY 2 DESC;
 3. 手写迁移 SQL，必要时加前置数据检查（参考 `20261028000000_add_glucose_unique_patient_measured` 的 `DO $$ ... $$` 写法）。
 4. `pnpm db:deploy` + `pnpm db:generate`。
 5. `pnpm typecheck` / `pnpm test`，并回填 `AGENTS.md` §4 **与 `.codebuddy/rules/*`** 的口径（两处都要改，漏一处 AI 仍会按旧口径生成代码）。
+
+## 6. 数据级迁移（不改表结构，但改存量数据）
+
+与 schema 迁移分开管理：这类操作**不产生 migration 目录**，`prisma migrate status` 也看不出差别，
+但会改存量行，同样需要试运行、可复核、可幂等重跑。
+
+| 脚本 | 用途 | 执行 |
+|---|---|---|
+| `prisma/reencrypt-patient-fields.ts` | 把 `Patient.*Cipher` / `User.phoneCipher` 的旧方案密文重加密为当前的确定性 AES-256-GCM | `pnpm db:reencrypt`（试运行）→ `pnpm db:reencrypt -- --apply`（写库） |
+
+**什么时候必须跑**：首次配置 `PATIENT_FIELD_KEY` 之后；或加密算法/密文前缀版本号变更之后。
+不跑的后果：存量行仍是 `enc:<base64>`（等于明文），而新写入是 AES，**姓名等值查询会漏掉存量行**
+（查询用 AES 密文匹配，存量是 base64，匹配不上）。
+
+**脚本的安全约定**（新增同类脚本时照抄）：
+- 默认试运行，必须显式 `--apply` 才写库；
+- 前置条件不满足直接拒绝执行并退出码 1（如未配密钥时 base64→base64 空转还报"成功"，会掩盖问题）；
+- 解密不出的行**跳过并计数**，绝不拿 `null`/空串覆盖原密文；
+- 幂等：确定性加密下重跑产出相同密文，自动跳过，可反复执行；
+- 游标分页 + 整页一个事务，避免一次性载入全表、也避免半页新半页旧；
+- 输出只有统计数字与前缀分布，**不打印任何明文、密文或患者标识**。
+
+**不支持换密钥（re-key）**：历史 `enc:hmac:` 密文不可逆；已用旧钥加密的 AES 密文换钥后 GCM 校验会失败。
+两种情况都只会被跳过。需要换钥时先用旧钥导出、再用新钥导入，属独立运维流程。
+
+**2026-11-17 的演练记录**（对开发库完整跑过一遍后已还原）：
+试运行识别 1006 行 / 1013 个 legacy 字段 → `--apply` 后分布变为 `aes 1013`、无法解密 0 →
+二次 `--apply` 为 0 行变更（幂等）→ 迁移后只读验证 1008/1008 往返一致、1008/1008 确定性成立、
+脱敏值交叉校验 1008/1008（用 `maskName(解出的明文)` 比对库里 `nameMasked`，在不打印明文的前提下证明解密正确）、
+等值查询命中 7 行同名患者 → 用还原脚本改回 base64 并复核。
+⚠️ 开发库当前**仍是 base64**：因为 `PATIENT_FIELD_KEY` 需人工写入 `.env`（AI 不得修改 `.env*`），
+配置密钥后请执行 `pnpm db:reencrypt -- --apply`。
