@@ -130,7 +130,7 @@
 |---|---|---|---|
 | P7-1 | Docker 化部署 | ❌ | 仓库有 `docker-compose.yml`，**无 `Dockerfile`** |
 | P7-2 | CI/CD | ❌ | **无 `.github/workflows`**；目前靠 husky 预提交钩子 + 本地 `pnpm lint/typecheck/test` |
-| P7-3 | 验收测试 | ❌ | 已有单测（server 151 / shared 59 / web 10，2026-11-17），无端到端验收用例集 |
+| P7-3 | 验收测试 | ❌ | 已有单测（server 181 / shared 59 / web 10，2026-11-17），无端到端验收用例集 |
 
 > 已具备但不计入本阶段：本地开发环境已脚本化（嵌入式 PostgreSQL + `pnpm dev:up` / `dev:down`）。
 

@@ -121,7 +121,7 @@ packages/
 - 将来若要允许"同一时间点多来源各一条"（设备+手工），必须先改本约束，属契约变更
 
 ### 4.6 CGM 扩展（**当前未预留，属目标态**）
-> 现状（2026-10-22 重构后简化重建，见 `docs/ARCHITECTURE.md:43-60`）：`GlucoseRecord` 仅
+> 现状（2026-10-22 重构后简化重建，见 `docs/ARCHITECTURE.md` §4；引用章节而非行号，避免行号漂移后指错）：`GlucoseRecord` 仅
 > `resultType / valueMmolL / mealContext / measuredAt / operatorId / testStrip / remark`；
 > **没有** `kind`、`rawPayload`、`GlucoseDailySummary`，**没有** `GlucoseIngestionService`
 > （现为 `GlucoseService`），`prisma/sql/glucose_record_partition.sql` **不存在**。
@@ -169,6 +169,21 @@ packages/
   已知代价：能看出"两条记录同名"。要消除需改随机 IV + 独立盲索引列，属表结构变更需评审
 - 生产环境**必须**配置 `PATIENT_FIELD_KEY`：缺失时加密会静默降级成 base64（等于明文入库），
   故 `main.ts` 的 `assertFieldCryptoReady` 在生产直接拒绝启动。存量数据在配置密钥后需跑 `pnpm db:reencrypt -- --apply`
+- ⚠️ **改 `.env` 里的 `PATIENT_FIELD_KEY` 后必须重启后端**：密钥只在进程启动时读入，改文件不影响已运行进程。
+  未重启时新建患者会写成 base64 或旧钥密文，造成方案混杂、姓名搜索漏行，且**全程不报错**。
+  本项 2026-11-17 一天内踩坑两次（后端 14:04 启动 / `.env` 14:33 修改；以及 14:38 / 14:58）。
+  核对方式：**进程启动时间必须晚于 `.env` 修改时间**
+- **换密钥（re-key）**：设 `PATIENT_FIELD_KEY_OLD` 为旧钥，跑 `pnpm db:reencrypt`（试运行）→ `pnpm db:reencrypt -- --apply`（写库）。
+  脚本用旧钥解密、新钥（`PATIENT_FIELD_KEY`）加密，并回显新旧钥的 SHA-256 前 8 位**指纹**（不回显密钥本身）供操作者核对。
+  跑完立即清除 `PATIENT_FIELD_KEY_OLD`，并重启后端。要点：
+  - ⚠️ **旧钥一旦丢失，存量密文永久不可解密**。换钥前必须先备份旧钥与数据库
+  - **失败即安全**：拿错旧钥或新旧钥写反时，全部 GCM 校验失败被跳过、**零写入**，据此可发现拿错钥
+  - re-key 模式**不幂等**（方案迁移模式幂等）：跑完后存量已是新钥密文，再用同一把旧钥跑会全部跳过
+  - 历史 `enc:hmac:` 密文不可逆，任何模式下都只会被跳过并计数
+  - 标准流程、2026-11-17 的完整轮换演练记录（A→B→A 往返后密文逐字节相同）见 `docs/DB-MIGRATION-NOTES.md` §6
+- **删除患者数据时一律不得连带删审计**：`AuditLog` 是 append-only（等保三级：只增不改不删、留存 ≥180 天），
+  且其 `targetId` 不建外键。删患者只处理 `PatientDeviceBinding`（必填关系默认 Restrict，须先解绑）→ `Patient`
+  （`GlucoseRecord` 是 `onDelete: Cascade`，随主表删除），审计行保留作为"该患者曾存在"的追溯凭证
 - 最小必要：详情页才展示完整信息，且访问即留痕。
   ⚠️ **当前未实现**：`decryptField` 已具备解密能力但无任何接口调用；接入明文回显时必须同时加"访问即留痕"审计，属独立需求需单独出规格
 - 导出 Excel/PDF 必须：走审批流程（或至少记录导出人/时间/范围）、文件加患者信息时附水印

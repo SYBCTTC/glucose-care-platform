@@ -40,23 +40,40 @@ NestJS 单体服务 ──► PostgreSQL 16
 
 角色 → 权限映射集中在 `packages/shared/src/dict/roles.ts`，前后端同源。
 
-## 4. 数据模型要点（通用）
+## 4. 数据模型要点
 
-> 血糖相关模型（`GlucoseRecord` / `GlucoseDailySummary`）已于 2026-10-22 重构中整体移除。
-> 以下要点仅作历史参考，恢复血糖功能时再据此重建。
+> ⚠️ 本节曾长期停留在 2026-10-22 重构后的"血糖模型已整体移除"状态，与实库严重不符——
+> 而 `AGENTS.md` §4.6 还把本节当作现状的权威来源，AI 顺着指针读到的全是反的。
+> 2026-11-17 按 `prisma/schema.prisma` 实况重写。**改 schema 后必须同步本节。**
 
-- 统一存储 `mmol/L`（`valueMmolL`），原始值另存 `rawValue / rawUnit`
-- `measuredAt` 为业务主时间（医护填写），`receivedAt` 为接收时间
-- `dedupeKey` 保证幂等：手工 `manual:{patientId}:{ISO}`，设备 `device:{deviceId}:{ISO}`
-- `kind` 区分 BGM / CGM，`rawPayload` 承载 CGM 扩展字段
-- `GlucoseDailySummary` 为 CGM 的 TIR / CV 指标预留
+**血糖模型现状**：`GlucoseRecord` **存在且在用**（`modules/glucose`），字段仅
+`resultType / valueMmolL / mealContext / measuredAt / operatorId / testStrip / remark`（加 `id / patientId / createdAt`）。
 
-## 5. CGM 演进路径（历史规划，功能已移除）
+- 统一存储 `mmol/L`（`valueMmolL Decimal? @db.Decimal(4,1)`）；**没有** `rawValue / rawUnit`，接口只收 mmol/L
+- `measuredAt` 是业务主时间（`Timestamptz(3)`，医护填写）；**没有** `receivedAt`，排查用 `createdAt`
+- 幂等靠唯一约束 `@@unique([patientId, measuredAt])`；**没有** `dedupeKey` 字段，
+  也不要再拼 `manual:{patientId}:{ISO}` / `device:{deviceId}:{ISO}` 键
+- **没有** `kind` / `rawPayload` / `GlucoseDailySummary`——CGM 扩展属目标态（见 §5），
+  上线前一次性补 schema 并走人工评审，**禁止按 §5 直接加字段**
+- `mealContext` 落库时段码（`TimeSlot.code`）。库层可空是给设备上报/历史数据留位，**应用层必填**；
+  code 可用性由服务端查 `TimeSlot` 表判定（存在且 `enabled`），不用静态白名单
+- 告警阈值存 `SystemConfig`（`glucose.low_threshold` / `glucose.high_threshold`），由 `SystemConfigService` 读取；
+  配置缺失/非法/`low >= high` 时拒绝写入，**不退回默认常量**
+- 关系删除语义：`patient` 是 `onDelete: Cascade`；`operator` 是 `onDelete: Restrict`
+  （删用户不得抹掉录入人，医疗留痕优先）
 
-1. 新增数据接入 adapter，统一走数据接入服务（当前为 `GlucoseService`）
-2. `kind = CGM`，趋势箭头等信息写入 `rawPayload`
-3. 日汇总改为任务调度预计算，前端只读 `GlucoseDailySummary`
-4. 数据量超阈值时按月分区（见 `prisma/sql/glucose_record_partition.sql`）
+**全部模型**：`Department / User / Role / UserRole / Patient / GlucoseRecord / Device /
+PatientDeviceBinding / AuditLog / SystemConfig / DictItem / TimeSlot`。
+患者敏感字段（姓名/身份证/手机号）加密存为 `*Cipher`，另存**落库**脱敏值 `*Masked`，见 `AGENTS.md` §5.3。
+
+## 5. CGM 演进路径（目标态，当前未预留任何字段）
+
+1. 新增数据接入 adapter，统一走 `GlucoseService`，不得改动上层
+2. 一次性补齐 schema：`kind`（BGM/CGM）、`rawPayload Json?`（趋势箭头等）、日汇总表（TIR / CV）
+3. 日汇总改为任务调度预计算，前端只读汇总表
+4. **分区触发条件** = 启用 CGM 或单表超 5000 万行；当前 BGM 规模**不要分区**。
+   执行前先补 `prisma/sql/glucose_record_partition.sql`——⚠️ **该文件当前不存在**，
+   `prisma/sql/` 下只有 `binding_partial_unique.sql`
 5. 前端图表开启 `sampling: 'lttb'` 与 `large: true`
 
 ## 6. 审计设计
@@ -68,6 +85,11 @@ NestJS 单体服务 ──► PostgreSQL 16
 
 ## 7. 部署与交付
 
-- 开发：`docker compose up -d postgres redis` + `pnpm dev`
+- **开发（日常首选）**：`pnpm dev:up` —— 由 `.codebuddy/skills/gc-dev` 拉起**嵌入式 PostgreSQL** +
+  后端(3000) + 前端(5173)，带增量判断，比 `pnpm dev` 快约 5-8 秒；`pnpm dev:down` 停止
+  （保留数据库以加快下次启动）。日志在 `.devtools/logs/`
+- 开发（Docker 方式，可选）：`docker compose up -d postgres redis` + `pnpm dev`
 - 生产：单机 `apps/server`（Node 20）+ `apps/web/dist`（Nginx）+ PostgreSQL
 - 内网离线：依赖走 pnpm store 离线包，镜像走 `docker save` 或私有仓库
+- ⚠️ **仓库当前无 Dockerfile**：`docker-compose.yml` 里的 `gc-server:1.0.0` / `gc-web:1.0.0`
+  是生产交付占位（已注释），镜像构建属 ROADMAP 的"Docker 化"待立项项
