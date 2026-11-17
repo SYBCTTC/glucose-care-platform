@@ -31,14 +31,43 @@ NestJS 单体服务 ──► PostgreSQL 16
 
 ## 3. 权限模型
 
-- 认证：JWT（Bearer），载荷含 `userId / departmentId / permissions`
+- 认证：JWT（Bearer）。载荷含 `sub`(= userId) / `username` / `displayName` / `departmentId` /
+  `departmentName` / `permissions` / `roles` / `dataScope` / `mustChangePassword` / `permissionVersion`。
+  `permissionVersion` 取用户 `updatedAt`，用于权限变更后使旧 token 失效
 - 鉴权：`PermissionsGuard` 校验 `@RequirePermissions(...)` 声明的权限点
-- **数据权限**：`ROLE_DATA_SCOPE` 定义角色可见范围，患者数据强制科室匹配
-  - 护士 / 医生 / 护士长 → 本科室
-  - 设备管理员 → 无患者数据（`DATA_SCOPE.NONE`）
-  - 系统管理员 → 仅系统管理，**不自动拥有患者数据查看权**
+- **数据权限**：`@RequireDataScope(RESOURCE.X)` 标注接口，`ROLE_DATA_SCOPE` 决定可见范围。
+  新增受数据权限约束的资源类型必须在 `roles.ts` 的 `RESOURCE` 中登记，否则数据权限不生效
 
-角色 → 权限映射集中在 `packages/shared/src/dict/roles.ts`，前后端同源。
+角色 → 数据范围与关键权限差异：
+
+| 角色 | 数据范围 | 权限要点 |
+|---|---|---|
+| 医生 `DOCTOR` | `DEPARTMENT` 本科室 | 可建档（2026-11-17 需求人决定），但**不含** `patient:update` / `patient:admit` |
+| 护士 `NURSE` | `DEPARTMENT` 本科室 | 含建档、编辑、办理住院 |
+| 护士长 `NURSE_HEAD` | `DEPARTMENT` 本科室 | 另含 `patient:manage`（归档）、`audit:view`、`quality:manage` |
+| 设备管理员 `DEVICE_ADMIN` | `NONE` 无患者数据 | 只有设备 / 质控 / 公共数据权限 |
+| 系统管理员 `SYS_ADMIN` | **`ALL` 全院** | **全部 22 个权限点**，含患者数据的查看 / 建档 / 编辑 / 归档 / 办理住院 |
+
+> ⚠️ **系统管理员是全院数据范围，不是"仅系统管理"**。本节原表述"系统管理员 → 仅系统管理，
+> 不自动拥有患者数据查看权"与代码长期相反，2026-11-17 经需求人裁定：**文档错、代码对**，已按
+> `roles.ts` 实况（`ROLE_DATA_SCOPE.SYS_ADMIN = DATA_SCOPE.ALL`、`ROLE_PERMISSIONS.SYS_ADMIN` 含全部权限点）修正。
+>
+> 这与等保三级的最小必要原则存在张力，属**有意的设计取舍**而非缺陷——演示与运维需要单一账号可见全部功能。
+> 若将来要收紧，须改 `roles.ts` 的 `ROLE_DATA_SCOPE` 与 `ROLE_PERMISSIONS`，属鉴权变更需人工评审，
+> **不要只改文档**（本次事故正是文档与代码各说一套造成的）。
+
+- `SELF`（仅本人）档已在 `apps/server/src/common/data-scope/scope.util.ts` 实现并有单测，
+  但**当前无角色使用**，属预留
+- 数据权限的唯一权威实现是 `apps/server/src/common/data-scope/scope.util.ts`
+  （`buildScopeWhere` 生成列表 where、`assertInScope` 做单行越权校验、`canAccessResource` 前置快速失败）。
+  **service 中禁止手写 `x.departmentId !== user.departmentId` 之类判断**，否则新模块极易漏掉数据权限。
+  四档 × 各资源的完整语义表见 `docs/PERMISSION-DESIGN.md` §4
+- 多角色时 `resolveDataScope` 取**最宽松**一档；无有效角色返回 `NONE`（最小权限兜底）；
+  非法角色码直接忽略，避免脏数据扩大权限
+- `NONE` 档角色访问 `PATIENT_SCOPED_RESOURCES`（当前为 `PATIENT`）一律拒绝；`SELF` 档同样不得访问 `PATIENT`
+- 设计原则（见 `roles.ts` 注释）：**不留"超管后门"式的隐式放行**，权限一律用权限点显式表达。
+  角色 → 权限映射集中在 `packages/shared/src/dict/roles.ts`，前后端同源
+  （前端菜单/按钮显隐仅是体验，后端 `PermissionsGuard` 才是强制校验）
 
 ## 4. 数据模型要点
 
