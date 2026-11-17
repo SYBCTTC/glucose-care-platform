@@ -152,7 +152,7 @@ model GlucoseRecord {
   resultType  String   @db.VarChar(2)
   /// 血糖值，统一 mmol/L；非数值类型（3~9）为 null
   valueMmolL  Decimal? @db.Decimal(4, 1)
-  /// 测量时段，取值见 @gc/shared TIME_SLOTS.code
+  /// 测量时段码，取值见 TimeSlot.code（动态数据）；录入时由服务端校验该 code 存在且 enabled
   mealContext String?  @db.VarChar(32)
   measuredAt  DateTime @db.Timestamptz(3)
   /// 记录者（录入人）；历史数据与设备自动上报可为空，手工录入由应用层强制必填
@@ -163,8 +163,10 @@ model GlucoseRecord {
   remark      String?  @db.VarChar(500)
   createdAt   DateTime @default(now())
 
-  patient  Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  operator User?   @relation("GlucoseOperator", fields: [operatorId], references: [id])
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  /// 记录者是医疗留痕，删用户不得抹掉录入人，因此显式 Restrict（与实库一致）。
+  /// 对照 AuditLog.operatorId 干脆不建外键，同样是防止留痕随用户删除而失真。
+  operator User?  @relation("GlucoseOperator", fields: [operatorId], references: [id], onDelete: Restrict)
 
   /// 唯一约束兜底：同一患者同一检测时间只允许一条记录；重复提交由服务端按幂等返回 skipped=true
   @@unique([patientId, measuredAt])
@@ -231,23 +233,31 @@ model PatientDeviceBinding {
 
 // ---------------------------- 审计与配置 ----------------------------
 
+/// 审计动作。
+/// 顺序与取值**必须与实库 pg_enum 一致**：AuditLog 只增不改不删（留存 >= 180 天），
+/// 重建枚举类型会让引用了历史值的旧行转换失败并整事务回滚，因此这里向实库靠拢，不重排。
 enum AuditAction {
   LOGIN
   LOGIN_FAILED
   LOGOUT
-  PASSWORD_CHANGE
   PATIENT_VIEW
-  /// 患者建档（新增患者），与 PATIENT_MANAGE 区分，便于审计按动作过滤
-  PATIENT_CREATE
-  /// 患者信息编辑（改床号/责任医生等），detail.changedFields 记变更字段名
-  PATIENT_UPDATE
   PATIENT_MANAGE
-  /// 添加血糖（手工录入血糖记录），detail 记 resultType / valueMmolL / testStrip / measuredAt
-  GLUCOSE_CREATE
+  /// 以下 3 个是 P3 血糖模块 2026-10-22 移除前写入的历史值，实库仍有旧审计行引用。
+  /// 保留只为能读出旧记录，**新代码禁止使用**（血糖动作统一用 GLUCOSE_CREATE）。
+  GLUCOSE_VIEW
+  GLUCOSE_INPUT
+  GLUCOSE_EXPORT
   DEVICE_VIEW
   DEVICE_MANAGE
   USER_MANAGE
   DATA_EXPORT
+  PASSWORD_CHANGE
+  /// 患者建档（新增患者），与 PATIENT_MANAGE 区分，便于审计按动作过滤
+  PATIENT_CREATE
+  /// 患者信息编辑（改床号/责任医生等），detail.changedFields 记变更字段名
+  PATIENT_UPDATE
+  /// 添加血糖（手工录入血糖记录），detail 记 resultType / valueMmolL / testStrip / measuredAt / skipped
+  GLUCOSE_CREATE
 }
 
 /// 审计日志：只增不改不删，留存 >= 180 天（等保三级要求）
