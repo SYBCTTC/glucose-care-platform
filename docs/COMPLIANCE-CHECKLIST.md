@@ -40,7 +40,7 @@
 | 患者敏感字段加密存储 | `Patient.*Cipher` + `common/crypto/field-crypto.ts` | ✅ **已实现并已启用**（2026-11-17，提交 `d0ede03`）：确定性 AES-256-GCM，密钥取自 `PATIENT_FIELD_KEY`（HKDF 派生加密钥与 nonce 钥）。开发库存量已跑 `db:reencrypt --apply` 完成迁移（1013 个字段全为 AES，往返校验 1013/1013）。**生产部署前必须配置该环境变量**，否则启动被 `assertFieldCryptoReady` 拦下 |
 | 加密算法选型留痕 | `field-crypto.ts` 文件头注释 | 采用**确定性**（SIV 式，nonce 由明文派生）而非随机 IV：患者列表的姓名筛选依赖密文等值匹配。已知代价是同明文密文相同，可看出"两条记录同名"；需求人 2026-11-17 已知悉并接受。要消除需改随机 IV + 独立盲索引列（表结构变更） |
 | 密钥管理 | 环境变量 `PATIENT_FIELD_KEY` | ✅ **开发环境已配置强随机钥**（2026-11-17，43 位 base64url = 32 字节，指纹 `0d6ad038`）；生产待运维注入。密钥不得进仓库（`apps/server/.env` 已被 `.gitignore` 忽略，已核对 `git check-ignore` 通过） |
-| 密钥强度 | 同上 | ✅ **已整改**（2026-11-17）：原为 8 位纯小写（熵上限约 38 bit，GPU 数十秒可穷举），已换为 `randomBytes(32).toString('base64url')`。⚠️ 代码层**仍未做强度校验**（任何非空串都接受），是否给 `assertFieldCryptoReady` 加"生产环境短于 32 位拒绝启动"待需求人裁定，见 ROADMAP |
+| 密钥强度 | 同上 | ✅ **已整改**（2026-11-17）：原为 8 位纯小写（熵上限约 38 bit，GPU 数十秒可穷举），已换为 `randomBytes(32).toString('base64url')`（43 字符 = 256 bit）。🚫 **代码层不做强度校验**——需求人 2026-11-17 裁定：`assertFieldCryptoReady` 保持只判非空，强度改由流程保障（`.env.example` 注明生成命令与长度要求，生产由运维注入）。**残留风险**：弱钥不会被任何测试发现，只会在等保测评或库文件泄漏后暴露 |
 | 密钥轮换（re-key） | `prisma/reencrypt-patient-fields.ts` + `encryptWithKey`/`decryptWithKey` | ✅ **已实现并演练通过**（2026-11-17）：设 `PATIENT_FIELD_KEY_OLD` 即进入 re-key 模式（旧钥解密、新钥加密），脚本回显新旧钥**指纹**供核对。已在 1013 个真实密文上完成 当前钥→临时钥→当前钥 双向轮换，**往返后密文与演练前逐字节相同**（确定性加密下的无损判据）。失败即安全：拿错钥时全部 GCM 校验失败被跳过、零写入（已实测 1016 字段全跳过） |
 | 列表脱敏展示 | `Patient.*Masked` 字段 | 已实现（患者列表接口默认返回脱敏值） |
 | 详情页展示完整明文 | — | ❌ **未实现**：`decryptField` 已具备解密能力但无接口调用。按 `AGENTS.md` §5.3，回显明文必须同时加"访问即留痕"审计，属独立需求需单独出规格 |
