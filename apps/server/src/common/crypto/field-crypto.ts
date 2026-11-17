@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHmac, hkdfSync } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, createHmac, hkdfSync } from 'node:crypto';
 
 /**
  * 患者敏感字段（姓名 / 身份证 / 手机号）的加密、解密与脱敏。
@@ -30,7 +30,15 @@ import { createCipheriv, createDecipheriv, createHmac, hkdfSync } from 'node:cry
  *
  * 从环境变量 `PATIENT_FIELD_KEY` 读取，经 HKDF-SHA256 派生出两把独立子密钥
  * （加密钥与 nonce 钥，info 不同）。**禁止**把密钥写进代码、配置文件或提交到仓库。
- * 换密钥等于让全部存量密文失效，必须先解密再用新密钥重加密（见 prisma/reencrypt-patient-fields.ts）。
+ *
+ * ### 换密钥（re-key）
+ *
+ * 换钥会让全部存量密文的 GCM 校验失败，**明文永久不可恢复**，因此必须"旧钥解密 → 新钥加密"迁移。
+ * 业务代码只认 `PATIENT_FIELD_KEY`（新钥），迁移脚本额外读 `PATIENT_FIELD_KEY_OLD`（旧钥），
+ * 走 `encryptWithKey` / `decryptWithKey` 这对密钥参数化原语，见 `prisma/reencrypt-patient-fields.ts`。
+ *
+ * ⚠️ 旧钥一旦丢失，存量密文即不可解密——换钥前必须先备份旧钥，且**改完 `.env` 必须重启后端**
+ * （密钥只在进程启动时读入，未重启的进程仍用旧钥写入，会造成新旧密文混杂）。
  */
 
 /** 当前方案前缀 */
@@ -53,19 +61,44 @@ interface DerivedKeys {
   nonceKey: Buffer;
 }
 
-/** 派生结果按密钥原文缓存，避免每次加解密都跑 HKDF */
-let keyCache: { secret: string; keys: DerivedKeys } | null = null;
+/**
+ * 派生结果按密钥原文缓存，避免每次加解密都跑 HKDF。
+ *
+ * 用 Map 而非单槽：换密钥（re-key）时需要**同时**持有旧钥（解密）与新钥（加密），
+ * 单槽缓存会在两者之间反复失效，导致每个字段都重跑两次 HKDF。
+ * 上限 4 条并淘汰最早插入项，防止长期运行的进程里密钥被反复更换造成无界增长。
+ */
+const KEY_CACHE_LIMIT = 4;
+const keyCache = new Map<string, DerivedKeys>();
 
 function deriveKeys(secret: string): DerivedKeys {
-  if (keyCache !== null && keyCache.secret === secret) {
-    return keyCache.keys;
+  const cached = keyCache.get(secret);
+  if (cached !== undefined) {
+    return cached;
   }
   const keys: DerivedKeys = {
     encKey: Buffer.from(hkdfSync('sha256', secret, HKDF_SALT, 'gc-field-enc', KEY_BYTES)),
     nonceKey: Buffer.from(hkdfSync('sha256', secret, HKDF_SALT, 'gc-field-nonce', KEY_BYTES)),
   };
-  keyCache = { secret, keys };
+  if (keyCache.size >= KEY_CACHE_LIMIT) {
+    // Map 保持插入顺序，首个 key 即最早插入项
+    const oldest = keyCache.keys().next().value;
+    if (oldest !== undefined) {
+      keyCache.delete(oldest);
+    }
+  }
+  keyCache.set(secret, keys);
   return keys;
+}
+
+/**
+ * 密钥指纹：SHA-256 前 8 位十六进制。
+ *
+ * 供运维脚本回显"当前在用哪把钥"，**不泄漏密钥本身**（强随机钥无法由摘要反推）。
+ * 换密钥是高危操作，操作者必须能核对新旧钥身份，否则拿错钥跑一遍就等于永久损毁存量密文。
+ */
+export function keyFingerprint(secret: string): string {
+  return createHash('sha256').update(secret, 'utf8').digest('hex').slice(0, 8);
 }
 
 /** 是否已配置字段加密密钥 */
@@ -117,6 +150,21 @@ export function encryptDeterministic(plain: string): string {
     warnInsecureOnce();
     return `${LEGACY_PREFIX}${Buffer.from(plain, 'utf8').toString('base64')}`;
   }
+  return encryptWithKey(plain, secret);
+}
+
+/**
+ * 用**指定密钥**加密（确定性），供换密钥迁移使用。
+ *
+ * 与 `encryptDeterministic` 的唯一区别是密钥来源。本函数**不接受"未配置"状态**、
+ * 也没有 base64 兜底：re-key 场景下新旧两把钥都必须显式在手，
+ * 此时静默降级成 base64 等于把患者明文写进库，正是要杜绝的事故。
+ * 传入空串会让 HKDF 派生出一把"所有人都能算出"的密钥，比不加密更危险，故直接拒绝。
+ */
+export function encryptWithKey(plain: string, secret: string): string {
+  if (secret.trim() === '') {
+    throw new Error('[field-crypto] encryptWithKey 拒绝使用空密钥');
+  }
 
   const { encKey, nonceKey } = deriveKeys(secret);
   const nonce = createHmac('sha256', nonceKey).update(plain, 'utf8').digest().subarray(0, NONCE_BYTES);
@@ -153,25 +201,55 @@ export function decryptField(stored: string | null | undefined): string | null {
       console.warn('[field-crypto] 密文为 AES 方案但未配置 PATIENT_FIELD_KEY，无法解密');
       return null;
     }
-    const blob = Buffer.from(stored.slice(AES_PREFIX.length), 'base64');
-    if (blob.length <= NONCE_BYTES + TAG_BYTES) {
-      console.warn('[field-crypto] AES 密文长度异常（被截断或损坏），跳过解密');
-      return null;
-    }
-    const nonce = blob.subarray(0, NONCE_BYTES);
-    const tag = blob.subarray(NONCE_BYTES, NONCE_BYTES + TAG_BYTES);
-    const ciphertext = blob.subarray(NONCE_BYTES + TAG_BYTES);
-    try {
-      const decipher = createDecipheriv('aes-256-gcm', deriveKeys(secret).encKey, nonce);
-      decipher.setAuthTag(tag);
-      return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
-    } catch {
-      // GCM 校验失败：密钥换过、或密文被篡改。不打印密文内容，避免泄漏
-      console.warn('[field-crypto] AES-GCM 校验失败（密钥不匹配或密文被篡改），跳过解密');
-      return null;
-    }
+    return decryptAesWithKey(stored, secret);
   }
 
+  return decryptNonAes(stored);
+}
+
+/**
+ * 用**指定密钥**解密，供换密钥迁移使用（此时解密要用旧钥，而 `PATIENT_FIELD_KEY` 已是新钥）。
+ *
+ * 与 `decryptField` 的差别仅在密钥来源；对 `enc:hmac:`（不可逆）与 `enc:<base64>`（无需密钥）
+ * 两种前缀的处理完全一致，因此 re-key 过程中混有历史方案的行也能被正确升级或跳过。
+ */
+export function decryptWithKey(stored: string | null | undefined, secret: string): string | null {
+  if (stored === null || stored === undefined || stored === '') {
+    return null;
+  }
+  if (stored.startsWith(AES_PREFIX)) {
+    if (secret.trim() === '') {
+      console.warn('[field-crypto] decryptWithKey 收到空密钥，无法解密 AES 密文');
+      return null;
+    }
+    return decryptAesWithKey(stored, secret);
+  }
+  return decryptNonAes(stored);
+}
+
+/** AES 密文解密内核：调用方负责确保 secret 非空 */
+function decryptAesWithKey(stored: string, secret: string): string | null {
+  const blob = Buffer.from(stored.slice(AES_PREFIX.length), 'base64');
+  if (blob.length <= NONCE_BYTES + TAG_BYTES) {
+    console.warn('[field-crypto] AES 密文长度异常（被截断或损坏），跳过解密');
+    return null;
+  }
+  const nonce = blob.subarray(0, NONCE_BYTES);
+  const tag = blob.subarray(NONCE_BYTES, NONCE_BYTES + TAG_BYTES);
+  const ciphertext = blob.subarray(NONCE_BYTES + TAG_BYTES);
+  try {
+    const decipher = createDecipheriv('aes-256-gcm', deriveKeys(secret).encKey, nonce);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
+  } catch {
+    // GCM 校验失败：密钥换过、或密文被篡改。不打印密文内容，避免泄漏
+    console.warn('[field-crypto] AES-GCM 校验失败（密钥不匹配或密文被篡改），跳过解密');
+    return null;
+  }
+}
+
+/** 非 AES 前缀的处理：历史 HMAC 不可逆，legacy base64 无需密钥即可还原 */
+function decryptNonAes(stored: string): string | null {
   if (stored.startsWith(HMAC_PREFIX)) {
     console.warn('[field-crypto] 命中历史 HMAC 密文，该方案不可逆，无法还原明文');
     return null;

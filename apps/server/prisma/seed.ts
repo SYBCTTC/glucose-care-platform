@@ -68,8 +68,10 @@ async function main(): Promise<void> {
   ) {
     const user = await prisma.user.upsert({
       where: { username },
-      // 重跑 seed 即重置演示状态：统一密码；默认未改密，便于反复演示首次强制改密
-      update: { passwordHash, mustChangePassword: requireChangePassword },
+      // 重跑 seed 即重置演示状态：统一密码；默认未改密，便于反复演示首次强制改密。
+      // phoneCipher 也必须刷新：它由 PATIENT_FIELD_KEY 加密，换密钥后旧密文解不开，
+      // 若 update 分支不重加密，重灌 seed 也救不回账号手机号（患者侧同理，见下方 patient.upsert）。
+      update: { passwordHash, mustChangePassword: requireChangePassword, phoneCipher: cipher(phone) },
       create: {
         username,
         name,

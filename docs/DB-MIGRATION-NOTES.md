@@ -111,7 +111,7 @@ SELECT action::text, COUNT(*) FROM "AuditLog" GROUP BY action ORDER BY 2 DESC;
 
 | 脚本 | 用途 | 执行 |
 |---|---|---|
-| `prisma/reencrypt-patient-fields.ts` | 把 `Patient.*Cipher` / `User.phoneCipher` 的旧方案密文重加密为当前的确定性 AES-256-GCM | `pnpm db:reencrypt`（试运行）→ `pnpm db:reencrypt -- --apply`（写库） |
+| `prisma/reencrypt-patient-fields.ts` | 把 `Patient.*Cipher` / `User.phoneCipher` 的旧方案密文重加密为当前的确定性 AES-256-GCM；设 `PATIENT_FIELD_KEY_OLD` 则为**换密钥**（旧钥解密、新钥加密） | `pnpm db:reencrypt`（试运行）→ `pnpm db:reencrypt -- --apply`（写库） |
 | `prisma/remask-patient-fields.ts` | 按 `@gc/shared` 当前脱敏规则重算 `Patient.nameMasked` / `idCardMasked` / `phoneMasked` | `pnpm db:remask`（试运行）→ `pnpm db:remask -- --apply`（写库） |
 
 **`db:remask` 什么时候必须跑**：任何改动脱敏规则之后。`*Masked` 是**落库字段**而非读取时计算，
@@ -133,12 +133,26 @@ SELECT action::text, COUNT(*) FROM "AuditLog" GROUP BY action ORDER BY 2 DESC;
 - 默认试运行，必须显式 `--apply` 才写库；
 - 前置条件不满足直接拒绝执行并退出码 1（如未配密钥时 base64→base64 空转还报"成功"，会掩盖问题）；
 - 解密不出的行**跳过并计数**，绝不拿 `null`/空串覆盖原密文；
-- 幂等：确定性加密下重跑产出相同密文，自动跳过，可反复执行；
+- 幂等：确定性加密下重跑产出相同密文，自动跳过，可反复执行。
+  ⚠️ **仅方案迁移模式幂等**；re-key 模式不幂等——跑完后存量已是新钥密文，
+  再用同一把旧钥跑会全部解密失败被跳过（安全但数字难看），重跑前必须先确认库里到底是哪把钥；
 - 游标分页 + 整页一个事务，避免一次性载入全表、也避免半页新半页旧；
 - 输出只有统计数字与前缀分布，**不打印任何明文、密文或患者标识**。
 
-**不支持换密钥（re-key）**：历史 `enc:hmac:` 密文不可逆；已用旧钥加密的 AES 密文换钥后 GCM 校验会失败。
-两种情况都只会被跳过。需要换钥时先用旧钥导出、再用新钥导入，属独立运维流程。
+**支持换密钥（re-key）**：设 `PATIENT_FIELD_KEY_OLD` 即进入 re-key 模式——用旧钥解密、新钥（`PATIENT_FIELD_KEY`）加密；
+不设则为方案迁移模式（解密与加密同钥）。脚本会回显新旧钥的 **SHA-256 前 8 位指纹**（不回显密钥本身），
+供操作者核对拿的是哪把钥——拿错钥跑一遍等于永久损毁存量密文，必须能核对身份。
+
+```powershell
+$env:PATIENT_FIELD_KEY_OLD="<旧钥>"; pnpm db:reencrypt            # 先试运行看统计
+$env:PATIENT_FIELD_KEY_OLD="<旧钥>"; pnpm db:reencrypt -- --apply  # 确认后写库
+Remove-Item Env:PATIENT_FIELD_KEY_OLD                             # 跑完立刻清掉，别让旧钥留在会话里
+```
+
+历史 `enc:hmac:` 密文仍不可逆，只会被跳过并计数。
+
+**失败即安全**：拿错旧钥（或新旧钥写反）时所有行 GCM 校验失败 → 全部跳过 → **零写入**，
+不会损毁数据，只会报"无法解密"，据此可发现拿错钥。已实测：用不匹配的钥跑 1016 个字段，全部跳过、0 行变更。
 
 **2026-11-17 的演练记录**（对开发库完整跑过一遍后已还原）：
 试运行识别 1006 行 / 1013 个 legacy 字段 → `--apply` 后分布变为 `aes 1013`、无法解密 0 →
@@ -158,3 +172,31 @@ SELECT action::text, COUNT(*) FROM "AuditLog" GROUP BY action ORDER BY 2 DESC;
 ⚠️ **改密钥后必须重启后端**：`PATIENT_FIELD_KEY` 在进程启动时读入，改 `.env` 不影响已运行进程。
 未重启时新建的患者会写成 base64，造成方案混杂、姓名搜索漏行。本次即遇到该情况
 （后端 14:04 启动、`.env` 14:33 修改），已重启并复验。
+
+**2026-11-17 换密钥记录**（8 位弱钥 → 43 位 base64url 强随机钥，指纹 `25dc2414` → `0d6ad038`）：
+
+原密钥为 8 位纯小写（熵上限约 38 bit，GPU 数十秒可穷举），不满足等保三级要求，已换为
+`randomBytes(32).toString('base64url')`。**换钥时旧钥已被覆盖且无备份**，导致旧钥密文不可解密，
+处置过程与结论如下，作为后续换钥的反面教材：
+
+- 旧钥丢失后，1016 个存量密文全部 GCM 校验失败。用新钥跑 `db:reencrypt` 试运行：
+  `需重加密行数 = 0`、`无法解密已跳过 = 1016`、**零写入**——"失败即安全"特性得到验证，拿错钥不会损毁数据。
+- 恢复途径逐一排除：`.env` 已被覆盖；IDE 本地历史目录不存在；旧钥仅存于当时运行中的后端进程环境块
+  （读 PEB 成本高）。因库内**全为 seed 演示数据、无真实患者**，最终选择重灌而非恢复。
+- 重灌前修掉一个 seed 缺陷：`ensureUser` 的 `update` 分支只刷密码、不刷 `phoneCipher`，
+  与"重跑 seed 即重置演示状态"的注释矛盾，会让换钥后 5 个账号的手机号永久解不开。已补上。
+- 重灌后跑**完整轮换演练**（当前钥 → 临时钥 → 当前钥，临时钥仅内存持有、不落盘不打印）：
+  两次各更新 1005 行、跳过 2 个既有坏字段；临时钥下 1011/1013 往返通过、姓名等值查询命中 7 行、
+  旧钥确认失效；**往返轮换后 1013 个密文与演练前快照逐字节相同**——确定性加密下这是无损轮换的硬判据。
+- 重启后端（PID 17732，启动时间晚于 `.env` 修改时间）后端到端复验：建档三字段均为 `aes`、
+  脱敏值符合 `@gc/shared` 规则、姓名等值查询命中新档、审计写入 `PATIENT_CREATE / SUCCESS / PATIENT / targetId`。
+
+⚠️ **遗留：1 条不可恢复的历史行**。`patientNo=123456`（`nameMasked=周**`，创建于 2026-10-26，
+早期手工建的测试档，不在 seed 覆盖范围 `P2026000001~P2026001000` 内）的 `nameCipher` 与 `idCardCipher`
+由已丢失的旧钥加密，**明文永久不可恢复**。列表页仍显示 `周**`（`*Masked` 是独立明文列，不受影响），
+但任何需要解密明文的场景（如将来的详情页回显）对这两字段会返回 null。未擅自删除，待需求人裁定。
+
+**换钥标准流程**（缺一不可，本次因跳过第 1 步才导致数据损失）：
+1. **备份旧钥**与数据库；2. 改 `.env` 的 `PATIENT_FIELD_KEY` 为新钥；
+3. **重启后端**；4. 用 `PATIENT_FIELD_KEY_OLD` 跑 `db:reencrypt` 试运行 → `--apply`；
+5. 只读复核往返解密与姓名等值查询；6. 清除 `PATIENT_FIELD_KEY_OLD`，按密钥保管要求处置旧钥。
