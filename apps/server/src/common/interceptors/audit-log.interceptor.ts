@@ -5,11 +5,54 @@ import type { AuditAction } from '@prisma/client';
 import type { Request } from 'express';
 import { catchError, from, map, mergeMap, Observable, throwError } from 'rxjs';
 import { AUDIT_ACTION_KEY, AUDIT_DETAIL_ALLOW_LIST } from '../decorators/audit.decorator';
+import { BusinessException } from '../exceptions/business.exception';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AuditResult, AuthenticatedUser } from '../types';
 
 interface AuditableRequest extends Request {
   user?: AuthenticatedUser;
+  /** 由 RequestIdMiddleware 生成，与响应头 X-Request-Id 同值，用于串联审计行与服务端日志 */
+  requestId?: string;
+}
+
+/** 3xxxx 号段 = 授权与数据权限（docs/ERROR-CODES.md §D3、error-codes 规则第 7 条） */
+const AUTHORIZATION_CODE_MIN = 30000;
+const AUTHORIZATION_CODE_MAX = 40000;
+
+/**
+ * 取异常携带的业务错误码；取不到返回 null。
+ *
+ * 只认数字码：Prisma 的 `PrismaClientKnownRequestError.code` 是 'P2002' 这类字符串，
+ * 不能被误当成业务码写进审计。
+ */
+function extractErrorCode(error: unknown): number | null {
+  if (error instanceof BusinessException) {
+    return error.code;
+  }
+  if (error !== null && typeof error === 'object' && 'code' in error) {
+    const code = (error as { code?: unknown }).code;
+    if (typeof code === 'number') {
+      return code;
+    }
+  }
+  return null;
+}
+
+/**
+ * 判定审计结果三值。
+ *
+ * 为什么按码段判而不是按异常类型判：项目规范（error-codes 规则第 1 条）要求业务错误一律抛
+ * `BusinessException`，全仓没有任何守卫或 service 抛 `ForbiddenException`，
+ * 因此原先的 `error instanceof ForbiddenException` 分支实际不可达，越权事件全被记成 FAILED，
+ * 导致审计表无法筛出越权尝试（等保三级要求越权留痕）。
+ * `ForbiddenException` 分支保留作框架层兜底。
+ */
+function resolveAuditResult(error: unknown): AuditResult {
+  const code = extractErrorCode(error);
+  if (code !== null && code >= AUTHORIZATION_CODE_MIN && code < AUTHORIZATION_CODE_MAX) {
+    return 'DENIED';
+  }
+  return error instanceof ForbiddenException ? 'DENIED' : 'FAILED';
 }
 
 /**
@@ -18,6 +61,7 @@ interface AuditableRequest extends Request {
  *  1. 只处理标注了 @Audit(...) 的接口
  *  2. 只写白名单字段，禁止把患者身份信息写进 detail
  *  3. 审计写入失败不得影响业务结果，但必须打错误日志
+ *  4. 越权（3xxxx）记 DENIED，其余异常记 FAILED；失败时 detail 带 errorCode 便于按码统计安全事件
  */
 @Injectable()
 export class AuditLogInterceptor implements NestInterceptor {
@@ -40,20 +84,11 @@ export class AuditLogInterceptor implements NestInterceptor {
 
     return next.handle().pipe(
       mergeMap((data) =>
-        from(this.write(action as AuditAction, request, context, 'SUCCESS', data)).pipe(
-          map(() => data),
-        ),
+        from(this.write(action as AuditAction, request, 'SUCCESS', data)).pipe(map(() => data)),
       ),
       catchError((error: unknown) =>
         from(
-          this.write(
-            action as AuditAction,
-            request,
-            context,
-            error instanceof ForbiddenException ? 'DENIED' : 'FAILED',
-            null,
-            error,
-          ),
+          this.write(action as AuditAction, request, resolveAuditResult(error), null, error),
         ).pipe(mergeMap(() => throwError(() => error))),
       ),
     );
@@ -62,7 +97,6 @@ export class AuditLogInterceptor implements NestInterceptor {
   private async write(
     action: AuditAction,
     request: AuditableRequest,
-    context: ExecutionContext,
     result: AuditResult,
     payload: unknown,
     error?: unknown,
@@ -72,6 +106,7 @@ export class AuditLogInterceptor implements NestInterceptor {
       const params = (request.params ?? {}) as Record<string, unknown>;
       const query = (request.query ?? {}) as Record<string, unknown>;
       const body = (request.body ?? {}) as Record<string, unknown>;
+      const errorCode = error === undefined ? null : extractErrorCode(error);
 
       await this.prisma.auditLog.create({
         data: {
@@ -89,8 +124,13 @@ export class AuditLogInterceptor implements NestInterceptor {
             ...pickAllowedFields({ ...params, ...query, ...body }),
             ...pickPayloadFields(payload),
             ...(error ? { error: 'denied_or_failed' } : {}),
+            // 业务错误码：便于按码统计安全事件（如筛出全部 30002 越权尝试）。
+            // 取不到码时不写该键，避免 null 混进 JSON 影响查询。
+            ...(errorCode === null ? {} : { errorCode }),
             path: `${request.method} ${request.route?.path ?? request.url}`,
-            requestId: context.getClass().name,
+            // 与响应头 X-Request-Id 同值，据此可串联审计行、服务端日志与用户报障。
+            // 原实现误存 context.getClass().name（如 'AuthController'），无法关联，已修正。
+            requestId: request.requestId ?? '',
           },
         },
       });

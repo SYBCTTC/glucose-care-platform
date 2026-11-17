@@ -71,9 +71,8 @@ describe('assertInScope', () => {
     expect(() => assertInScope(user('DEPARTMENT'), 'PATIENT', { departmentId: 'd-endo' })).not.toThrow();
   });
 
-  // 注：审计目前把它记为 FAILED 而非 DENIED（拦截器只认 ForbiddenException），
-  // 缺口见 docs/ERROR-CODES.md §F.2 第 10 项，修好后本用例名可改回"按越权统计"。
-  it('跨科室抛 30002', () => {
+  // 30002 属 3xxxx 号段，审计拦截器据此记 DENIED（见 audit-log.interceptor.spec.ts 的回归用例）
+  it('跨科室抛 30002（审计按越权统计）', () => {
     expect(() => assertInScope(user('DEPARTMENT'), 'PATIENT', { departmentId: 'd-cardio' })).toThrowError(
       expect.objectContaining({ code: ERROR_CODES.CROSS_DEPARTMENT_DENIED }),
     );
