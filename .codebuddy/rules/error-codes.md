@@ -41,4 +41,9 @@ throw new BusinessException(ERROR_CODES.ACCOUNT_LOCKED, `账号已锁定 ${minut
 ## 易错点
 
 - **登录失败（20001）与会话失效（20002）都是 401**，必须按 `code` 区分，不能只判断 HTTP 401（否则密码输错会误跳登录）。
-- `41002`（血糖值异常待复核）是**成功语义**：`code = 0` + `data.status = 'PENDING_REVIEW'`，前端黄色警示，不要当错误处理。
+- `41002`（血糖值异常待复核）**尚未实现，不要按旧描述写代码**：`packages/shared/src/error/codes.ts`（唯一码表）里
+  没有任何 `41xxx` 码，`GlucoseRecord` 也没有 `status` 字段。当前血糖越界（超出 `0.6 ~ 33.3 mmol/L`）由
+  `createGlucoseSchema` 直接拒为 `10001`，**不入库、无 `PENDING_REVIEW` 复核流程**。
+  将来要做复核，必须先按本规则第 2 条登记码表、再走 schema 评审。
+  注意 `docs/ERROR-CODES.md` 自身不一致：§D5 已标注血糖 `41xxx` 于 2026-10-22 整体移除，
+  但 §E 前端策略表仍残留 `41002`/`41006`/`41008` 三行，**勿据此实现**。
