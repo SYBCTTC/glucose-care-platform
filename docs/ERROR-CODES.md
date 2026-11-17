@@ -128,12 +128,49 @@
 | 40003 | 409 | 该患者已绑定有效设备 | 重复绑定 |
 | 40004 | 409 | 患者当前状态不允许该操作 | 状态机校验 |
 
-### D5. 血糖 `41xxx` —— ⚪ 已整体移除（2026-10-22）
+### D5. 血糖 `41xxx`（挂在患者下）
 
-> ⚠️ 血糖业务（录入/查询/汇总/导出/数据管理）已于 2026-10-22 重构中整体移除：
-> 权限点 `GLUCOSE_VIEW/INPUT/EXPORT`、后端 `glucose` 模块、前端页面/路由、
-> 错误码 `41xxx` 与数据库表 `GlucoseRecord`/`GlucoseDailySummary` 均已删除。
-> 以下明细仅作历史参考，恢复血糖功能时再据此重新登记。
+> 血糖业务已重建，但**不再是独立模块**：路由挂在患者下（`POST /patients/:id/glucose`），
+> 权限点 `glucose:create`（`PERMISSION.GLUCOSE_CREATE`），审计动作 `GLUCOSE_CREATE`，
+> 与患者模块共用同一套鉴权、数据范围（`RESOURCE.PATIENT`）与审计口径。
+> 2026-10-22 那次「整体移除」的说明**已作废**：`GlucoseRecord` 表、`glucose` 模块、
+> `GLUCOSE_CREATE` 权限点均已存在，`41xxx` 号段仍归血糖域。
+> 原 `GLUCOSE_VIEW` / `GLUCOSE_INPUT` / `GLUCOSE_EXPORT` 三个权限点未恢复，
+> 它们作为 `AuditAction` 的**历史枚举值**保留在 schema 里（旧审计行仍在引用，见 `DB-MIGRATION-NOTES.md` §2.3）。
+
+#### 当前已实现的错误场景（**均复用既有码，不占用 `41xxx`**）
+
+| 场景 | 错误码 | HTTP | 前端行为 |
+|---|---|---|---|
+| 患者不存在**或已归档** | `40001 PATIENT_NOT_FOUND` | 404 | toast |
+| 患者非住院（出院/待入院） | `40004 PATIENT_INVALID_STATE` | 409 | toast |
+| 跨科室患者 | `30002 CROSS_DEPARTMENT_DENIED` | 403 | toast |
+| 数据范围为 NONE（设备管理员） | `30006 NO_PATIENT_DATA_SCOPE` | 403 | toast |
+| 缺 `glucose:create` 权限点 | `30004 MISSING_PERMISSION` | 403 | toast |
+| 血糖值/试纸/记录者/检测时间不合法 | `10001 VALIDATION_FAILED` | 422 | 字段级 |
+| 检测时段在库里不存在 | `10001` + `details[{field:'mealContext', message:'检测时段不存在'}]` | 422 | 字段级 |
+| 检测时段已停用 | `10001` + `details[{field:'mealContext', message:'检测时段已停用'}]` | 422 | 字段级 |
+| 记录者不存在或已停用 | `10001` + `details[{field:'operatorId'}]` | 422 | 字段级 |
+| 同患者同检测时间重复提交 | **不是错误**：`code 0` + `data.skipped=true` | 200 | warning「未重复保存」 |
+
+> 血糖值越界（超出 `0.6 ~ 33.3 mmol/L`）由 `createGlucoseSchema` 拒为 `10001`，**不入库、无复核流程**：
+> `GlucoseRecord` 没有 `status` 字段，`PENDING_REVIEW` 未实现。
+> 重复提交靠唯一约束 `(patientId, measuredAt)` 幂等跳过，**不得**为它新增错误码（见本文件 §8 约定）。
+
+#### `41xxx` 预留（规划中，**尚未登记进 `codes.ts`**）
+
+| code | 名称 | HTTP | 语义 | 前置条件 |
+|---|---|---|---|---|
+| 41002 | `GLUCOSE_ALREADY_REVIEWED` | 409 | 异常值已被他人复核（并发冲突） | 需先给 `GlucoseRecord` 加状态字段，走 schema 评审 |
+| 41006 | 待定 | 409 | 血糖域冲突类（§E 曾把它归入 409 类，具体语义无历史记录） | 语义待对应功能立项时定义 |
+| 41008 | `GLUCOSE_EXPORT_RUNNING` | 409 | 已有导出任务进行中 | 依赖 P5 导出（异步任务 + 水印 + 审批留痕） |
+
+> `41001`、`41003~41005`、`41007`、`41009+` 为血糖域保留号段，语义待对应功能立项时定义。
+>
+> ⚠️ **实现某项功能时再登记对应错误码**（先改本表，再改 `packages/shared/src/error/codes.ts`），
+> 不要提前把未使用的码写进码表：2026-10-22 移除旧血糖模块时，为规划功能预建的
+> `EntryChannel` / `GlucoseKind` / `GlucoseUnit` / `MealContext` / `RecordStatus` 五个枚举
+> 在库里残留了近一个月，直到 2026-11-17 才清理（见 `docs/DB-MIGRATION-NOTES.md` §2）。
 
 ### D6. 设备 `42xxx`
 
@@ -185,13 +222,14 @@
 | 错误码 | 判定方式 | 前端行为 |
 |---|---|---|
 | `0` | 成功 | 返回 `data` |
+| `0` + `data.skipped === true` | 成功但**未写入**（幂等跳过） | `message.warning('未重复保存')`，**不得提示成功**（血糖录入唯一约束命中） |
 | `10001` + `details` | 有字段明细 | 映射到对应表单项 `error`；不弹全局 toast |
 | `20001 / 20006 / 20007 / 20009` | 登录/改密表单 | **字段级错误提示，不清 token、不跳登录** |
 | `20002 / 20008` | 会话失效 | 清 token → 跳 `/login` → `message.error`；并发请求用"单次跳转"去重 |
 | `20003` | 账号锁定 | 登录页展示锁定时长，禁用提交按钮 |
 | `20004 / 30001~30005` | 权限类 | `message.warning`，**不跳登录、不弹多次** |
-| `409` 类（10008/41006/41008/42002~42006/43002~43004） | 冲突 | `message.warning` + 刷新列表 |
-| `41002` | 成功但待复核 | `message.warning('数值异常，已标记待复核')` |
+| `409` 类（10008/42002~42006/43002~43004；`41006`/`41008` **规划中未实现**） | 冲突 | `message.warning` + 刷新列表 |
+| `41002`（**规划中未实现**，见 §D5） | 成功但待复核 | `message.warning('数值异常，已标记待复核')` |
 | `423 / 429` | 锁定/限流 | 提示剩余时间，按钮禁用至倒计时结束 |
 | `5xxxx` | 系统故障 | 统一"系统繁忙，请稍后重试"；有 requestId 则一并展示"如持续失败请联系信息科并提供编号 xxx" |
 | `fetch TypeError` | 网络不可达 | "无法连接服务器，请检查网络或内网环境" |

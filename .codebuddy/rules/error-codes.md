@@ -41,9 +41,13 @@ throw new BusinessException(ERROR_CODES.ACCOUNT_LOCKED, `账号已锁定 ${minut
 ## 易错点
 
 - **登录失败（20001）与会话失效（20002）都是 401**，必须按 `code` 区分，不能只判断 HTTP 401（否则密码输错会误跳登录）。
-- `41002`（血糖值异常待复核）**尚未实现，不要按旧描述写代码**：`packages/shared/src/error/codes.ts`（唯一码表）里
-  没有任何 `41xxx` 码，`GlucoseRecord` 也没有 `status` 字段。当前血糖越界（超出 `0.6 ~ 33.3 mmol/L`）由
-  `createGlucoseSchema` 直接拒为 `10001`，**不入库、无 `PENDING_REVIEW` 复核流程**。
-  将来要做复核，必须先按本规则第 2 条登记码表、再走 schema 评审。
-  注意 `docs/ERROR-CODES.md` 自身不一致：§D5 已标注血糖 `41xxx` 于 2026-10-22 整体移除，
-  但 §E 前端策略表仍残留 `41002`/`41006`/`41008` 三行，**勿据此实现**。
+- 血糖域（`41xxx`）**目前一个码都没实现**：`packages/shared/src/error/codes.ts`（唯一码表）里没有任何 `41xxx`。
+  血糖业务已重建但**挂在患者下**（`POST /patients/:id/glucose`），错误一律复用既有码——
+  患者不存在/已归档 `40001`、非住院 `40004`、跨科室 `30002`、时段或记录者不合法 `10001` + 字段级 `details`。
+  血糖越界（超出 `0.6 ~ 33.3 mmol/L`）由 `createGlucoseSchema` 拒为 `10001`，**不入库、无 `PENDING_REVIEW` 复核流程**
+  （`GlucoseRecord` 没有 `status` 字段）。
+- **重复提交不是错误**：唯一约束 `(patientId, measuredAt)` 命中时返回 `code 0` + `data.skipped=true`，
+  前端提示「未重复保存」；禁止为它新增错误码，也禁止提示成功。
+- `41002` / `41006` / `41008` 是 `docs/ERROR-CODES.md` §D5 的**预留号段**，实现对应功能时才登记进码表。
+  不要提前写进 `codes.ts`：旧血糖模块为规划功能预建的 5 个枚举在库里残留了近一个月才清理
+  （见 `docs/DB-MIGRATION-NOTES.md` §2）。
