@@ -19,6 +19,13 @@ export const AUDIT_DETAIL_ALLOW_LIST = [
   /** 血糖添加：结果类型与试纸数量（备注为自由文本，可能含个人信息，不入日志） */
   'resultType',
   'testStrip',
+  /**
+   * 血糖添加：本次是否因唯一约束 (patientId, measuredAt) 命中而幂等跳过。
+   * 跳过时接口仍返回成功（result = SUCCESS），但库里没有新数据，
+   * 因此必须把 skipped 落进 detail，否则事后无法区分"写入了"和"未重复保存"。
+   * 布尔值，不含患者身份信息。
+   */
+  'skipped',
   'count',
   'rangeFrom',
   'rangeTo',
