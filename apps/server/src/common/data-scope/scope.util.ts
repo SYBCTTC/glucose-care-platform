@@ -66,7 +66,12 @@ export function buildScopeWhere(
 
 /**
  * 单行数据越权校验（用于"先查后判"的场景，如按 id 更新/删除）。
- * 越权属安全事件，抛 30002 / 30006，由审计拦截器记录为 DENIED。
+ * 越权属安全事件，抛 30002 / 30006。
+ *
+ * ⚠️ 已知缺口（2026-11-17 实测确认，未修）：审计拦截器按 `error instanceof ForbiddenException`
+ * 判 DENIED，而本函数抛的是 BusinessException，因此越权实际被记为 **FAILED**，
+ * 且 detail 不含错误码，无法从审计表筛出越权尝试。
+ * 修法与决策见 docs/ERROR-CODES.md §F.2 第 10 项。改这里之前不要相信"DENIED"这个说法。
  */
 export function assertInScope(
   user: AuthenticatedUser,

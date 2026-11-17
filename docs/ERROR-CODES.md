@@ -243,22 +243,35 @@
 
 ---
 
-## F. 请你确认 / 补充（填 `____` 即可）
+## F. 确认状态（2026-11-17 按实际代码回填）
 
-| # | 待确认项 | 我的推荐 | 你的决定 |
+> 原表 12 项的「你的决定」一直空着，但其中 9 项**已被实现事实决定**。此处按代码回填，避免下一轮开发继承错误上下文。
+
+### F.1 已决（有代码依据）
+
+| # | 项 | 结论 | 依据 |
 |---|---|---|---|
-| 1 | 响应体是否新增 `requestId` | **新增**（排障 + 等保工单定位） | ____ |
-| 2 | 响应体是否新增 `timestamp` | 新增 | ____ |
-| 3 | 账号锁定用 423 还是 429 | **423**（429 留给限流） | ____ |
-| 4 | `message` 由服务端给还是前端映射 | **服务端给中文兜底，前端可按 code 覆盖** | ____ |
-| 5 | 校验错误 `details` 结构 | `{ field, message }[]`（现有 Zod 管道已产出） | ____ |
-| 6 | 是否需要"业务子码"（细分到具体校验项） | 暂不需要，字段级 `details` 足够 | ____ |
-| 7 | 幂等重复提交 | 保持 `200 + skipped: true`，不用错误码 | ____ |
-| 8 | 是否需要接口级限流码（QPS） | 需要则用 `10011` 或新增 `10012` | ____ |
-| 9 | 5xx 是否一律屏蔽真实原因 | **是**（只给 requestId） | ____ |
-| 10 | 错误码是否写入审计表独立字段 | 建议写入（便于按码统计安全事件） | ____ |
-| 11 | 是否需要英文/双语版本 | 内网单语言，仅中文 | ____ |
-| 12 | 需要补充的业务码（请列出） | — | ____ |
+| 1 | 响应体 `requestId` | ✅ 已新增 | `RequestIdMiddleware` 生成 UUID 并写 `X-Request-Id` 响应头；`ResponseInterceptor` 补进成功响应，`HttpExceptionFilter` 补进错误响应 |
+| 2 | 响应体 `timestamp` | ✅ 已新增 | 同上两处，格式走 `formatDateTime` |
+| 3 | 账号锁定用 423 | ✅ 按推荐 | `codes.ts`：`ACCOUNT_LOCKED(20003)` → `httpStatus: 423, action: 'lock'`；429 仍留给限流 |
+| 4 | `message` 由服务端给 | ✅ 按推荐 | 服务端 `errorMeta(code).message` 给中文兜底；前端按 `action` 字段分派交互（`field`/`toast`/`relogin`/`lock`…），不自行拼文案 |
+| 5 | 校验错误 `details` 结构 | ✅ `{ field, message }[]` | Zod 管道产出；时段校验失败即返回 `details:[{field:'mealContext'}]` |
+| 6 | 业务子码 | ✅ 按推荐未引入 | 字段级 `details` 已够用 |
+| 7 | 幂等重复提交 | ✅ `200 + skipped: true` | 唯一约束命中 P2002 时幂等跳过；`skipped` 已入审计白名单（提交 `629b16c`） |
+| 9 | 5xx 屏蔽真实原因 | ✅ 按推荐 | `HttpExceptionFilter` 对 5xx 覆写 `message = errorMeta(code).message`，只留 `requestId` |
+| 11 | 双语 | ✅ 按推荐仅中文 | 内网单语言 |
+
+### F.2 仍未决（新一轮开发前建议先定）
+
+| # | 项 | 现状 | 建议 |
+|---|---|---|---|
+| 8 | 接口级限流码 | `codes.ts` 无 `RATE_LIMITED`（`10007` 是 `REQUEST_TIMEOUT`，语义不同） | 内网 < 2000 账号，暂不需要；若做导出/批量导入再登记 `10011` |
+| 10 | **错误码写入审计独立字段** | ❌ 未实现，且缺口比原判断大：`AuditLogInterceptor` 用 `error instanceof ForbiddenException` 判 `DENIED`，但**全仓无任何守卫/service 抛 `ForbiddenException`**（一律 `BusinessException`）。实测审计表 `SUCCESS 209 / FAILED 44 / DENIED 1`，**越权事件全部记为 `FAILED`**；`detail` 只有固定串 `error:'denied_or_failed'`，不含错误码 → **无法从审计表筛出越权尝试**（`AGENTS.md` §5.1 要求越权留痕） | 改为按 `3xxxx` 码段判 `DENIED`，并把 `code` 写进 `detail`（或加独立列，属 schema 变更需评审） |
+| 12 | 需补充的业务码 | `41xxx` 血糖号段仅在 §D5 预留，未登记进 `codes.ts` | 实现对应功能时再登记；`41006` 语义无历史记录，需你给出定义 |
+
+> 另一处相关缺口（不属错误码但同源）：审计 `detail.requestId` 存的是 `context.getClass().name`（实测样例 `"AuthController"`），
+> **不是** `RequestIdMiddleware` 生成的 UUID，因此审计行无法与服务端日志、用户报障的 `X-Request-Id` 关联。
+> 拦截器已持有 `request` 对象，改为 `request.requestId` 即可，属等保可追溯性缺口。
 
 ---
 

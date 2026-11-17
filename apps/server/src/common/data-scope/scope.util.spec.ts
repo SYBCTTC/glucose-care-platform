@@ -71,7 +71,9 @@ describe('assertInScope', () => {
     expect(() => assertInScope(user('DEPARTMENT'), 'PATIENT', { departmentId: 'd-endo' })).not.toThrow();
   });
 
-  it('跨科室抛 30002（审计按越权统计）', () => {
+  // 注：审计目前把它记为 FAILED 而非 DENIED（拦截器只认 ForbiddenException），
+  // 缺口见 docs/ERROR-CODES.md §F.2 第 10 项，修好后本用例名可改回"按越权统计"。
+  it('跨科室抛 30002', () => {
     expect(() => assertInScope(user('DEPARTMENT'), 'PATIENT', { departmentId: 'd-cardio' })).toThrowError(
       expect.objectContaining({ code: ERROR_CODES.CROSS_DEPARTMENT_DENIED }),
     );

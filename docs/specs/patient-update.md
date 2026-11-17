@@ -155,4 +155,13 @@
 2. 查看详情（`GET /patients/:id`）会因打开编辑弹窗而产生一条 `PATIENT_VIEW` 审计。若审计量过大，可改为「编辑弹窗打开时不单独留痕」，但这会削弱等保可追溯性，不建议。
 3. `updatePatientSchema` 中原有的 `id` 字段已废弃（患者 ID 走 URL path），旧死代码已重写。
 4. 审计拦截器补了一层「从响应信封 `data` 里取白名单字段」。此前只扫描顶层，导致 `changedFields` 这类写在 `data` 里的字段永远进不了审计（`PATIENT_CREATE` 的 `targetId` 为空也是同一原因）。属于审计逻辑改动，已实现但**建议人工复审** `audit-log.interceptor.ts` 的 `pickPayloadFields`。
-5. **存量问题（非本次引入，未修）**：`schema.prisma` 的 `AuditAction` 缺少 `GLUCOSE_VIEW / GLUCOSE_INPUT / GLUCOSE_EXPORT`，而 `20261020000000_init` 迁移里已创建这三个值，数据库与 schema 存在漂移。影响：`prisma migrate dev` 会判定 schema 漂移而要求 reset；`prisma.auditLog.groupBy()` 之类会做运行期枚举校验的调用会报 `Value 'GLUCOSE_INPUT' not found in enum 'AuditAction'`。本次用 `migrate deploy` 规避，未改动 schema.prisma 的既有枚举，需人工决定如何对齐。
+5. ~~**存量问题（非本次引入，未修）**：`schema.prisma` 的 `AuditAction` 缺少 `GLUCOSE_VIEW / GLUCOSE_INPUT / GLUCOSE_EXPORT`……需人工决定如何对齐。~~
+   ✅ **已于 2026-11-17 解决**（提交 `3813f93`）：三个历史值已补回 `schema.prisma` 并按实库 `pg_enum` 顺序重排，
+   注明"仅用于读取旧审计行，新代码禁止使用"；库漂移清零，`prisma.auditLog.groupBy()` 已可正常调用（本次核对即用它统计 `result` 分布）。
+   处置过程见 `docs/DB-MIGRATION-NOTES.md` §2.3 / §4。
+6. **仍未修（2026-11-17 复核确认）**：上文第 2、4 项提到的审计语义问题范围比原判断更大——
+   `AuditLogInterceptor` 用 `error instanceof ForbiddenException` 判 `DENIED`，但**全仓没有任何守卫或 service 抛 `ForbiddenException`**
+   （`PermissionsGuard` / `JwtAuthGuard` / `MustChangePasswordGuard` / `assertInScope` 一律抛 `BusinessException`），
+   实测审计表 `SUCCESS 209 / FAILED 44 / DENIED 1`，即**越权事件实际全部记为 `FAILED`**，且 `detail` 不含错误码，
+   无法从审计表筛出越权尝试。另 `detail.requestId` 存的是 `context.getClass().name`（如 `AuthController`）而非请求 UUID，
+   无法与 `RequestIdMiddleware` 生成的 `X-Request-Id` 及服务端日志关联。两项均属等保可追溯性缺口，待决策。

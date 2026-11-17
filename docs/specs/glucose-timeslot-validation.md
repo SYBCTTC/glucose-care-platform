@@ -13,7 +13,7 @@
 | 模块 | `glucose` + `shared` + `time-slot` |
 | 优先级 | P2 |
 | 依赖 | 已落地的 `TimeSlot` 表（`4553fc6`）与 `GET /time-slots`（`e2971b9`）；无新依赖 |
-| 需求人 | 待确认 |
+| 需求人 | 项目所有者（2026-11-17 裁定 §11 四项决定） |
 
 ### 1. 目标与用户故事 ⭐
 
@@ -89,9 +89,9 @@
 | 加密字段 | 无 |
 | 审计 | 动作仍为 `GLUCOSE_CREATE`，`AUDIT_DETAIL_ALLOW_LIST` 不变（已含 `mealContext`、`skipped`）。时段校验失败时 `AuditLogInterceptor` 会落一条 **`result='FAILED'`** 的审计（拦截器对非 `ForbiddenException` 一律记 FAILED，`ForbiddenException` 才记 DENIED），`detail` 含请求里的白名单字段 + `error:'denied_or_failed'`，**不含错误消息文本**。已实测：3 次提交（1 成功 + 2 被拒）产生 3 条 `GLUCOSE_CREATE` 审计行 |
 
-⚠️ 实现方式待评审（§11-1）：`GlucoseService` 直接 `prisma.timeSlot.findUnique`，
-还是走 `TimeSlotModule` 导出的 `TimeSlotService`。`AGENTS.md` §3 要求跨模块调用走 module 导出，
-但 `GlucoseService` 现已直接查 `prisma.patient` / `prisma.user`，直查更一致且少一层模块耦合。
+✅ 实现方式已裁定（§11-1）：走 `TimeSlotModule` 导出的 `TimeSlotService.findByCode`，
+不在 `GlucoseService` 里直查 `prisma.timeSlot`——符合 `AGENTS.md` §3「跨模块调用必须走 module 导出」。
+（`GlucoseService` 现有的 `prisma.patient` / `prisma.user` 直查属存量写法，本次未一并改造。）
 
 ### 6. 前端交互 ⭐
 
