@@ -11,5 +11,7 @@
     "incremental": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.ts"]
+  // prisma/ 一并纳入：seed.ts 与运维脚本此前不在 typecheck 范围内，
+  // 导致 $transaction 的 PrismaPromise 类型错误直到手工 tsc 才暴露（2026-11-17）。
+  "include": ["src/**/*.ts", "prisma/**/*.ts"]
 }

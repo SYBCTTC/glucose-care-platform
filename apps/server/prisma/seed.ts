@@ -6,14 +6,25 @@ import { PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import dayjs from 'dayjs';
 import { DICT_TYPE, TIME_SLOTS } from '@gc/shared';
+import {
+  encryptDeterministic as cipher,
+  isFieldCryptoConfigured,
+  maskIdCard,
+  maskName,
+  maskPhone,
+} from '../src/common/crypto/field-crypto';
 
 const prisma = new PrismaClient();
 
-/** 生产环境字段加密用 AES-256 或国密 SM4；此处演示仅做 base64，避免引入密钥管理复杂度 */
-const cipher = (plain: string): string => `enc:${Buffer.from(plain, 'utf8').toString('base64')}`;
-
-const maskName = (name: string): string =>
-  name.length <= 2 ? `${name[0]}*` : `${name[0]}*${name.slice(-1)}`;
+// 加密与脱敏一律走 src/common/crypto/field-crypto（全仓唯一实现）。
+// 此处曾自带 `cipher()` / `maskName()` 副本，会绕过 AES 直接写 base64，
+// 导致"配了密钥但 seed 出来的数据仍是明文等价"，已于 2026-11-17 收口。
+if (!isFieldCryptoConfigured()) {
+  console.warn(
+    '[seed] ⚠️ 未配置 PATIENT_FIELD_KEY：演示数据的敏感字段将以 base64 存储（不是加密）。' +
+      '本地开发可接受；配置密钥后请执行 pnpm db:reencrypt 重加密存量数据。',
+  );
+}
 
 async function main(): Promise<void> {
   const passwordHash = bcrypt.hashSync('Gc@2026pass', 10);
@@ -142,9 +153,9 @@ async function main(): Promise<void> {
           nameCipher: cipher(seed.name),
           nameMasked: maskName(seed.name),
           idCardCipher: cipher(seed.idCard),
-          idCardMasked: `${seed.idCard.slice(0, 3)}********${seed.idCard.slice(-2)}`,
+          idCardMasked: maskIdCard(seed.idCard),
           phoneCipher: cipher(seed.phone),
-          phoneMasked: `${seed.phone.slice(0, 3)}****${seed.phone.slice(-4)}`,
+          phoneMasked: maskPhone(seed.phone),
           gender: seed.gender,
           birthDate: seed.birthDate,
           bedNo: seed.bedNo,
@@ -159,9 +170,9 @@ async function main(): Promise<void> {
           nameCipher: cipher(seed.name),
           nameMasked: maskName(seed.name),
           idCardCipher: cipher(seed.idCard),
-          idCardMasked: `${seed.idCard.slice(0, 3)}********${seed.idCard.slice(-2)}`,
+          idCardMasked: maskIdCard(seed.idCard),
           phoneCipher: cipher(seed.phone),
-          phoneMasked: `${seed.phone.slice(0, 3)}****${seed.phone.slice(-4)}`,
+          phoneMasked: maskPhone(seed.phone),
           gender: seed.gender,
           birthDate: seed.birthDate,
           bedNo: seed.bedNo,

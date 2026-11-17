@@ -5,9 +5,14 @@ import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
+import { assertFieldCryptoReady } from './common/crypto/field-crypto';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 
 async function bootstrap(): Promise<void> {
+  // 敏感字段加密自检必须在建应用之前：缺 PATIENT_FIELD_KEY 时加密会静默降级成 base64，
+  // 患者姓名/证件号等于明文入库。生产环境直接拒绝启动，非生产只警告一次。
+  assertFieldCryptoReady(process.env.NODE_ENV);
+
   const app = await NestFactory.create(AppModule);
 
   app.setGlobalPrefix('api');

@@ -12,7 +12,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests",
     "prisma": "prisma",
-    "db:seed": "tsx prisma/seed.ts"
+    "db:seed": "tsx prisma/seed.ts",
+    "db:reencrypt": "tsx prisma/reencrypt-patient-fields.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
