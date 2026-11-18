@@ -272,6 +272,7 @@ describe('PatientService.detail', () => {
         phoneMasked: '138****1234',
         remark: null,
         nurseId: 'nurse-1',
+        nurse: { name: '赵护士' },
         diabetesType: 'TYPE_2',
         hba1c: new Prisma.Decimal('7.5'),
         bindings: [],
@@ -294,11 +295,32 @@ describe('PatientService.detail', () => {
     expect(detail.idCardMasked).toBe('110********01');
     expect(detail.phoneMasked).toBe('138****1234');
     expect(detail.nurseId).toBe('nurse-1');
+    expect(detail.nurseName).toBe('赵护士');
     expect(detail.hba1c).toBe(7.5);
     // 明文列在 select 里就没有，这里断言 key 不存在，防止将来误加
     expect(detail).not.toHaveProperty('name');
     expect(detail).not.toHaveProperty('idCard');
     expect(detail).not.toHaveProperty('phone');
+  });
+
+  it('无责任护士时 nurseName 为 null（nurse 关系缺失不报错）', async () => {
+    prisma.patient.findUnique.mockResolvedValue(
+      publicRow({
+        idCardMasked: '110********01',
+        phoneMasked: '138****1234',
+        remark: null,
+        nurseId: null,
+        nurse: null,
+        diabetesType: null,
+        hba1c: null,
+        bindings: [],
+      }),
+    );
+
+    const detail = await service.detail(deptUser, PATIENT_ID);
+
+    expect(detail.nurseId).toBeNull();
+    expect(detail.nurseName).toBeNull();
   });
 });
 

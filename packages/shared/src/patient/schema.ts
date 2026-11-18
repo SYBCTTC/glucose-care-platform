@@ -224,6 +224,8 @@ export interface PatientDetail extends PatientListItem {
   remark: string | null;
   /** 责任护士 ID：编辑弹窗回填用，列表接口不返回 */
   nurseId: string | null;
+  /** 责任护士姓名：详情页展示用，列表接口不返回 */
+  nurseName: string | null;
   diabetesType: DiabetesType | null;
   /** 糖化血红蛋白（%） */
   hba1c: number | null;

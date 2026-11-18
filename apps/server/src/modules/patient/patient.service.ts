@@ -129,6 +129,7 @@ const PATIENT_DETAIL_SELECT = Prisma.validator<Prisma.PatientSelect>()({
   phoneMasked: true,
   remark: true,
   nurseId: true,
+  nurse: { select: { name: true } },
   diabetesType: true,
   hba1c: true,
   bindings: {
@@ -319,6 +320,7 @@ export class PatientService {
       birthDate: formatDateOnly(row.birthDate),
       remark: row.remark,
       nurseId: row.nurseId,
+      nurseName: row.nurse?.name ?? null,
       diabetesType: row.diabetesType as DiabetesType | null,
       hba1c: row.hba1c === null ? null : Number(row.hba1c),
       devices: row.bindings.map((binding) => binding.device),
