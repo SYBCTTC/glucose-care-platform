@@ -9,5 +9,7 @@ export * from './dict/roles';
 export * from './dict/dict-types';
 export * from './dict/time-slots';
 export * from './dict/user-status';
+export * from './dict/ward';
+export * from './ward/schema';
 export * from './mask';
 export * from './error/codes';

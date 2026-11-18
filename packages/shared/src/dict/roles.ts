@@ -40,6 +40,8 @@ export const PERMISSION = {
   SYSTEM_MANAGE: 'system:manage',
   // 住院管理
   WARD_VIEW: 'ward:view',
+  /** 虚拟病区操作（加入 / 移出患者）；与查看分离，便于将来只读授权 */
+  WARD_MANAGE: 'ward:manage',
   ALERT_VIEW: 'alert:view',
   // 质控管理
   QUALITY_VIEW: 'quality:view',
@@ -72,6 +74,9 @@ export const ROLE_PERMISSIONS: Record<RoleCode, PermissionCode[]> = {
     // 医生不授予 PATIENT_ADMIT：入院登记属护理/管理动作
     PERMISSION.DEVICE_VIEW,
     PERMISSION.WARD_VIEW,
+    // 虚拟病区操作（2026-11-18 需求人裁定：医生/护士/护士长/系统管理员均可操作）。
+    // 数据范围仍是 DEPARTMENT，只能加入本科室患者；跨科室抛 30002 并记 DENIED 审计。
+    PERMISSION.WARD_MANAGE,
     PERMISSION.ALERT_VIEW,
     PERMISSION.QUALITY_VIEW,
     PERMISSION.GLUCOSE_CREATE,
@@ -88,6 +93,7 @@ export const ROLE_PERMISSIONS: Record<RoleCode, PermissionCode[]> = {
     PERMISSION.PATIENT_ADMIT,
     PERMISSION.DEVICE_VIEW,
     PERMISSION.WARD_VIEW,
+    PERMISSION.WARD_MANAGE,
     PERMISSION.ALERT_VIEW,
     PERMISSION.QUALITY_VIEW,
     PERMISSION.DEPARTMENT_VIEW,
@@ -106,6 +112,7 @@ export const ROLE_PERMISSIONS: Record<RoleCode, PermissionCode[]> = {
     PERMISSION.DEVICE_VIEW,
     PERMISSION.AUDIT_VIEW,
     PERMISSION.WARD_VIEW,
+    PERMISSION.WARD_MANAGE,
     PERMISSION.ALERT_VIEW,
     PERMISSION.QUALITY_VIEW,
     PERMISSION.QUALITY_MANAGE,
@@ -138,6 +145,8 @@ export const ROLE_PERMISSIONS: Record<RoleCode, PermissionCode[]> = {
     PERMISSION.AUDIT_VIEW,
     PERMISSION.SYSTEM_MANAGE,
     PERMISSION.WARD_VIEW,
+    // SYS_ADMIN 的不变式是"含全部权限点"，新增权限点必须同步加到这里
+    PERMISSION.WARD_MANAGE,
     PERMISSION.ALERT_VIEW,
     PERMISSION.QUALITY_VIEW,
     PERMISSION.QUALITY_MANAGE,

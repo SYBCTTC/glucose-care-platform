@@ -82,6 +82,12 @@ export const ERROR_CODES = {
   LAST_ADMIN_PROTECTED: 43003,
   CANNOT_MODIFY_SELF_ROLE: 43004,
 
+  // ---------- 44xxx 虚拟病区 ----------
+  /** 重复加入：并发或页面数据过期时触发（正常流程前端已置灰菜单项） */
+  WARD_ALREADY_JOINED: 44001,
+  /** 移出时已无在区记录：并发或页面数据过期时触发 */
+  WARD_NOT_JOINED: 44002,
+
   // ---------- 5xxxx 系统与依赖 ----------
   DB_UNAVAILABLE: 50001,
   DB_WRITE_CONFLICT: 50002,
@@ -217,6 +223,19 @@ export const ERROR_CODE_META: Record<ErrorCode, ErrorCodeMeta> = {
     action: 'toast-refresh',
   },
   [ERROR_CODES.CANNOT_MODIFY_SELF_ROLE]: { httpStatus: 409, message: '不能修改自己的角色', action: 'toast-refresh' },
+
+  // ---------- 44xxx 虚拟病区 ----------
+  // 两码都用 toast-refresh：它们只在并发/数据过期时出现，刷新后用户才能看到真实状态
+  [ERROR_CODES.WARD_ALREADY_JOINED]: {
+    httpStatus: 409,
+    message: '该患者已在虚拟病区',
+    action: 'toast-refresh',
+  },
+  [ERROR_CODES.WARD_NOT_JOINED]: {
+    httpStatus: 409,
+    message: '该患者不在虚拟病区',
+    action: 'toast-refresh',
+  },
 
   // ---------- 5xxxx 系统与依赖 ----------
   [ERROR_CODES.DB_UNAVAILABLE]: { httpStatus: 503, message: '数据库服务不可用', action: 'toast' },
