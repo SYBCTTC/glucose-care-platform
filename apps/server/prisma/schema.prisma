@@ -38,32 +38,36 @@ enum UserStatus {
 }
 
 model User {
-  id       String     @id @default(uuid()) @db.Uuid
-  username String     @unique @db.VarChar(64)
+  id                 String     @id @default(uuid()) @db.Uuid
+  username           String     @unique @db.VarChar(64)
   /// 真实姓名（医护，非患者，院内可见，按需仍可选择加密）
-  name     String     @db.VarChar(64)
+  name               String     @db.VarChar(64)
   /// 工号 / 手机号加密存储
-  phoneCipher String? @db.VarChar(512)
-  passwordHash String  @db.VarChar(255)
-  status     UserStatus @default(ACTIVE)
-  departmentId String  @db.Uuid
-  lastLoginAt DateTime?
+  phoneCipher        String?    @db.VarChar(512)
+  passwordHash       String     @db.VarChar(255)
+  status             UserStatus @default(ACTIVE)
+  departmentId       String     @db.Uuid
+  lastLoginAt        DateTime?
   /// 最近一次修改密码时间，用于密码有效期策略
-  passwordChangedAt DateTime @default(now())
+  passwordChangedAt  DateTime   @default(now())
   /// 首次登录或被管理员重置后必须修改密码；为 true 时除改密/登出/个人信息的接口一律拒绝（20005）
-  mustChangePassword Boolean @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  mustChangePassword Boolean    @default(false)
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
 
-  department     Department      @relation(fields: [departmentId], references: [id])
-  roles          UserRole[]
-  bindings       PatientDeviceBinding[]
+  department        Department             @relation(fields: [departmentId], references: [id])
+  roles             UserRole[]
+  bindings          PatientDeviceBinding[]
   /// 作为责任医生负责的患者
-  patients       Patient[]       @relation("PatientDoctor")
+  patients          Patient[]              @relation("PatientDoctor")
   /// 作为责任护士负责的患者
-  nursePatients  Patient[]       @relation("PatientNurse")
+  nursePatients     Patient[]              @relation("PatientNurse")
   /// 手工录入的血糖记录（作为记录者）
-  glucoseRecords GlucoseRecord[] @relation("GlucoseOperator")
+  glucoseRecords    GlucoseRecord[]        @relation("GlucoseOperator")
+  /// 虚拟病区：由本人加入的进出记录
+  wardJoinedRecords VirtualWardRecord[]    @relation("WardJoinedBy")
+  /// 虚拟病区：由本人移出的进出记录
+  wardLeftRecords   VirtualWardRecord[]    @relation("WardLeftBy")
 
   @@index([departmentId])
   @@index([status])
@@ -96,27 +100,27 @@ enum PatientStatus {
 }
 
 model Patient {
-  id   String @id @default(uuid()) @db.Uuid
+  id           String  @id @default(uuid()) @db.Uuid
   /// 住院号 / 门诊号（院内唯一业务主键）
-  patientNo    String?  @unique @db.VarChar(32)
+  patientNo    String? @unique @db.VarChar(32)
   /// 姓名：密文 + 脱敏值（列表展示只用 Masked）
-  nameCipher   String   @db.VarChar(512)
-  nameMasked   String   @db.VarChar(64)
+  nameCipher   String  @db.VarChar(512)
+  nameMasked   String  @db.VarChar(64)
   idCardCipher String? @db.VarChar(512)
   idCardMasked String? @db.VarChar(64)
   phoneCipher  String? @db.VarChar(512)
   phoneMasked  String? @db.VarChar(32)
 
   /// 性别：取值见 @gc/shared GENDER（含 UNSPECIFIED 未说明，故长度 16）
-  gender       String?    @db.VarChar(16)
-  birthDate    DateTime?  @db.Date
-  bedNo        String?    @db.VarChar(32)
+  gender       String?       @db.VarChar(16)
+  birthDate    DateTime?     @db.Date
+  bedNo        String?       @db.VarChar(32)
   /// 糖尿病类型：取值见 @gc/shared DIABETES_TYPE
-  diabetesType String?    @db.VarChar(32)
+  diabetesType String?       @db.VarChar(32)
   /// 糖化血红蛋白（%），0~100，保留 1 位小数
-  hba1c        Decimal?   @db.Decimal(4, 1)
-  remark       String?    @db.VarChar(255)
-  departmentId String     @db.Uuid
+  hba1c        Decimal?      @db.Decimal(4, 1)
+  remark       String?       @db.VarChar(255)
+  departmentId String        @db.Uuid
   /// 住院 / 出院状态（Tab 与列表接口按此过滤）
   status       PatientStatus @default(INPATIENT)
   /// 入院时间（筛选区间）
@@ -124,18 +128,20 @@ model Patient {
   /// 出院时间（出院 Tab 筛选区间；为空表示仍在院）
   dischargeAt  DateTime?
   /// 责任医生
-  doctorId     String?    @db.Uuid
+  doctorId     String?       @db.Uuid
   /// 责任护士
-  nurseId      String?    @db.Uuid
+  nurseId      String?       @db.Uuid
   archivedAt   DateTime?
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
 
-  department     Department @relation(fields: [departmentId], references: [id])
-  doctor         User?      @relation("PatientDoctor", fields: [doctorId], references: [id])
-  nurse          User?      @relation("PatientNurse", fields: [nurseId], references: [id])
-  bindings       PatientDeviceBinding[]
-  glucoseRecords GlucoseRecord[]
+  department         Department             @relation(fields: [departmentId], references: [id])
+  doctor             User?                  @relation("PatientDoctor", fields: [doctorId], references: [id])
+  nurse              User?                  @relation("PatientNurse", fields: [nurseId], references: [id])
+  bindings           PatientDeviceBinding[]
+  glucoseRecords     GlucoseRecord[]
+  /// 虚拟病区进出记录（含历史）；"当前是否在区" = 有没有 leftAt 为空的行
+  virtualWardRecords VirtualWardRecord[]
 
   @@index([departmentId, archivedAt])
   @@index([departmentId, status, admissionAt])
@@ -163,15 +169,49 @@ model GlucoseRecord {
   remark      String?  @db.VarChar(500)
   createdAt   DateTime @default(now())
 
-  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patient  Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
   /// 记录者是医疗留痕，删用户不得抹掉录入人，因此显式 Restrict（与实库一致）。
   /// 对照 AuditLog.operatorId 干脆不建外键，同样是防止留痕随用户删除而失真。
-  operator User?  @relation("GlucoseOperator", fields: [operatorId], references: [id], onDelete: Restrict)
+  operator User?   @relation("GlucoseOperator", fields: [operatorId], references: [id], onDelete: Restrict)
 
   /// 唯一约束兜底：同一患者同一检测时间只允许一条记录；重复提交由服务端按幂等返回 skipped=true
   @@unique([patientId, measuredAt])
   @@index([patientId, measuredAt(sort: Desc)])
   @@index([operatorId])
+}
+
+/// 虚拟病区进出记录：一条 = 一次进出。leftAt 为空表示当前在区，非空即历史。
+/// 与 PatientDeviceBinding（unboundAt 为空 = 当前绑定）是同一套"单条有效 + 保留历史"模式。
+/// 重复进出**每次新建记录**、历史全留（2026-11-18 需求人裁定），因此同一患者可有多条历史 + 至多一条在区。
+/// "至多一条在区"由部分唯一索引保证，Prisma 表达不了，见 prisma/sql/ward_one_active.sql。
+model VirtualWardRecord {
+  id          String    @id @default(uuid()) @db.Uuid
+  patientId   String    @db.Uuid
+  /// 加入时间，「加入虚拟病区天数」的计算起点；业务时间故用 timestamptz（同 GlucoseRecord.measuredAt）
+  joinedAt    DateTime  @default(now()) @db.Timestamptz(3)
+  /// 移出时间；NULL = 当前仍在虚拟病区
+  leftAt      DateTime? @db.Timestamptz(3)
+  /// 加入操作人
+  joinedById  String    @db.Uuid
+  /// 移出操作人；leftAt 非空时必填（应用层保证）。库层可空，因为在区行还没有移出人
+  leftById    String?   @db.Uuid
+  /// 移出方式，取值见 @gc/shared WARD_LEAVE_REASON；在区时为 NULL。
+  /// DISCHARGE / ARCHIVE 是预留值，待出院/归档功能落地时接入（docs/specs/virtual-ward.md §4-8）
+  leaveReason String?   @db.VarChar(16)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  patient  Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  /// 操作人是医疗留痕，删用户不得抹掉，因此显式 Restrict（与 GlucoseRecord.operator 同理）
+  joinedBy User    @relation("WardJoinedBy", fields: [joinedById], references: [id], onDelete: Restrict)
+  leftBy   User?   @relation("WardLeftBy", fields: [leftById], references: [id], onDelete: Restrict)
+
+  /// 按患者取在区记录（列表 inVirtualWard 子查询、加入前的重复校验都走它）
+  @@index([patientId, leftAt])
+  /// 当前/历史两个 Tab 的排序与日期区间筛选
+  @@index([leftAt, joinedAt])
+  @@index([joinedById])
+  @@index([leftById])
 }
 
 // ---------------------------- 设备 ----------------------------
@@ -188,26 +228,26 @@ enum DeviceStatus {
 }
 
 model Device {
-  id             String       @id @default(uuid()) @db.Uuid
-  sn             String       @unique @db.VarChar(64)
-  model          String       @db.VarChar(64)
-  manufacturer   String?      @db.VarChar(64)
-  firmwareVersion String?     @db.VarChar(32)
-  status         DeviceStatus @default(IDLE)
-  enabled        Boolean      @default(true)
+  id              String       @id @default(uuid()) @db.Uuid
+  sn              String       @unique @db.VarChar(64)
+  model           String       @db.VarChar(64)
+  manufacturer    String?      @db.VarChar(64)
+  firmwareVersion String?      @db.VarChar(32)
+  status          DeviceStatus @default(IDLE)
+  enabled         Boolean      @default(true)
   /// 最后一次上报时间，设备在线状态判断依据
-  lastReportAt   DateTime?
-  calibratedAt   DateTime?
-  departmentId   String?      @db.Uuid
+  lastReportAt    DateTime?
+  calibratedAt    DateTime?
+  departmentId    String?      @db.Uuid
   /// 设备台账：采购与保修，用于设备生命周期管理
-  purchasedAt    DateTime?
-  warrantyUntil  DateTime?
-  remark         String?      @db.VarChar(255)
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  purchasedAt     DateTime?
+  warrantyUntil   DateTime?
+  remark          String?      @db.VarChar(255)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
 
-  department     Department? @relation(fields: [departmentId], references: [id])
-  bindings       PatientDeviceBinding[]
+  department Department?            @relation(fields: [departmentId], references: [id])
+  bindings   PatientDeviceBinding[]
 
   @@index([status, enabled])
   @@index([departmentId])
@@ -258,6 +298,10 @@ enum AuditAction {
   PATIENT_UPDATE
   /// 添加血糖（手工录入血糖记录），detail 记 resultType / valueMmolL / testStrip / measuredAt / skipped
   GLUCOSE_CREATE
+  /// 加入虚拟病区，detail 记 patientId / wardRecordId（targetId 已是患者 ID）
+  PATIENT_WARD_JOIN
+  /// 移出虚拟病区，detail 记 patientId / wardRecordId / leaveReason
+  PATIENT_WARD_REMOVE
 }
 
 /// 审计日志：只增不改不删，留存 >= 180 天（等保三级要求）
@@ -281,7 +325,7 @@ model AuditLog {
   userAgent String? @db.VarChar(255)
 
   /// SUCCESS / DENIED / FAILED
-  result  String @db.VarChar(16)
+  result String @db.VarChar(16)
   detail Json?
 
   createdAt DateTime @default(now()) @db.Timestamptz(3)
@@ -303,21 +347,21 @@ model SystemConfig {
 /// 动态字典（公共数据）：登录后一次性下发，前端 useCommonDataStore 缓存。
 /// 字典是数据不是代码：新增/调整取值改数据即可，不再发版；前端禁止硬编码 label/color。
 model DictItem {
-  id       String @id @default(uuid()) @db.Uuid
+  id        String  @id @default(uuid()) @db.Uuid
   /// 字典类型，取值见 @gc/shared 的 DICT_TYPE（如 GLUCOSE_RESULT）
-  dictType String @db.VarChar(32)
+  dictType  String  @db.VarChar(32)
   /// 字典码：入库与接口传输用；血糖监测结果为 '0'~'9'
-  code     String @db.VarChar(32)
+  code      String  @db.VarChar(32)
   /// 展示文案（中文或英文标签，如 偏低 / Low / 拒检）
-  label    String @db.VarChar(64)
+  label     String  @db.VarChar(64)
   /// 展示色，前端直接取用；色值登记见 docs/UI-DESIGN-TOKENS.md 5.1
-  color    String? @db.VarChar(16)
+  color     String? @db.VarChar(16)
   /// 是否可由用户选择：偏低/偏高由后台按阈值判定，不出现在录入选项里
   checkable Boolean @default(true)
   /// 是否计入血糖统计（拒检/外出/请假/已吃饭/未进食不计入）
-  counted  Boolean @default(true)
+  counted   Boolean @default(true)
   /// 同类型内展示顺序，升序
-  sortOrder Int    @default(0)
+  sortOrder Int     @default(0)
   enabled   Boolean @default(true)
 
   createdAt DateTime @default(now())
@@ -331,17 +375,17 @@ model DictItem {
 /// 血糖按 measuredAt 落入 [startTime, endTime) 归组；普通时段要求 00:00~24:00 全覆盖、不重叠、不跨零点，
 /// 特殊时段（随机/复测）与强化时段无区间。code 是落库契约（GlucoseRecord.mealContext），改名不改码。
 model TimeSlot {
-  id    String @id @default(uuid()) @db.Uuid
+  id        String   @id @default(uuid()) @db.Uuid
   /// 时段码，落库值：FASTING / BREAKFAST_PRE / RANDOM ...
-  code  String @unique @db.VarChar(32)
+  code      String   @unique @db.VarChar(32)
   /// 时段名，展示用
-  name  String @db.VarChar(64)
+  name      String   @db.VarChar(64)
   /// 0-强化 1-普通 4-特殊，取值见 @gc/shared TIME_SLOT_CATEGORY
-  type  Int
+  type      Int
   /// 起点 HH:mm（'24:00' 可作终点）；特殊/强化为空
-  startTime String? @db.VarChar(5)
+  startTime String?  @db.VarChar(5)
   /// 终点 HH:mm；特殊/强化为空
-  endTime   String? @db.VarChar(5)
+  endTime   String?  @db.VarChar(5)
   /// 时段控糖目标下限 mmol/L；特殊/强化为空
   valueDown Decimal? @db.Decimal(4, 1)
   /// 时段控糖目标上限 mmol/L；特殊/强化为空
