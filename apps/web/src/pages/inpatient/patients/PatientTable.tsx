@@ -27,6 +27,8 @@ interface TableBaseProps<T extends PatientListItem> {
   page: number;
   pageSize: number;
   onPageChange: (page: number, pageSize: number) => void;
+  /** C3：点击姓名列进入患者详情（患者管理 / 虚拟病区两页共用） */
+  onViewDetail: (patient: T) => void;
   /** 横向滚动宽度；默认 1400 是患者管理的列宽合计，虚拟病区列数不同需另传 */
   scrollX?: number;
   emptyText?: string;
@@ -80,7 +82,9 @@ export type PatientTableProps<T extends PatientListItem = PatientListItem> = Tab
   (PatientModeProps<T> | WardModeProps<T>);
 
 /** 基本信息列：床号 → 住院天数，两页完全一致 */
-function buildBasicColumns<T extends PatientListItem>(): ColumnsType<T> {
+function buildBasicColumns<T extends PatientListItem>(
+  onViewDetail: (patient: T) => void,
+): ColumnsType<T> {
   return [
     {
       title: '床号',
@@ -88,7 +92,22 @@ function buildBasicColumns<T extends PatientListItem>(): ColumnsType<T> {
       width: 90,
       render: (value: string | null) => value ?? '-',
     },
-    { title: '姓名', dataIndex: 'nameMasked', width: 110 },
+    {
+      title: '姓名',
+      dataIndex: 'nameMasked',
+      width: 110,
+      // C3：列表仅姓名可点进详情（整行不可点，避免与操作列、文本选中冲突）
+      render: (value: string, record) => (
+        <Button
+          type="link"
+          size="small"
+          style={{ paddingInline: 0, height: 'auto' }}
+          onClick={() => onViewDetail(record)}
+        >
+          {value}
+        </Button>
+      ),
+    },
     {
       title: '性别',
       dataIndex: 'gender',
@@ -287,7 +306,7 @@ export default function PatientTable<T extends PatientListItem = PatientListItem
     const action = props.wardTab
       ? buildWardActionColumn(props.renderActions)
       : buildPatientActionColumn(props);
-    return [...buildBasicColumns<T>(), ...middle, action];
+    return [...buildBasicColumns<T>(props.onViewDetail), ...middle, action];
   }, [props, getTimeSlotName]);
 
   return (

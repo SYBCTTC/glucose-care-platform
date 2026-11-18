@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Alert, Button, Card, Modal, Result, message } from 'antd';
 import { PATIENT_STATUS, PERMISSION } from '@gc/shared';
 import type { PatientListItem, PatientStatus } from '@gc/shared';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { admitPatient } from '@/api/patient';
 import { joinWard } from '@/api/ward';
 import Tabs, { type TabItem } from '@/components/common/Tabs';
@@ -21,6 +22,8 @@ const VIEW_TABS: TabItem[] = [
 ];
 
 export default function PatientManagementPage() {
+  const navigate = useNavigate();
+  const location = useLocation();
   const hasPermission = useAuthStore((state) => state.hasPermission);
   const canInpatient = hasPermission(PERMISSION.PATIENT_INPATIENT_VIEW);
   const canDischarged = hasPermission(PERMISSION.PATIENT_DISCHARGED_VIEW);
@@ -81,6 +84,11 @@ export default function PatientManagementPage() {
         }
       },
     });
+  };
+
+  // C1 方式B：进详情时带上来源路径，详情页返回据此 navigate(-1) 还原本页 Tab/筛选/视图/页码
+  const goDetail = (patient: PatientListItem) => {
+    navigate(`/inpatient/patients/${patient.id}`, { state: { from: location.pathname } });
   };
 
   if (!enabled) {
@@ -177,6 +185,7 @@ export default function PatientManagementPage() {
               hasMore={query.cardHasMore}
               hasError={Boolean(query.cardError)}
               onLoadMore={query.loadMore}
+              onViewDetail={goDetail}
               canEditPatient={canEditPatient}
               onEditPatient={(patient) => setEditingPatientId(patient.id)}
               canCreateGlucose={canCreateGlucose}
@@ -193,6 +202,7 @@ export default function PatientManagementPage() {
             page={query.page}
             pageSize={query.pageSize}
             onPageChange={query.changePage}
+            onViewDetail={goDetail}
             canEditPatient={canEditPatient}
             isDischarged={!isInpatient}
             canAdmitPatient={canAdmitPatient}

@@ -31,6 +31,8 @@ interface CardBaseProps<T extends PatientListItem> {
   hasMore: boolean;
   hasError?: boolean;
   onLoadMore: () => void;
+  /** C2：整卡可点进入患者详情（患者管理 / 虚拟病区两页共用） */
+  onViewDetail: (patient: T) => void;
   emptyText?: string;
 }
 
@@ -123,11 +125,24 @@ interface PatientCardProps<T extends PatientListItem> {
   actions: ReactNode;
   /** 基本信息之后的差异区 */
   footer: ReactNode;
+  /** C2：整卡点击进详情 */
+  onViewDetail: (patient: T) => void;
 }
 
-function PatientCard<T extends PatientListItem>({ patient, actions, footer }: PatientCardProps<T>) {
+function PatientCard<T extends PatientListItem>({
+  patient,
+  actions,
+  footer,
+  onViewDetail,
+}: PatientCardProps<T>) {
   return (
-    <Card size="small" style={{ height: '100%' }} styles={{ body: { height: '100%' } }}>
+    <Card
+      size="small"
+      hoverable
+      onClick={() => onViewDetail(patient)}
+      style={{ height: '100%', cursor: 'pointer' }}
+      styles={{ body: { height: '100%' } }}
+    >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10, height: '100%' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <Typography.Text
@@ -137,7 +152,10 @@ function PatientCard<T extends PatientListItem>({ patient, actions, footer }: Pa
           >
             {patient.bedNo || '暂无床号'}
           </Typography.Text>
-          {actions}
+          {/* C2：操作区阻止冒泡，点"更多"不触发整卡进详情 */}
+          <div onClick={(event) => event.stopPropagation()} style={{ flexShrink: 0 }}>
+            {actions}
+          </div>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -235,6 +253,7 @@ export default function PatientCardGrid<T extends PatientListItem = PatientListI
             <PatientCard
               key={patient.id}
               patient={patient}
+              onViewDetail={props.onViewDetail}
               actions={
                 props.wardOf ? (
                   props.renderActions(patient)

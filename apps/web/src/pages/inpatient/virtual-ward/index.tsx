@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Alert, Button, Card, Result, message } from 'antd';
 import type { VirtualWardListItem } from '@gc/shared';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { joinWard, leaveWard } from '@/api/ward';
 import Tabs, { type TabItem } from '@/components/common/Tabs';
 import PatientCardGrid from '../patients/PatientCardGrid';
@@ -36,9 +37,16 @@ function wardOf(record: VirtualWardListItem) {
 }
 
 export default function VirtualWardPage() {
+  const navigate = useNavigate();
+  const location = useLocation();
   const query = useVirtualWardQuery();
   /** 正在提交的患者 ID，用于禁用菜单防连点 */
   const [pendingId, setPendingId] = useState<string | null>(null);
+
+  // C1 方式B：进详情时带上来源路径，详情页返回据此 navigate(-1) 还原本页 Tab/筛选/视图/页码
+  const goDetail = (patient: VirtualWardListItem) => {
+    navigate(`/inpatient/patients/${patient.id}`, { state: { from: location.pathname } });
+  };
 
   const handleAction = async (patient: VirtualWardListItem) => {
     setPendingId(patient.id);
@@ -157,6 +165,7 @@ export default function VirtualWardPage() {
               hasMore={query.cardHasMore}
               hasError={Boolean(query.cardError)}
               onLoadMore={query.loadMore}
+              onViewDetail={goDetail}
               emptyText="暂无虚拟病区患者"
               wardOf={wardOf}
               renderActions={renderActions}
@@ -170,6 +179,7 @@ export default function VirtualWardPage() {
             page={query.page}
             pageSize={query.pageSize}
             onPageChange={query.changePage}
+            onViewDetail={goDetail}
             scrollX={query.isCurrent ? SCROLL_X_CURRENT : SCROLL_X_HISTORY}
             emptyText="暂无虚拟病区患者"
             wardTab={query.tab}

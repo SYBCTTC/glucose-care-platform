@@ -9,7 +9,6 @@ const ACTION_LABELS: Record<string, string> = {
   glucose: '添加血糖',
   ward: '加入虚拟病区',
   wardJoined: '已加入虚拟病区',
-  detail: '查看详情',
 };
 
 interface PatientMoreActionsProps<T extends PatientListItem> {
@@ -74,7 +73,6 @@ export default function PatientMoreActions<T extends PatientListItem>({
         disabled: patient.inVirtualWard,
       });
     }
-    result.push({ type: 'divider' }, { key: 'detail', label: ACTION_LABELS.detail });
     return result;
   }, [canEdit, editDisabledReason, canCreateGlucose, canJoinWard, patient.inVirtualWard]);
 
@@ -96,6 +94,12 @@ export default function PatientMoreActions<T extends PatientListItem>({
     }
     message.info(`${ACTION_LABELS[key] ?? '该功能'}暂未开发`);
   };
+
+  // C4：移除"查看详情"后，编辑/血糖/加入病区三项都无权限时菜单为空，
+  // 此时不渲染空的"更多操作"按钮（详情入口已由姓名/整卡点击承担）。
+  if (items.length === 0) {
+    return null;
+  }
 
   return (
     <Dropdown trigger={['hover']} menu={{ items, onClick: handleClick }}>
