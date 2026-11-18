@@ -68,4 +68,12 @@ export const AUDIT_DETAIL_ALLOW_LIST = [
   /** 状态流转前后值（仅状态码，不含患者信息）：办理住院等流转类操作留痕 */
   'fromStatus',
   'toStatus',
+  /**
+   * 虚拟病区进出记录 ID（UUID，不含患者身份信息）：加入/移出虚拟病区留痕。
+   * 同一患者可多次进出（每次新建记录），只靠 targetId + action 无法定位是哪一次，
+   * 故记下记录 ID。审计对象仍是患者（targetType='PATIENT'、targetId=患者 ID）。
+   */
+  'wardRecordId',
+  /** 虚拟病区移出方式，枚举码 MANUAL / DISCHARGE / ARCHIVE，不含患者信息 */
+  'leaveReason',
 ] as const;
