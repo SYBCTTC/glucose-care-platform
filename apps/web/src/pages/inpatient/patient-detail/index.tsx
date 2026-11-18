@@ -41,7 +41,7 @@ export default function PatientDetailPage() {
 
   return (
     <Card
-      style={{ height: '100%', minHeight: 480, overflow: 'hidden' }}
+      style={{ height: 'calc(100vh - 88px)', minHeight: 480, overflow: 'hidden' }}
       styles={{
         body: {
           height: '100%',

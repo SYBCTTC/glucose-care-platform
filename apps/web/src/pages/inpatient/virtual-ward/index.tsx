@@ -90,7 +90,7 @@ export default function VirtualWardPage() {
     <Card
       style={
         query.isCardMode
-          ? { height: '100%', minHeight: 480, overflow: 'hidden' }
+          ? { height: 'calc(100vh - 88px)', minHeight: 480, overflow: 'hidden' }
           : undefined
       }
       styles={

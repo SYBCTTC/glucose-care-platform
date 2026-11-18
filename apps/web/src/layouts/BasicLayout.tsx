@@ -96,14 +96,14 @@ export default function BasicLayout() {
   const { items: menuItems, openKeys } = buildMenuTree(APP_ROUTES, hasPermission);
 
   return (
-    <Layout style={{ minHeight: '100%' }}>
+    <Layout style={{ minHeight: '100vh' }}>
       <Sider
         collapsible
         collapsed={collapsed}
         onCollapse={setCollapsed}
         width={layoutSize.siderWidth}
         collapsedWidth={layoutSize.siderCollapsedWidth}
-        style={{ minHeight: '100%' }}
+        style={{ minHeight: '100vh' }}
       >
         <div
           style={{
