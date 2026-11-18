@@ -20,6 +20,7 @@ import ForbiddenPage from '@/pages/Forbidden';
 import PlaceholderPage from '@/pages/Placeholder';
 import PatientManagementPage from '@/pages/inpatient/patients';
 import VirtualWardPage from '@/pages/inpatient/virtual-ward';
+import PatientDetailPage from '@/pages/inpatient/patient-detail';
 import type { AppRoute } from './menu';
 
 export type { AppRoute } from './menu';
@@ -60,6 +61,13 @@ export const APP_ROUTES: AppRoute[] = [
     // 住院/出院任一权限即可进入；页面内再按权限渲染 Tab
     permissions: [PERMISSION.PATIENT_INPATIENT_VIEW, PERMISSION.PATIENT_DISCHARGED_VIEW],
     element: <PatientManagementPage />,
+  },
+  {
+    // 患者详情：无 label/icon/menuGroup → 不进菜单（buildMenuTree 跳过无 label 项）；
+    // 守卫与后端详情接口一致（PATIENT_VIEW）。React Router 按特异性排序，与 /inpatient/patients 不冲突
+    path: '/inpatient/patients/:id',
+    permissions: [PERMISSION.PATIENT_VIEW],
+    element: <PatientDetailPage />,
   },
   {
     path: '/inpatient/alerts',

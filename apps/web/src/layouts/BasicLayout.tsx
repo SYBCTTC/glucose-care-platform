@@ -122,7 +122,12 @@ export default function BasicLayout() {
         <Menu
           theme={mode === 'dark' ? 'dark' : 'light'}
           mode="inline"
-          selectedKeys={[location.pathname]}
+          selectedKeys={[
+            // 患者详情 /inpatient/patients/:id 不在菜单中，高亮其父级"患者管理"
+            location.pathname.startsWith('/inpatient/patients/')
+              ? '/inpatient/patients'
+              : location.pathname,
+          ]}
           defaultOpenKeys={openKeys}
           items={menuItems as MenuProps['items']}
           onClick={({ key }) => {
