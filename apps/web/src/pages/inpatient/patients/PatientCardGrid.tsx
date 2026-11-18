@@ -1,25 +1,68 @@
 import { ClockCircleOutlined } from '@ant-design/icons';
 import { Card, Empty, Space, Spin, Typography } from 'antd';
 import { useEffect, useRef } from 'react';
+import type { ReactNode } from 'react';
 import type { PatientListItem } from '@gc/shared';
 import { useCommonDataStore } from '@/store/common-data';
 import LastGlucose from './LastGlucose';
 import PatientMoreActions from './PatientMoreActions';
-import { formatAge, formatGlucoseTime, formatHospitalDays, getGenderLabel } from './patient-format';
+import {
+  formatAge,
+  formatGlucoseTime,
+  formatHospitalDays,
+  formatWardDays,
+  getGenderLabel,
+} from './patient-format';
 
-interface PatientCardGridProps {
-  items: PatientListItem[];
+/**
+ * 患者卡片网格（滚动加载），患者管理页与虚拟病区页共用。
+ *
+ * 与 PatientTable 同一套思路：基本信息部分**必须是同一份代码**，差异只在
+ * 右上角操作区与底部差异区，故把这两块抽成 `actions` / `footer` 插槽。
+ * 虚拟病区卡片少一行（血糖两行 → 天数一行），整体会变矮，但网格默认
+ * `align-items: stretch` + 卡片 `height: 100%`，同一行卡片仍然等高（决策 12a）。
+ *
+ * 卡片模式只在「当前虚拟病区」出现，历史 Tab 只有列表，故这里不需要 wardTab。
+ */
+
+interface CardBaseProps<T extends PatientListItem> {
+  items: T[];
   loading: boolean;
   hasMore: boolean;
   hasError?: boolean;
   onLoadMore: () => void;
+  emptyText?: string;
+}
+
+/** 患者管理模式：操作区是 PatientMoreActions，底部是血糖两项 */
+interface PatientModeProps<T extends PatientListItem> {
+  wardOf?: undefined;
+  renderActions?: undefined;
   /** 是否有患者编辑权限（决定「更多」菜单里是否出现「编辑患者信息」） */
   canEditPatient: boolean;
-  onEditPatient: (patient: PatientListItem) => void;
+  onEditPatient: (patient: T) => void;
   /** 是否有添加血糖权限（住院 Tab 且具备 GLUCOSE_CREATE 时才为 true） */
   canCreateGlucose: boolean;
-  onAddGlucose: (patient: PatientListItem) => void;
+  onAddGlucose: (patient: T) => void;
+  /** 是否有虚拟病区操作权限（ward:manage）：无权限时菜单里不出现该项 */
+  canJoinWard: boolean;
+  onJoinWard: (patient: T) => void;
 }
+
+/** 虚拟病区模式：操作区由调用方给（单菜单），底部是加入天数 */
+interface WardModeProps<T extends PatientListItem> {
+  wardOf: (record: T) => { joinedAt: string; leftAt: string | null };
+  renderActions: (record: T) => ReactNode;
+  canEditPatient?: undefined;
+  onEditPatient?: undefined;
+  canCreateGlucose?: undefined;
+  onAddGlucose?: undefined;
+  canJoinWard?: undefined;
+  onJoinWard?: undefined;
+}
+
+export type PatientCardGridProps<T extends PatientListItem = PatientListItem> = CardBaseProps<T> &
+  (PatientModeProps<T> | WardModeProps<T>);
 
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
@@ -34,27 +77,55 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-interface PatientCardProps {
-  patient: PatientListItem;
-  canEditPatient: boolean;
-  onEditPatient: (patient: PatientListItem) => void;
-  canCreateGlucose: boolean;
-  onAddGlucose: (patient: PatientListItem) => void;
-}
-
-function PatientCard({
-  patient,
-  canEditPatient,
-  onEditPatient,
-  canCreateGlucose,
-  onAddGlucose,
-}: PatientCardProps) {
+/** 患者管理卡片底部：最近血糖时间 + 血糖值/时段 */
+function GlucoseFooter({ patient }: { patient: PatientListItem }) {
   // 时段名取自动态时段（库里改名即时生效；停用项也能回显历史记录）
   const getTimeSlotName = useCommonDataStore((state) => state.getTimeSlotName);
   const glucoseContext = patient.lastGlucoseMealContext
     ? getTimeSlotName(patient.lastGlucoseMealContext)
     : '-';
 
+  return (
+    <>
+      <Typography.Text type="secondary">
+        <ClockCircleOutlined style={{ marginRight: 6 }} />
+        {formatGlucoseTime(patient.lastGlucoseMeasuredAt)}
+      </Typography.Text>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <span style={{ marginRight: 'auto' }}>
+          <LastGlucose
+            resultType={patient.lastGlucoseResultType}
+            value={patient.lastGlucoseValue}
+          />
+        </span>
+        <Typography.Text>{glucoseContext}</Typography.Text>
+      </div>
+    </>
+  );
+}
+
+/** 虚拟病区卡片底部：替换掉血糖区域的那一行（决策 5a） */
+function WardFooter({ joinedAt, leftAt }: { joinedAt: string; leftAt: string | null }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <Typography.Text type="secondary" style={{ marginRight: 'auto' }}>
+        加入虚拟病区天数
+      </Typography.Text>
+      <Typography.Text strong>{formatWardDays(joinedAt, leftAt)}</Typography.Text>
+    </div>
+  );
+}
+
+interface PatientCardProps<T extends PatientListItem> {
+  patient: T;
+  /** 右上角操作区 */
+  actions: ReactNode;
+  /** 基本信息之后的差异区 */
+  footer: ReactNode;
+}
+
+function PatientCard<T extends PatientListItem>({ patient, actions, footer }: PatientCardProps<T>) {
   return (
     <Card size="small" style={{ height: '100%' }} styles={{ body: { height: '100%' } }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10, height: '100%' }}>
@@ -66,14 +137,7 @@ function PatientCard({
           >
             {patient.bedNo || '暂无床号'}
           </Typography.Text>
-          <PatientMoreActions
-            patient={patient}
-            label="更多"
-            canEdit={canEditPatient}
-            canCreateGlucose={canCreateGlucose}
-            onEdit={onEditPatient}
-            onAddGlucose={onAddGlucose}
-          />
+          {actions}
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -103,34 +167,17 @@ function PatientCard({
           </Typography.Text>
         </div>
 
-        <Typography.Text type="secondary">
-          <ClockCircleOutlined style={{ marginRight: 6 }} />
-          {formatGlucoseTime(patient.lastGlucoseMeasuredAt)}
-        </Typography.Text>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span style={{ marginRight: 'auto' }}>
-            <LastGlucose resultType={patient.lastGlucoseResultType} value={patient.lastGlucoseValue} />
-          </span>
-          <Typography.Text>{glucoseContext}</Typography.Text>
-        </div>
+        {footer}
       </div>
     </Card>
   );
 }
 
 /** 卡片模式：滚动容器由页面 Card body 提供高度，这里只负责网格与触底加载 */
-export default function PatientCardGrid({
-  items,
-  loading,
-  hasMore,
-  hasError = false,
-  onLoadMore,
-  canEditPatient,
-  onEditPatient,
-  canCreateGlucose,
-  onAddGlucose,
-}: PatientCardGridProps) {
+export default function PatientCardGrid<T extends PatientListItem = PatientListItem>(
+  props: PatientCardGridProps<T>,
+) {
+  const { items, loading, hasMore, hasError = false, onLoadMore, emptyText = '暂无住院患者' } = props;
   const scrollRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
@@ -174,7 +221,7 @@ export default function PatientCardGrid({
           <Spin />
         </div>
       ) : items.length === 0 ? (
-        <Empty description="暂无住院患者" style={{ paddingTop: 80 }} />
+        <Empty description={emptyText} style={{ paddingTop: 80 }} />
       ) : (
         <div
           style={{
@@ -188,10 +235,29 @@ export default function PatientCardGrid({
             <PatientCard
               key={patient.id}
               patient={patient}
-              canEditPatient={canEditPatient}
-              onEditPatient={onEditPatient}
-              canCreateGlucose={canCreateGlucose}
-              onAddGlucose={onAddGlucose}
+              actions={
+                props.wardOf ? (
+                  props.renderActions(patient)
+                ) : (
+                  <PatientMoreActions
+                    patient={patient}
+                    label="更多"
+                    canEdit={props.canEditPatient}
+                    canCreateGlucose={props.canCreateGlucose}
+                    canJoinWard={props.canJoinWard}
+                    onEdit={props.onEditPatient}
+                    onAddGlucose={props.onAddGlucose}
+                    onJoinWard={props.onJoinWard}
+                  />
+                )
+              }
+              footer={
+                props.wardOf ? (
+                  <WardFooter {...props.wardOf(patient)} />
+                ) : (
+                  <GlucoseFooter patient={patient} />
+                )
+              }
             />
           ))}
         </div>

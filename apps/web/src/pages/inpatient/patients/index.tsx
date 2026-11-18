@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { Alert, Button, Card, Result, message } from 'antd';
+import { Alert, Button, Card, Modal, Result, message } from 'antd';
 import { PATIENT_STATUS, PERMISSION } from '@gc/shared';
 import type { PatientListItem, PatientStatus } from '@gc/shared';
 import { admitPatient } from '@/api/patient';
+import { joinWard } from '@/api/ward';
 import Tabs, { type TabItem } from '@/components/common/Tabs';
 import { useAuthStore } from '@/store/auth';
 import GlucoseCreateModal from './GlucoseCreateModal';
@@ -39,7 +40,15 @@ export default function PatientManagementPage() {
   const canAdmitPatient = hasPermission(PERMISSION.PATIENT_ADMIT);
   // 出院患者不录入血糖：仅住院 Tab 且具备 GLUCOSE_CREATE 时展示入口
   const canCreateGlucose = isInpatient && hasPermission(PERMISSION.GLUCOSE_CREATE);
+  // 决策 4a：仅住院患者可加入虚拟病区，出院 Tab 本就不渲染更多操作菜单
+  const canJoinWard = isInpatient && hasPermission(PERMISSION.WARD_MANAGE);
   const [admittingId, setAdmittingId] = useState<string | null>(null);
+  /**
+   * 确认框用 Modal.useModal() 而非静态 Modal.confirm：主题（暗色 + 字号档）由
+   * App.tsx 的 ConfigProvider 下发，静态方法渲染在 React 树外拿不到上下文。
+   * 不用 Popconfirm 是因为它需要持续存在的锚点，而 Dropdown 菜单项点击后菜单即关闭。
+   */
+  const [modal, contextHolder] = Modal.useModal();
 
   const handleAdmit = async (patient: PatientListItem) => {
     setAdmittingId(patient.id);
@@ -53,6 +62,25 @@ export default function PatientManagementPage() {
     } finally {
       setAdmittingId(null);
     }
+  };
+
+  const handleJoinWard = (patient: PatientListItem) => {
+    modal.confirm({
+      title: '加入虚拟病区',
+      content: `确认将 ${patient.nameMasked} 加入虚拟病区？`,
+      okText: '确认',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          const result = await joinWard(patient.id);
+          void message.success('已加入虚拟病区');
+          // 局部更新该行（inVirtualWard 已翻转为 true，菜单项随即置灰），不整表重查
+          query.patchItem(result.item);
+        } catch {
+          // 失败提示由请求拦截器统一处理（含 44001 已在区、越权 30002）
+        }
+      },
+    });
   };
 
   if (!enabled) {
@@ -153,6 +181,8 @@ export default function PatientManagementPage() {
               onEditPatient={(patient) => setEditingPatientId(patient.id)}
               canCreateGlucose={canCreateGlucose}
               onAddGlucose={setGlucosePatient}
+              canJoinWard={canJoinWard}
+              onJoinWard={handleJoinWard}
             />
           </div>
         ) : (
@@ -171,9 +201,14 @@ export default function PatientManagementPage() {
             onAdmitPatient={handleAdmit}
             canCreateGlucose={canCreateGlucose}
             onAddGlucose={setGlucosePatient}
+            canJoinWard={canJoinWard}
+            onJoinWard={handleJoinWard}
           />
         )}
       </div>
+
+      {/* Modal.useModal 的上下文占位，必须渲染才能拿到 ConfigProvider 的主题 */}
+      {contextHolder}
 
       <PatientCreateModal
         open={createOpen}

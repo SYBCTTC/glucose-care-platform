@@ -1,19 +1,42 @@
 import { useMemo } from 'react';
 import { Button, Popconfirm, Table } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import type { PatientListItem } from '@gc/shared';
+import type { ReactNode } from 'react';
+import { WARD_TAB } from '@gc/shared';
+import type { PatientListItem, WardTab } from '@gc/shared';
 import { useCommonDataStore } from '@/store/common-data';
 import LastGlucose from './LastGlucose';
 import PatientMoreActions from './PatientMoreActions';
-import { formatAge, formatHospitalDays, getGenderLabel } from './patient-format';
+import { formatAge, formatHospitalDays, formatWardDays, getGenderLabel } from './patient-format';
 
-interface PatientTableProps {
-  items: PatientListItem[];
+/**
+ * 患者列表表格，患者管理页与虚拟病区页共用。
+ *
+ * 两页的基本信息列**必须是同一份代码**（需求人 2026-11-17 裁定：虚拟病区的患者展示
+ * 与患者管理一样），差异只有两处：中段列（血糖三项 ↔ 加入天数）与操作列。
+ * 因此用可辨识联合把两种模式的 props 分开，`wardTab` 是判别字段：
+ * 传了就是虚拟病区模式，此时患者管理那组 props 一律不接受，反之亦然。
+ * 这样任何一边漏传 props 都是编译错误，而不是运行时 undefined。
+ */
+
+/** 两种模式共用的分页与加载 props */
+interface TableBaseProps<T extends PatientListItem> {
+  items: T[];
   total: number;
   loading: boolean;
   page: number;
   pageSize: number;
   onPageChange: (page: number, pageSize: number) => void;
+  /** 横向滚动宽度；默认 1400 是患者管理的列宽合计，虚拟病区列数不同需另传 */
+  scrollX?: number;
+  emptyText?: string;
+}
+
+/** 患者管理模式：操作列由本组件渲染（编辑 / 血糖 / 办理住院 / 更多操作） */
+interface PatientModeProps<T extends PatientListItem> {
+  wardTab?: undefined;
+  wardOf?: undefined;
+  renderActions?: undefined;
   /** 是否存在患者编辑权限（无权限时菜单里不出现「编辑患者信息」） */
   canEditPatient: boolean;
   /** 是否出院 Tab：出院患者的操作列只有一个「办理住院」按钮 */
@@ -22,25 +45,42 @@ interface PatientTableProps {
   canAdmitPatient: boolean;
   /** 正在办理的患者 ID，用于按钮 loading 与防重复提交 */
   admittingId: string | null;
-  onEditPatient: (patient: PatientListItem) => void;
-  onAdmitPatient: (patient: PatientListItem) => void;
+  onEditPatient: (patient: T) => void;
+  onAdmitPatient: (patient: T) => void;
   /** 是否有添加血糖权限（住院 Tab 且具备 GLUCOSE_CREATE 时才为 true） */
   canCreateGlucose: boolean;
-  onAddGlucose: (patient: PatientListItem) => void;
+  onAddGlucose: (patient: T) => void;
+  /** 是否有虚拟病区操作权限（ward:manage）：无权限时菜单里不出现该项 */
+  canJoinWard: boolean;
+  onJoinWard: (patient: T) => void;
 }
 
-function buildColumns(
-  canEditPatient: boolean,
-  isDischarged: boolean,
-  canAdmitPatient: boolean,
-  admittingId: string | null,
-  onEditPatient: (patient: PatientListItem) => void,
-  onAdmitPatient: (patient: PatientListItem) => void,
-  canCreateGlucose: boolean,
-  onAddGlucose: (patient: PatientListItem) => void,
-  /** 时段码 → 名称（动态时段，停用项也能回显） */
-  getTimeSlotName: (code: string) => string,
-): ColumnsType<PatientListItem> {
+/** 虚拟病区模式：中段列换成加入天数，操作列由调用方渲染（单菜单） */
+interface WardModeProps<T extends PatientListItem> {
+  wardTab: WardTab;
+  /**
+   * 从行里取本次进出的时间。天数在前端算而不是后端下发：
+   * 跨零点后无需重新请求即自动 +1，也避免服务端与前端两套口径。
+   */
+  wardOf: (record: T) => { joinedAt: string; leftAt: string | null };
+  renderActions: (record: T) => ReactNode;
+  canEditPatient?: undefined;
+  isDischarged?: undefined;
+  canAdmitPatient?: undefined;
+  admittingId?: undefined;
+  onEditPatient?: undefined;
+  onAdmitPatient?: undefined;
+  canCreateGlucose?: undefined;
+  onAddGlucose?: undefined;
+  canJoinWard?: undefined;
+  onJoinWard?: undefined;
+}
+
+export type PatientTableProps<T extends PatientListItem = PatientListItem> = TableBaseProps<T> &
+  (PatientModeProps<T> | WardModeProps<T>);
+
+/** 基本信息列：床号 → 住院天数，两页完全一致 */
+function buildBasicColumns<T extends PatientListItem>(): ColumnsType<T> {
   return [
     {
       title: '床号',
@@ -80,6 +120,15 @@ function buildColumns(
       width: 100,
       render: (_, record) => formatHospitalDays(record.admissionAt, record.dischargeAt),
     },
+  ];
+}
+
+/** 患者管理的中段列：最近血糖 / 测量时段 / 测量时间 */
+function buildGlucoseColumns<T extends PatientListItem>(
+  /** 时段码 → 名称（动态时段，停用项也能回显） */
+  getTimeSlotName: (code: string) => string,
+): ColumnsType<T> {
+  return [
     {
       title: '最近血糖',
       dataIndex: 'lastGlucoseValue',
@@ -100,104 +149,156 @@ function buildColumns(
       width: 170,
       render: (value: string | null) => value ?? '-',
     },
-    {
-      title: '操作',
-      key: 'actions',
-      width: 120,
-      fixed: 'right',
-      render: (_, record) => {
-        // 出院 Tab：只有一个「办理住院」按钮，不再提供更多操作菜单
-        if (isDischarged) {
-          if (!canAdmitPatient) {
-            return null;
-          }
-          return (
-            <Popconfirm
-              title="办理住院"
-              description={`确认将 ${record.nameMasked} 重新办理住院？`}
-              okText="确认"
-              cancelText="取消"
-              onConfirm={() => onAdmitPatient(record)}
-            >
-              <Button
-                type="link"
-                size="small"
-                loading={admittingId === record.id}
-                disabled={admittingId !== null && admittingId !== record.id}
-                style={{ paddingInline: 0, height: 'auto' }}
-              >
-                办理住院
-              </Button>
-            </Popconfirm>
-          );
-        }
-        return (
-          <PatientMoreActions
-            patient={record}
-            canEdit={canEditPatient}
-            canCreateGlucose={canCreateGlucose}
-            onEdit={onEditPatient}
-            onAddGlucose={onAddGlucose}
-          />
-        );
-      },
-    },
   ];
 }
 
-export default function PatientTable({
-  items,
-  total,
-  loading,
-  page,
-  pageSize,
-  onPageChange,
-  canEditPatient,
-  isDischarged,
-  canAdmitPatient,
-  admittingId,
-  onEditPatient,
-  onAdmitPatient,
-  canCreateGlucose,
-  onAddGlucose,
-}: PatientTableProps) {
-  const getTimeSlotName = useCommonDataStore((state) => state.getTimeSlotName);
+/** 虚拟病区的中段列：加入天数（历史 Tab 另加加入/移出时间两列） */
+function buildWardColumns<T extends PatientListItem>(
+  wardTab: WardTab,
+  wardOf: (record: T) => { joinedAt: string; leftAt: string | null },
+): ColumnsType<T> {
+  const columns: ColumnsType<T> = [
+    {
+      title: '加入虚拟病区天数',
+      key: 'wardDays',
+      width: 150,
+      render: (_, record) => {
+        const { joinedAt, leftAt } = wardOf(record);
+        return formatWardDays(joinedAt, leftAt);
+      },
+    },
+  ];
+  // 历史行有两个时间点：只给移出时间看不出这次进出跨越了多久，天数列只隐含结果，故两列都显示
+  if (wardTab === WARD_TAB.HISTORY) {
+    columns.push(
+      {
+        title: '加入时间',
+        key: 'wardJoinedAt',
+        width: 170,
+        render: (_, record) => wardOf(record).joinedAt || '-',
+      },
+      {
+        title: '移出时间',
+        key: 'wardLeftAt',
+        width: 170,
+        render: (_, record) => wardOf(record).leftAt ?? '-',
+      },
+    );
+  }
+  return columns;
+}
 
-  const columns = useMemo(
-    () =>
-      buildColumns(
-        canEditPatient,
-        isDischarged,
-        canAdmitPatient,
-        admittingId,
-        onEditPatient,
-        onAdmitPatient,
-        canCreateGlucose,
-        onAddGlucose,
-        getTimeSlotName,
-      ),
-    [
-      canEditPatient,
-      isDischarged,
-      canAdmitPatient,
-      admittingId,
-      onEditPatient,
-      onAdmitPatient,
-      canCreateGlucose,
-      onAddGlucose,
-      getTimeSlotName,
-    ],
-  );
+/** 患者管理的操作列：出院 Tab 只有「办理住院」，住院 Tab 是更多操作菜单 */
+function buildPatientActionColumn<T extends PatientListItem>(
+  props: TableBaseProps<T> & PatientModeProps<T>,
+): ColumnsType<T>[number] {
+  const {
+    isDischarged,
+    canAdmitPatient,
+    admittingId,
+    onAdmitPatient,
+    canEditPatient,
+    canCreateGlucose,
+    onEditPatient,
+    onAddGlucose,
+    canJoinWard,
+    onJoinWard,
+  } = props;
+  return {
+    title: '操作',
+    key: 'actions',
+    width: 120,
+    fixed: 'right',
+    render: (_, record) => {
+      // 出院 Tab：只有一个「办理住院」按钮，不再提供更多操作菜单
+      if (isDischarged) {
+        if (!canAdmitPatient) {
+          return null;
+        }
+        return (
+          <Popconfirm
+            title="办理住院"
+            description={`确认将 ${record.nameMasked} 重新办理住院？`}
+            okText="确认"
+            cancelText="取消"
+            onConfirm={() => onAdmitPatient(record)}
+          >
+            <Button
+              type="link"
+              size="small"
+              loading={admittingId === record.id}
+              disabled={admittingId !== null && admittingId !== record.id}
+              style={{ paddingInline: 0, height: 'auto' }}
+            >
+              办理住院
+            </Button>
+          </Popconfirm>
+        );
+      }
+      return (
+        <PatientMoreActions
+          patient={record}
+          canEdit={canEditPatient}
+          canCreateGlucose={canCreateGlucose}
+          canJoinWard={canJoinWard}
+          onEdit={onEditPatient}
+          onAddGlucose={onAddGlucose}
+          onJoinWard={onJoinWard}
+        />
+      );
+    },
+  };
+}
+
+/** 虚拟病区的操作列：内容由调用方给（WardMoreActions 单菜单） */
+function buildWardActionColumn<T extends PatientListItem>(
+  renderActions: (record: T) => ReactNode,
+): ColumnsType<T>[number] {
+  return {
+    title: '操作',
+    key: 'actions',
+    width: 120,
+    fixed: 'right',
+    render: (_, record) => renderActions(record),
+  };
+}
+
+export default function PatientTable<T extends PatientListItem = PatientListItem>(
+  props: PatientTableProps<T>,
+) {
+  const getTimeSlotName = useCommonDataStore((state) => state.getTimeSlotName);
+  const {
+    items,
+    total,
+    loading,
+    page,
+    pageSize,
+    onPageChange,
+    scrollX = 1400,
+    emptyText = '暂无患者数据',
+  } = props;
+
+  // 依赖整个 props：调用方传的多是内联箭头函数，逐个列出来也拿不到稳定引用，
+  // 反而容易漏依赖导致列不刷新。表格最多 100 行，重建列数组的开销可忽略。
+  const columns = useMemo<ColumnsType<T>>(() => {
+    const middle = props.wardTab
+      ? buildWardColumns(props.wardTab, props.wardOf)
+      : buildGlucoseColumns<T>(getTimeSlotName);
+    const action = props.wardTab
+      ? buildWardActionColumn(props.renderActions)
+      : buildPatientActionColumn(props);
+    return [...buildBasicColumns<T>(), ...middle, action];
+  }, [props, getTimeSlotName]);
 
   return (
-    <Table<PatientListItem>
+    <Table<T>
       rowKey="id"
       columns={columns}
       dataSource={items}
       loading={loading}
       size="middle"
-      scroll={{ x: 1400 }}
-      locale={{ emptyText: '暂无患者数据' }}
+      scroll={{ x: scrollX }}
+      locale={{ emptyText }}
       pagination={{
         current: page,
         pageSize,
