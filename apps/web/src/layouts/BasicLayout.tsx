@@ -103,40 +103,44 @@ export default function BasicLayout() {
         onCollapse={setCollapsed}
         width={layoutSize.siderWidth}
         collapsedWidth={layoutSize.siderCollapsedWidth}
-        style={{ minHeight: '100vh' }}
+        style={{ height: '100vh', position: 'sticky', top: 0 }}
       >
-        <div
-          style={{
-            height: layoutSize.headerHeight,
-            display: 'flex',
-            alignItems: 'center',
-            padding: '0 16px',
-            color: mode === 'dark' ? '#ffffff' : '#08333a',
-            fontWeight: 600,
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-          }}
-        >
-          设备与人员管理平台
+        <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+          <div
+            style={{
+              height: layoutSize.headerHeight,
+              flexShrink: 0,
+              display: 'flex',
+              alignItems: 'center',
+              padding: '0 16px',
+              color: mode === 'dark' ? '#ffffff' : '#08333a',
+              fontWeight: 600,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+            }}
+          >
+            设备与人员管理平台
+          </div>
+          <Menu
+            style={{ flex: 1, minHeight: 0, overflow: 'auto' }}
+            theme={mode === 'dark' ? 'dark' : 'light'}
+            mode="inline"
+            selectedKeys={[
+              // 患者详情 /inpatient/patients/:id 不在菜单中，高亮其父级"患者管理"
+              location.pathname.startsWith('/inpatient/patients/')
+                ? '/inpatient/patients'
+                : location.pathname,
+            ]}
+            defaultOpenKeys={openKeys}
+            items={menuItems as MenuProps['items']}
+            onClick={({ key }) => {
+              // 仅 path 类型节点可导航；分组节点（group:/mid: 前缀）只负责展开
+              if (key.startsWith('/')) {
+                navigate(key);
+              }
+            }}
+          />
         </div>
-        <Menu
-          theme={mode === 'dark' ? 'dark' : 'light'}
-          mode="inline"
-          selectedKeys={[
-            // 患者详情 /inpatient/patients/:id 不在菜单中，高亮其父级"患者管理"
-            location.pathname.startsWith('/inpatient/patients/')
-              ? '/inpatient/patients'
-              : location.pathname,
-          ]}
-          defaultOpenKeys={openKeys}
-          items={menuItems as MenuProps['items']}
-          onClick={({ key }) => {
-            // 仅 path 类型节点可导航；分组节点（group:/mid: 前缀）只负责展开
-            if (key.startsWith('/')) {
-              navigate(key);
-            }
-          }}
-        />
       </Sider>
       <Layout>
         <Header
