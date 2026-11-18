@@ -6,6 +6,15 @@ import type { DepartmentOption, StaffOption } from '@/api/common-data';
 import { fetchPatients, type PatientListParams, type PatientListResult } from '@/api/patient';
 import { useAuthStore } from '@/store/auth';
 import { useCommonDataStore } from '@/store/common-data';
+import {
+  asInt,
+  asOneOf,
+  asString,
+  deserializeRange,
+  readListSnapshot,
+  serializeRange,
+  writeListSnapshot,
+} from '../list-nav-state';
 
 /** "所有"占位值：查询时不向后端传对应字段 */
 const ALL = 'ALL';
@@ -71,6 +80,67 @@ function buildParams(filters: PatientFilters, page: number, pageSize: number): P
   };
 }
 
+/** C1 方式B：可持久化到 history.state 的查询状态快照（Dayjs 区间已序列化为 ISO 字符串） */
+interface PatientQuerySnapshot {
+  status: PatientStatus;
+  viewMode: PatientViewMode;
+  filters: PatientFilters;
+  page: number;
+  pageSize: number;
+}
+
+const STATUS_OPTIONS = [PATIENT_STATUS.INPATIENT, PATIENT_STATUS.DISCHARGED] as const;
+const VIEW_MODE_OPTIONS: PatientViewMode[] = ['CARD', 'LIST'];
+
+/** 当前查询状态 → 可结构化克隆的快照 payload */
+function toSnapshot(state: PatientQuerySnapshot): Record<string, unknown> {
+  return {
+    status: state.status,
+    viewMode: state.viewMode,
+    filters: {
+      departmentId: state.filters.departmentId,
+      doctorId: state.filters.doctorId,
+      patientNo: state.filters.patientNo,
+      name: state.filters.name,
+      bedNo: state.filters.bedNo,
+      admissionRange: serializeRange(state.filters.admissionRange),
+      dischargeRange: serializeRange(state.filters.dischargeRange),
+    },
+    page: state.page,
+    pageSize: state.pageSize,
+  };
+}
+
+/** history.state 快照 → 查询状态；损坏/缺失返回 null（回退默认）。科室/医生有效性由调用方在选项就绪后校验 */
+function parseSnapshot(raw: unknown): PatientQuerySnapshot | null {
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
+  const obj = raw as Record<string, unknown>;
+  const rawFilters =
+    obj.filters && typeof obj.filters === 'object' ? (obj.filters as Record<string, unknown>) : {};
+  return {
+    status: asOneOf(obj.status, STATUS_OPTIONS, PATIENT_STATUS.INPATIENT),
+    viewMode: asOneOf(obj.viewMode, VIEW_MODE_OPTIONS, 'CARD'),
+    filters: {
+      departmentId: asString(rawFilters.departmentId, ALL),
+      doctorId: asString(rawFilters.doctorId, ALL),
+      patientNo: asString(rawFilters.patientNo),
+      name: asString(rawFilters.name),
+      bedNo: asString(rawFilters.bedNo),
+      admissionRange: deserializeRange(rawFilters.admissionRange),
+      dischargeRange: deserializeRange(rawFilters.dischargeRange),
+    },
+    page: asInt(obj.page, 1),
+    pageSize: asInt(obj.pageSize, DEFAULT_PAGE_SIZE),
+  };
+}
+
+/** 选项有效性：'ALL' 恒有效，否则须仍在当前可见选项内（数据范围可能已变） */
+function isValidOption(value: string, options: Array<{ id: string }>): boolean {
+  return value === ALL || options.some((option) => option.id === value);
+}
+
 /**
  * 患者管理页顶部筛选状态。
  * - 科室/医生选项按当前用户数据范围过滤（ALL→全院，DEPARTMENT/SELF→本科室，NONE→空）
@@ -82,12 +152,17 @@ export function usePatientQuery(initialStatus: PatientStatus, enabled = true) {
   const staff = useCommonDataStore((state) => state.staff);
   const commonLoaded = useCommonDataStore((state) => state.loaded);
 
-  const [status, setStatus] = useState<PatientStatus>(initialStatus);
-  const [viewMode, setViewMode] = useState<PatientViewMode>('CARD');
-  const [filters, setFilters] = useState<PatientFilters>(createEmptyFilters);
+  // C1 方式B：挂载时读一次历史快照（从详情页 navigate(-1) 返回时携带）；惰性初始化只跑一次
+  const [restored] = useState<PatientQuerySnapshot | null>(() =>
+    parseSnapshot(readListSnapshot('patients')),
+  );
+
+  const [status, setStatus] = useState<PatientStatus>(restored?.status ?? initialStatus);
+  const [viewMode, setViewMode] = useState<PatientViewMode>(restored?.viewMode ?? 'CARD');
+  const [filters, setFilters] = useState<PatientFilters>(restored?.filters ?? createEmptyFilters);
   const initializedRef = useRef(false);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [page, setPage] = useState(restored?.page ?? 1);
+  const [pageSize, setPageSize] = useState(restored?.pageSize ?? DEFAULT_PAGE_SIZE);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<PatientListResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -227,17 +302,39 @@ export function usePatientQuery(initialStatus: PatientStatus, enabled = true) {
       return;
     }
     initializedRef.current = true;
-    const departmentId = defaultOption(departmentOptions);
-    const next: PatientFilters = {
-      ...createEmptyFilters(),
-      departmentId,
-      doctorId: defaultOption(filterDoctors(allDoctors, departmentId)),
-    };
+
+    let next: PatientFilters;
+    let nextPage: number;
+    let nextPageSize: number;
+    if (restored) {
+      // 还原路径：校验快照里的科室/医生是否仍在可见选项内（数据范围可能已变），失效则回退默认；
+      // 其余筛选/视图/页码沿用快照。卡片模式仍从第 1 页重载（滚动位置不还原，决策 C1）。
+      const departmentId = isValidOption(restored.filters.departmentId, departmentOptions)
+        ? restored.filters.departmentId
+        : defaultOption(departmentOptions);
+      const doctors = filterDoctors(allDoctors, departmentId);
+      const doctorId = isValidOption(restored.filters.doctorId, doctors)
+        ? restored.filters.doctorId
+        : defaultOption(doctors);
+      next = { ...restored.filters, departmentId, doctorId };
+      nextPage = restored.page;
+      nextPageSize = restored.pageSize;
+    } else {
+      // 首次进入：按数据范围计算默认科室/医生
+      const departmentId = defaultOption(departmentOptions);
+      next = {
+        ...createEmptyFilters(),
+        departmentId,
+        doctorId: defaultOption(filterDoctors(allDoctors, departmentId)),
+      };
+      nextPage = 1;
+      nextPageSize = DEFAULT_PAGE_SIZE;
+    }
     setFilters(next);
     if (status === PATIENT_STATUS.INPATIENT && viewMode === 'CARD') {
       void runCardQuery(next, status, true);
     } else {
-      void runQuery(next, status, 1, DEFAULT_PAGE_SIZE);
+      void runQuery(next, status, nextPage, nextPageSize);
     }
   }, [
     enabled,
@@ -249,7 +346,17 @@ export function usePatientQuery(initialStatus: PatientStatus, enabled = true) {
     runCardQuery,
     status,
     viewMode,
+    restored,
   ]);
+
+  // C1 方式B：已提交状态变化时写入当前历史条目，供从详情页返回时还原。
+  // 初始化前不写（避免覆盖刚读到的快照）；卡片滚动加载只改 cardItems，不在依赖内，不会触发写入。
+  useEffect(() => {
+    if (!initializedRef.current) {
+      return;
+    }
+    writeListSnapshot('patients', toSnapshot({ status, viewMode, filters, page, pageSize }));
+  }, [status, viewMode, filters, page, pageSize]);
 
   const changeStatus = (nextStatus: PatientStatus) => {
     setStatus(nextStatus);

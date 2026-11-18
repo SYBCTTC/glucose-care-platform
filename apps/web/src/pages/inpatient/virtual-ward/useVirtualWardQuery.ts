@@ -6,6 +6,15 @@ import type { DepartmentOption, StaffOption } from '@/api/common-data';
 import { fetchWardPatients, type WardListParams, type WardListResult } from '@/api/ward';
 import { useAuthStore } from '@/store/auth';
 import { useCommonDataStore } from '@/store/common-data';
+import {
+  asInt,
+  asOneOf,
+  asString,
+  deserializeRange,
+  readListSnapshot,
+  serializeRange,
+  writeListSnapshot,
+} from '../list-nav-state';
 
 /**
  * 虚拟病区页的查询状态。
@@ -109,6 +118,67 @@ function buildParams(
   return params;
 }
 
+/** C1 方式B：可持久化到 history.state 的查询状态快照（Dayjs 区间已序列化为 ISO 字符串） */
+interface WardQuerySnapshot {
+  tab: WardTab;
+  viewMode: WardViewMode;
+  filters: VirtualWardFilters;
+  page: number;
+  pageSize: number;
+}
+
+const TAB_OPTIONS = [WARD_TAB.CURRENT, WARD_TAB.HISTORY] as const;
+const VIEW_MODE_OPTIONS: WardViewMode[] = ['CARD', 'LIST'];
+
+/** 当前查询状态 → 可结构化克隆的快照 payload */
+function toSnapshot(state: WardQuerySnapshot): Record<string, unknown> {
+  return {
+    tab: state.tab,
+    viewMode: state.viewMode,
+    filters: {
+      departmentId: state.filters.departmentId,
+      doctorId: state.filters.doctorId,
+      patientNo: state.filters.patientNo,
+      name: state.filters.name,
+      bedNo: state.filters.bedNo,
+      joinRange: serializeRange(state.filters.joinRange),
+      leaveRange: serializeRange(state.filters.leaveRange),
+    },
+    page: state.page,
+    pageSize: state.pageSize,
+  };
+}
+
+/** history.state 快照 → 查询状态；损坏/缺失返回 null（回退默认）。科室/医生有效性由调用方在选项就绪后校验 */
+function parseSnapshot(raw: unknown): WardQuerySnapshot | null {
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
+  const obj = raw as Record<string, unknown>;
+  const rawFilters =
+    obj.filters && typeof obj.filters === 'object' ? (obj.filters as Record<string, unknown>) : {};
+  return {
+    tab: asOneOf(obj.tab, TAB_OPTIONS, WARD_TAB.CURRENT),
+    viewMode: asOneOf(obj.viewMode, VIEW_MODE_OPTIONS, 'CARD'),
+    filters: {
+      departmentId: asString(rawFilters.departmentId, ALL),
+      doctorId: asString(rawFilters.doctorId, ALL),
+      patientNo: asString(rawFilters.patientNo),
+      name: asString(rawFilters.name),
+      bedNo: asString(rawFilters.bedNo),
+      joinRange: deserializeRange(rawFilters.joinRange),
+      leaveRange: deserializeRange(rawFilters.leaveRange),
+    },
+    page: asInt(obj.page, 1),
+    pageSize: asInt(obj.pageSize, DEFAULT_PAGE_SIZE),
+  };
+}
+
+/** 选项有效性：'ALL' 恒有效，否则须仍在当前可见选项内（数据范围可能已变） */
+function isValidOption(value: string, options: Array<{ id: string }>): boolean {
+  return value === ALL || options.some((option) => option.id === value);
+}
+
 export function useVirtualWardQuery(enabled = true) {
   const profile = useAuthStore((state) => state.profile);
   const hasPermission = useAuthStore((state) => state.hasPermission);
@@ -122,12 +192,19 @@ export function useVirtualWardQuery(enabled = true) {
   const canManage = hasPermission(PERMISSION.WARD_MANAGE);
   const queryEnabled = enabled && canView;
 
-  const [tab, setTab] = useState<WardTab>(WARD_TAB.CURRENT);
-  const [viewMode, setViewMode] = useState<WardViewMode>('CARD');
-  const [filters, setFilters] = useState<VirtualWardFilters>(createEmptyFilters);
+  // C1 方式B：挂载时读一次历史快照（从详情页 navigate(-1) 返回时携带）；惰性初始化只跑一次
+  const [restored] = useState<WardQuerySnapshot | null>(() =>
+    parseSnapshot(readListSnapshot('ward')),
+  );
+
+  const [tab, setTab] = useState<WardTab>(restored?.tab ?? WARD_TAB.CURRENT);
+  const [viewMode, setViewMode] = useState<WardViewMode>(restored?.viewMode ?? 'CARD');
+  const [filters, setFilters] = useState<VirtualWardFilters>(
+    restored?.filters ?? createEmptyFilters,
+  );
   const initializedRef = useRef(false);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [page, setPage] = useState(restored?.page ?? 1);
+  const [pageSize, setPageSize] = useState(restored?.pageSize ?? DEFAULT_PAGE_SIZE);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<WardListResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -262,17 +339,39 @@ export function useVirtualWardQuery(enabled = true) {
       return;
     }
     initializedRef.current = true;
-    const departmentId = defaultOption(departmentOptions);
-    const next: VirtualWardFilters = {
-      ...createEmptyFilters(),
-      departmentId,
-      doctorId: defaultOption(filterDoctors(allDoctors, departmentId)),
-    };
+
+    let next: VirtualWardFilters;
+    let nextPage: number;
+    let nextPageSize: number;
+    if (restored) {
+      // 还原路径：校验快照里的科室/医生是否仍在可见选项内（数据范围可能已变），失效则回退默认；
+      // 其余筛选/视图/页码沿用快照。卡片模式仍从第 1 页重载（滚动位置不还原，决策 C1）。
+      const departmentId = isValidOption(restored.filters.departmentId, departmentOptions)
+        ? restored.filters.departmentId
+        : defaultOption(departmentOptions);
+      const doctors = filterDoctors(allDoctors, departmentId);
+      const doctorId = isValidOption(restored.filters.doctorId, doctors)
+        ? restored.filters.doctorId
+        : defaultOption(doctors);
+      next = { ...restored.filters, departmentId, doctorId };
+      nextPage = restored.page;
+      nextPageSize = restored.pageSize;
+    } else {
+      // 首次进入：按数据范围计算默认科室/医生
+      const departmentId = defaultOption(departmentOptions);
+      next = {
+        ...createEmptyFilters(),
+        departmentId,
+        doctorId: defaultOption(filterDoctors(allDoctors, departmentId)),
+      };
+      nextPage = 1;
+      nextPageSize = DEFAULT_PAGE_SIZE;
+    }
     setFilters(next);
     if (tab === WARD_TAB.CURRENT && viewMode === 'CARD') {
       void runCardQuery(next, tab, true);
     } else {
-      void runQuery(next, tab, 1, DEFAULT_PAGE_SIZE);
+      void runQuery(next, tab, nextPage, nextPageSize);
     }
   }, [
     queryEnabled,
@@ -284,7 +383,17 @@ export function useVirtualWardQuery(enabled = true) {
     runCardQuery,
     tab,
     viewMode,
+    restored,
   ]);
+
+  // C1 方式B：已提交状态变化时写入当前历史条目，供从详情页返回时还原。
+  // 初始化前不写（避免覆盖刚读到的快照）；卡片滚动加载只改 cardItems，不在依赖内，不会触发写入。
+  useEffect(() => {
+    if (!initializedRef.current) {
+      return;
+    }
+    writeListSnapshot('ward', toSnapshot({ tab, viewMode, filters, page, pageSize }));
+  }, [tab, viewMode, filters, page, pageSize]);
 
   const changeTab = (nextTab: WardTab) => {
     // 切 Tab 清掉日期区间：joinRange 只对 CURRENT 有意义、leaveRange 只对 HISTORY 有意义，
