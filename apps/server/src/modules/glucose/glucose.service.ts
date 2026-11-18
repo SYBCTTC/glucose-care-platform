@@ -12,6 +12,7 @@ import { assertInScope } from '../../common/data-scope/scope.util';
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import type { AuthenticatedUser } from '../../common/types';
+import { isUniqueConstraintViolation } from '../../common/utils/prisma-error';
 import { PATIENT_PUBLIC_SELECT, toListItem } from '../patient/patient.service';
 import type { GlucoseAlertThreshold } from '../system/system-config.service';
 import { SystemConfigService } from '../system/system-config.service';
@@ -50,11 +51,6 @@ type GlucoseRecordSummary = {
   valueMmolL: Prisma.Decimal | null;
   measuredAt: Date;
 };
-
-/** 是否 Prisma 唯一约束冲突（P2002），用于血糖重复提交的幂等兜底 */
-function isUniqueConstraintViolation(error: unknown): boolean {
-  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
-}
 
 @Injectable()
 export class GlucoseService {
