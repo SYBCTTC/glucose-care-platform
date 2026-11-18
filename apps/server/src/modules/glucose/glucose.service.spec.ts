@@ -57,6 +57,8 @@ function patientRow(departmentId = 'd-endo') {
     glucoseRecords: [
       { resultType: '1', valueMmolL: new Prisma.Decimal('8.9'), mealContext: 'FASTING', measuredAt },
     ],
+    // toListItem 会读 virtualWardRecords 判定 inVirtualWard，mock 行须与 PATIENT_PUBLIC_SELECT 同形
+    virtualWardRecords: [],
   };
 }
 

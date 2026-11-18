@@ -64,6 +64,8 @@ function publicRow(overrides: Record<string, unknown> = {}) {
     dischargeAt: null,
     archivedAt: null,
     glucoseRecords: [],
+    // toListItem 会读 virtualWardRecords 判定 inVirtualWard，mock 行须与 PATIENT_PUBLIC_SELECT 同形
+    virtualWardRecords: [],
     ...overrides,
   };
 }

@@ -12,6 +12,7 @@ import { PatientModule } from './modules/patient/patient.module';
 import { DictModule } from './modules/dict/dict.module';
 import { GlucoseModule } from './modules/glucose/glucose.module';
 import { TimeSlotModule } from './modules/time-slot/time-slot.module';
+import { WardModule } from './modules/ward/ward.module';
 import { SystemModule } from './modules/system/system.module';
 import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
@@ -33,6 +34,8 @@ import { PrismaModule } from './common/prisma/prisma.module';
     DictModule,
     GlucoseModule,
     TimeSlotModule,
+    // 虚拟病区：复用患者域的脱敏选择器与数据范围，不新增 RESOURCE
+    WardModule,
     // 系统参数（SystemConfig）：血糖告警阈值等，只读；维护接口属 ROADMAP P5-3
     SystemModule,
   ],

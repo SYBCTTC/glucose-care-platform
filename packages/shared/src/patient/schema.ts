@@ -204,6 +204,12 @@ export interface PatientListItem {
   lastGlucoseMealContext: string | null;
   /** 最近一次血糖测量时间，YYYY-MM-DD HH:mm:ss */
   lastGlucoseMeasuredAt: string | null;
+  /**
+   * 当前是否在虚拟病区（存在 leftAt 为空的 VirtualWardRecord）。
+   * 前端据此把「加入虚拟病区」菜单项切换为置灰的「已加入虚拟病区」。
+   * 所有走 toListItem 的出参都带此字段：住院/出院列表、详情、编辑结果、办理住院结果、添加血糖结果。
+   */
+  inVirtualWard: boolean;
 }
 
 /**

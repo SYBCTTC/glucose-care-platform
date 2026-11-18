@@ -28,6 +28,7 @@ import { assertInScope, buildScopeWhere } from '../../common/data-scope/scope.ut
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import type { AuthenticatedUser } from '../../common/types';
+import { isUniqueConstraintViolation } from '../../common/utils/prisma-error';
 
 export interface PatientListResult {
   items: PatientListItem[];
@@ -80,6 +81,13 @@ export const PATIENT_PUBLIC_SELECT = Prisma.validator<Prisma.PatientSelect>()({
     take: 1,
     select: { resultType: true, valueMmolL: true, mealContext: true, measuredAt: true },
   },
+  // 当前是否在虚拟病区：只探一条 leftAt 为空的记录，命中索引 (patientId, leftAt)。
+  // 部分唯一索引保证至多一条，故 take:1 足够；用 length>0 判定而不是取字段，避免多查列。
+  virtualWardRecords: {
+    where: { leftAt: null },
+    take: 1,
+    select: { id: true },
+  },
 });
 
 export type PatientPublicRow = Prisma.PatientGetPayload<{ select: typeof PATIENT_PUBLIC_SELECT }>;
@@ -109,6 +117,8 @@ export function toListItem(row: PatientPublicRow): PatientListItem {
     lastGlucoseValue: lastGlucose?.valueMmolL ? Number(lastGlucose.valueMmolL) : null,
     lastGlucoseMealContext: lastGlucose?.mealContext ?? null,
     lastGlucoseMeasuredAt: formatDateTime(lastGlucose?.measuredAt ?? null),
+    // 前端据此把「加入虚拟病区」菜单项切换为置灰的「已加入虚拟病区」
+    inVirtualWard: row.virtualWardRecords.length > 0,
   };
 }
 
@@ -191,7 +201,7 @@ export class PatientService {
       });
       return { id: created.id };
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      if (isUniqueConstraintViolation(error)) {
         throw new BusinessException(ERROR_CODES.PATIENT_NO_DUPLICATE);
       }
       throw error;
