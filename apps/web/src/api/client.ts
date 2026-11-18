@@ -56,7 +56,7 @@ export function clearToken(): void {
 }
 
 async function request<T>(
-  method: 'GET' | 'POST' | 'PATCH',
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
   url: string,
   body?: unknown,
 ): Promise<T> {
@@ -109,4 +109,6 @@ export const http = {
   },
   post: <T>(url: string, body?: unknown) => request<T>('POST', url, body),
   patch: <T>(url: string, body?: unknown) => request<T>('PATCH', url, body),
+  /** 无请求体；用于"移出虚拟病区"这类以路径参数表达意图的删除语义 */
+  delete: <T>(url: string) => request<T>('DELETE', url),
 };
