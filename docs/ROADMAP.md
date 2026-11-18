@@ -55,7 +55,7 @@
 | P2-5 | 入院办理 | ✅ | `POST /patients/:id/admit`（`PATIENT_MANAGE` 审计）。**原 ROADMAP 未列此项** |
 | P2-6 | 患者出院 | ❌ | 无出院接口。`PatientStatus` 已有 `DISCHARGED`，出院列表查询已可用，只差状态流转接口 |
 | P2-7 | 批量导入 | ❌ | — |
-| P2-8 | 虚拟病区 | ⚠️ | 页面、筛选与查询已通（`useVirtualWardQuery` + `VirtualWardFilter` / `VirtualWardToolbar`）；**列表 UI 未开发**（页面内已自标注） |
+| P2-8 | 虚拟病区 | ✅ | `VirtualWardRecord`（一条=一次进出，历史全留，部分唯一索引 `virtual_ward_record_one_active` 保证至多一条在区）；`GET /ward/patients`（CURRENT/HISTORY 双 Tab）+ `POST/DELETE /ward/patients/:id`（`WARD_VIEW`/`WARD_MANAGE` + 审计 `PATIENT_WARD_JOIN`/`PATIENT_WARD_REMOVE`）；数据权限沿用 `RESOURCE.PATIENT`（跨科室 30002、NONE 档 30006）；并发兜底 44001/44002；前端复用 `PatientTable`/`PatientCardGrid`（判别联合 props），当前 Tab 卡片滚动加载、历史 Tab 仅列表；`useVirtualWardQuery` 命令式双路径 + `removeItem` 局部更新。规格见 `docs/specs/virtual-ward.md` |
 | P2-9 | 卡片视图 | ✅ | `PatientCardGrid` |
 | P2-10 | **血糖录入**（原 P3-1） | ✅ | `POST /patients/:id/glucose`（`GLUCOSE_CREATE` + 审计）；`GlucoseCreateModal` + `LastGlucose`；结果类型 `0/1/2` 服务端判定；唯一约束 `(patientId, measuredAt)` 幂等去重（`data.skipped`）；检测时段查 `TimeSlot` 表运行时校验 |
 
@@ -138,14 +138,15 @@
 
 ## 整体进度
 
-**约 40%**（按 32 个功能项加权：P1 4/4、P2 7/10、P4 0.2/6、P5 0.8/5、P6 0.5/4、P7 0/3）
+**约 42%**（按 32 个功能项加权：P1 4/4、P2 8/10、P4 0.2/6、P5 0.8/5、P6 0.5/4、P7 0/3）
 
-- ✅ 已完成：P1 全部；P2 的查询/建档/编辑/入院/卡片视图/**血糖录入**
-- 🔄 进行中：P2 详情与虚拟病区（各差前端）、P4 设备列表、P5 只读下发、P6 审计写入
+- ✅ 已完成：P1 全部；P2 的查询/建档/编辑/入院/卡片视图/**血糖录入**/**虚拟病区**
+- 🔄 进行中：P2 详情（差前端独立页）、P4 设备列表、P5 只读下发、P6 审计写入
 - ⚪ 未开始：患者出院与批量导入、设备数据链路、系统管理（增删改）、审计查询与报表、导出、部署与 CI
 
 > 与上一版（约 35%）的差异来自**按代码复核**而非新增功能：P2 补上了此前漏记的入院办理与血糖录入，
-> P5/P6 从 0%/5% 上调（只读下发接口与审计写入链路其实已落地），P2 详情与虚拟病区从「已完成」下调为「部分」。
+> P5/P6 从 0%/5% 上调（只读下发接口与审计写入链路其实已落地），P2 详情从「已完成」下调为「部分」。
+> 2026-11-18：P2-8 虚拟病区后端 + 前端全量落地（进出记录、双 Tab 列表、权限与审计、并发兜底 44001/44002），由「部分」上调为「已完成」。
 
 ---
 

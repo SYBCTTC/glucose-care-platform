@@ -46,7 +46,7 @@ NestJS 单体服务 ──► PostgreSQL 16
 | 护士 `NURSE` | `DEPARTMENT` 本科室 | 含建档、编辑、办理住院 |
 | 护士长 `NURSE_HEAD` | `DEPARTMENT` 本科室 | 另含 `patient:manage`（归档）、`audit:view`、`quality:manage` |
 | 设备管理员 `DEVICE_ADMIN` | `NONE` 无患者数据 | 只有设备 / 质控 / 公共数据权限 |
-| 系统管理员 `SYS_ADMIN` | **`ALL` 全院** | **全部 22 个权限点**，含患者数据的查看 / 建档 / 编辑 / 归档 / 办理住院 |
+| 系统管理员 `SYS_ADMIN` | **`ALL` 全院** | **全部 23 个权限点**，含患者数据的查看 / 建档 / 编辑 / 归档 / 办理住院 |
 
 > ⚠️ **系统管理员是全院数据范围，不是"仅系统管理"**。本节原表述"系统管理员 → 仅系统管理，
 > 不自动拥有患者数据查看权"与代码长期相反，2026-11-17 经需求人裁定：**文档错、代码对**，已按
@@ -92,8 +92,17 @@ NestJS 单体服务 ──► PostgreSQL 16
   （删用户不得抹掉录入人，医疗留痕优先）
 
 **全部模型**：`Department / User / Role / UserRole / Patient / GlucoseRecord / Device /
-PatientDeviceBinding / AuditLog / SystemConfig / DictItem / TimeSlot`。
+PatientDeviceBinding / VirtualWardRecord / AuditLog / SystemConfig / DictItem / TimeSlot`。
 患者敏感字段（姓名/身份证/手机号）加密存为 `*Cipher`，另存**落库**脱敏值 `*Masked`，见 `AGENTS.md` §5.3。
+
+**虚拟病区模型现状**：`VirtualWardRecord`（`modules/ward`）一条 = 一次进出，`leftAt` 为空表示当前在区。
+- 重复进出每次**新建记录、历史全留**；同一患者至多一条在区行，由**部分唯一索引**
+  `virtual_ward_record_one_active`（`prisma/sql/ward_one_active.sql`，Prisma 不支持部分唯一索引故走手工 SQL）保证，
+  并发撞 P2002 时服务端映射为 `44001`
+- 字段仅 `patientId / joinedAt / leftAt / joinedById / leftById / leaveReason`（加 `id / createdAt`）；
+  `leaveReason` 取值见 `WARD_LEAVE_REASON`，当前仅 `MANUAL` 有代码写入，`DISCHARGE` / `ARCHIVE` 为预留
+- 数据权限**沿用 `RESOURCE.PATIENT`**，不新增资源类型，`scope.util.ts` 与 `ROLE_DATA_SCOPE` 一字未改；
+  设备管理员（`NONE` 档）自动被拒 `30006`。完整规格见 `docs/specs/virtual-ward.md`
 
 ## 5. CGM 演进路径（目标态，当前未预留任何字段）
 
@@ -102,7 +111,7 @@ PatientDeviceBinding / AuditLog / SystemConfig / DictItem / TimeSlot`。
 3. 日汇总改为任务调度预计算，前端只读汇总表
 4. **分区触发条件** = 启用 CGM 或单表超 5000 万行；当前 BGM 规模**不要分区**。
    执行前先补 `prisma/sql/glucose_record_partition.sql`——⚠️ **该文件当前不存在**，
-   `prisma/sql/` 下只有 `binding_partial_unique.sql`
+   `prisma/sql/` 下只有 `binding_partial_unique.sql` 与 `ward_one_active.sql`（均为部分唯一索引）
 5. 前端图表开启 `sampling: 'lttb'` 与 `large: true`
 
 ## 6. 审计设计

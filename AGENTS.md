@@ -139,7 +139,8 @@ packages/
 - **数据范围按角色定档**（`ROLE_DATA_SCOPE`，唯一权威实现 `apps/server/src/common/data-scope/scope.util.ts`，
   四档语义表见 `docs/PERMISSION-DESIGN.md` §4）：医生 / 护士 / 护士长 → **本科室**（`DEPARTMENT`）；
   设备管理员 → 无患者数据（`NONE`）；系统管理员 → **全院**（`ALL`，2026-11-17 需求人裁定确认，
-  含全部 22 个权限点与患者数据的查看/建档/编辑/归档/办理住院）
+  含全部 23 个权限点与患者数据的查看/建档/编辑/归档/办理住院；2026-11-18 虚拟病区上线后
+  新增 `ward:view` / `ward:manage`，医生/护士/护士长/系统管理员均授予，数据范围仍按 `DEPARTMENT` 收敛）
 - ⚠️ **医生看的是本科室全部患者，不是"自己管辖的患者"**：`DEPARTMENT` 档只按 `departmentId` 过滤。
   `Patient.doctorId`（责任医生）仅是列表的**可选筛选项**（`patient.service.ts` 的 `query.doctorId`），
   **不是数据权限边界**——不要据此实现按责任医生过滤，也不要以为医生看不到同科室其他医生的患者

@@ -77,3 +77,8 @@ dr.chen 跨科室     HTTP403 {"code":30002,"message":"无权访问其他科室�
 | NONE | 拒绝（30006） | `departmentId` | `departmentId` |
 
 未知资源类型一律按最小权限拒绝（`default` 分支）。
+
+> **复用既有资源、不新增类型的范例**：虚拟病区（`modules/ward`，2026-11-18 上线）的患者进出操作
+> 一律标 `@RequireDataScope(RESOURCE.PATIENT)`，数据权限完全沿用患者域（跨科室 `30002`、`NONE` 档 `30006`），
+> `scope.util.ts` 与 `ROLE_DATA_SCOPE` **一字未改**；功能权限新增 `ward:view` / `ward:manage` 两点（查看与操作分离）。
+> 新增"挂在患者下"的子资源时应照此办理——只为真正独立的资源域新建类型，避免语义表随子功能膨胀。
