@@ -79,19 +79,15 @@ export function ReportCell({
           <div key={`${entry.time}-${index}`} style={index > 0 ? separatorStyle : undefined}>
             {/* gc-num 提供等宽数字；其默认右对齐被 inline center 覆盖（2026-11-19 二次调整：格内居中）。
                 不设 nowrap：列宽均分页面时允许括号段换行，保证表格不横向滚动。
-                间距（2026-11-19 三次调整，需求人指定 6px）：
-                有强化时段 → `值(时间)` 与 `(强化名)` 之间加间距；无强化 → `值` 与 `(时间)` 之间加间距。
+                间距（2026-11-19 三次调整，需求人指定 6px）：`值` 与 `(时间)` 之间恒有间距；
+                有强化时段时 `(时间)` 与 `(强化名)` 之间同样加间距。
                 用 margin 而非空格字符：文本口径仍是「紧邻无空格」（R3），且 inline margin 不破坏居中 */}
             <div className="gc-num" style={{ textAlign: 'center' }}>
               <span style={{ color: dict?.color ?? undefined }}>{text}</span>
+              <span style={{ marginLeft: VALUE_GAP_PX }}>({entry.time})</span>
               {entry.intensiveName ? (
-                <>
-                  <span>({entry.time})</span>
-                  <span style={{ marginLeft: VALUE_GAP_PX }}>({entry.intensiveName})</span>
-                </>
-              ) : (
-                <span style={{ marginLeft: VALUE_GAP_PX }}>({entry.time})</span>
-              )}
+                <span style={{ marginLeft: VALUE_GAP_PX }}>({entry.intensiveName})</span>
+              ) : null}
             </div>
             <div style={{ color: token.colorTextSecondary }}>{entry.nurseName ?? '-'}</div>
           </div>

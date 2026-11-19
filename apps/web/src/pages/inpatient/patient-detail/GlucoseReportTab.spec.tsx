@@ -75,18 +75,18 @@ describe('ReportCell — 血糖报告单元格（R3/R4）', () => {
     expect(textOf(render([entry()]))).not.toContain('(08:30)(');
   });
 
-  it('有强化时段：`值(时间)` 与 `(强化名)` 之间 6px 间距，值与时间之间无间距（2026-11-19 三次调整）', () => {
+  it('有强化时段：`值`/`(时间)`/`(强化名)` 三段之间各 6px 间距（2026-11-19 三次调整）', () => {
     const html = render([entry({ intensiveName: '强化-上午' })]);
 
+    expect(html).toContain('<span style="margin-left:6px">(08:30)</span>');
     expect(html).toContain('<span style="margin-left:6px">(强化-上午)</span>');
-    expect(html).toContain('<span>(08:30)</span>');
   });
 
   it('无强化时段：`值` 与 `(时间)` 之间 6px 间距（2026-11-19 三次调整）', () => {
     const html = render([entry()]);
 
     expect(html).toContain('<span style="margin-left:6px">(08:30)</span>');
-    expect(html).not.toContain('<span>(08:30)</span>');
+    expect(html).not.toContain('强化');
   });
 
   it('valueMmolL 为 null → 显示字典标签而非数值（R8）', () => {
