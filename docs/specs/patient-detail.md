@@ -142,7 +142,12 @@ interface PatientDetail extends PatientListItem {
   其余「label：值」；入院时间、年龄用 `gc-num` 等宽数字；「添加血糖」按钮 `marginLeft: 'auto'` 贴右下角（D3）。
   颜色取 `theme.useToken()`、间距取 `layoutSize`、边框宽度取 `token.lineWidth`，**无硬编码色值/魔法数字**。
 - `PatientDetailTabs.tsx`：主 Tabs（`underline`：血糖数据 / 基本信息 / 出入院记录）+ 子 Tabs（`background`：血糖报告 / 记录 / 趋势图），
-  默认「血糖数据 → 血糖报告」，全部 `Empty`「（建设中）」占位（A4）。
+  默认「血糖数据 → 血糖报告」。
+  ⚠️ **2026-11-19 起（`docs/specs/glucose-report.md` R10）两层 Tab 全部由 URL 驱动，不再 `useState`**：
+  5 个内容页（`basic` / `admission` / `glucose/report` / `glucose/record` / `glucose/trend`）各为独立子路由，刷新停留；
+  内容区经 `<Outlet context={{ glucoseVersion }}/>` 渲染；Tab 切换统一走 `useDetailTabNavigate()`
+  （`replace: true` + `state` 透传，防污染历史与丢返回来源）；路径常量唯一来源 `detail-tabs.ts`。
+  血糖报告子页已是真实数据，记录 / 趋势图仍 `DetailPlaceholder`「（建设中）」占位（A4 剩余部分）。
 
 ### 6.3 入口接线（C2/C3/C4）
 
@@ -150,8 +155,10 @@ interface PatientDetail extends PatientListItem {
 - `PatientCardGrid.tsx`：`CardBaseProps` 增 `onViewDetail`；整卡 `hoverable` + `onClick` 进详情，
   操作区包一层 `onClick={e => e.stopPropagation()}` 防误触（C2）。
 - `PatientMoreActions.tsx`：移除 `detail` 菜单项与分隔线（C4）；编辑/血糖/加入病区三项均无权限时 `items.length === 0` → 返回 `null`。
-- `patients/index.tsx`、`virtual-ward/index.tsx`：新增 `goDetail(patient)` →
-  `navigate('/inpatient/patients/' + patient.id, { state: { from: location.pathname } })`，传给表格与卡片网格。
+- `patients/index.tsx`、`virtual-ward/index.tsx`：新增 `goDetail(patient)`，传给表格与卡片网格。
+  ⚠️ **2026-11-19 起（`docs/specs/glucose-report.md` D10）跳转目标由裸详情 URL 改为直达默认子路由**：
+  `navigate(`${DETAIL_PATH_PREFIX}${patient.id}/${DETAIL_DEFAULT_TAB}`, { state: { from: location.pathname } })`
+  （即 `.../glucose/report`），不经过 index 重定向、不产生额外历史栈条目；`state.from` 保留供返回还原（C1）。
 
 ## 7. 错误码与前端行为
 
@@ -167,7 +174,10 @@ interface PatientDetail extends PatientListItem {
 ## 8. 测试要求（已落地）
 
 - [x] `patient-detail/PatientDetail.spec.tsx`（`renderToStaticMarkup`，node 环境无 jsdom）：
-  基本信息区字段/脱敏值/责任护士、添加血糖按钮门控（住院+权限展示、出院/无权限隐藏）、`nurseName=null` 边界、Tabs 默认占位（5 用例）
+  基本信息区字段/脱敏值/责任护士、添加血糖按钮门控（住院+权限展示、出院/无权限隐藏）、`nurseName=null` 边界；
+  2026-11-19 扩充：双层 Tab 由 URL 派生（`MemoryRouter`）、`DetailPlaceholder` 占位、
+  壳组件 loading/403/失败分支不渲染 `<Outlet/>` 内容（mock `usePatientDetail` + 哨兵子路由，风险 7）——共 15 用例。
+  Tab 派生/跳转约束纯函数另见 `detail-tabs.spec.ts`（13 用例）
 - [x] `patients/PatientMoreActions.spec.tsx`：C4 空菜单守卫（三项无权限 → 返回 null）、触发按钮渲染（3 用例）
 - [x] `inpatient/list-nav-state.spec.ts`：C1 快照序列化/反序列化、版本与跨页守卫、读写异常降级（15 用例）
 - [x] `patient.service.spec.ts`：`detail()` 返回 `nurseName`（有护士 / 无护士 null）回归

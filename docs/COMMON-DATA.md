@@ -112,6 +112,7 @@
 
 - "添加血糖表单的**结果选项**用 `DY-RESULT`（`dictItems(DICT_TYPE.GLUCOSE_RESULT)`，RadioGroup 只渲染 `checkable=true` 的项，并在最前面加一个不在字典里的「检测」占位项），**操作人**用 `DY-OPERATOR`（默认带出 `CURRENT_USER`，若当前账号不在其中则前端临时补一条，不写回 DY-OPERATOR）。"
 - "患者血糖展示按 `DY-TIMESLOT` 的时段作为表头（普通时段 + 特殊时段，强化按检测时间落点归入普通时段），**按服务端返回的 `resultType` 着色**（`'0'` 偏低 / `'2'` 偏高标红），不要在前端拿阈值自己比——阈值在 `SystemConfig` 里、前端取不到；录入弹窗的「检测时段」取 `useCommonDataStore().timeSlots`，并按检测时间自动选中。"
+  → ✅ **血糖报告已按此口径落地**（2026-11-19，`docs/specs/glucose-report.md`）：表头 = 普通 + 特殊时段（**含停用项**，其历史数据必须有列可落）；强化归组用 `pickTimeSlotByTime(slots, time, { ignoreEnabled: true })`，无命中或 `mealContext` 脏数据落 `RANDOM` 列；着色取 `DY-RESULT` 字典 `color`，只作用于数值/标签。
 - "设备列表的状态列用 `D-DEVSTATUS` 映射中文；设备选择用 `DY-DEVICE`（`useCommonDataStore().devices`）。"
 - "建档表单的性别用 `D-GENDER`（可选值取 `GENDER_SELECTABLE`），糖尿病类型用 `D-DIABETES`，责任医生用 `DY-DOCTOR`（`staffByRole('DOCTOR')`），责任护士用 `DY-OPERATOR`，科室用 `DY-DEPT`。"
 - "糖化血红蛋白：范围常量 `HBA1C_MIN/HBA1C_MAX/HBA1C_UNIT`（`patient/schema.ts`），0~100、最多 1 位小数、单位 `%`，禁止在页面写死范围和单位。"
