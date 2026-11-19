@@ -4,6 +4,8 @@
  * 与 `pnpm dev` 的差异：
  *  - 已在运行的服务直接跳过（幂等，重复执行 < 1s）
  *  - @gc/shared 源码没变时跳过 build + sync（省约 5s，且不破坏 Vite 依赖缓存）
+ *  - 但仍校验「共享包副本 vs Vite 预构建元数据」：副本新于预构建结果时单独清 .vite，
+ *    避免浏览器一直拿旧预构建包、导致新增导出恒为 undefined
  *  - prisma/schema.prisma 没变时跳过 prisma generate（省约 7s）
  *  - 嵌入式 PG 已在 5432 监听时跳过启动
  *
@@ -208,18 +210,28 @@ async function main() {
   const sharedSrc = join(root, 'packages/shared/src');
   const sharedDist = join(root, 'packages/shared/dist/index.js');
   const copiedDist = join(root, 'apps/web/node_modules/@gc/shared/dist/index.js');
+  const viteCacheDir = join(root, 'apps/web/node_modules/.vite');
+  const viteDepsMeta = join(viteCacheDir, 'deps/_metadata.json');
   const stale =
     flags.has('--sync-shared') ||
     newestMtime(sharedSrc) > mtime(sharedDist) ||
     mtime(sharedDist) > mtime(copiedDist) ||
     !existsSync(copiedDist);
+  // 盲区补丁：源码/产物/副本三者一致时 stale 为 false，但副本仍可能新于 Vite 的预构建结果
+  // （上一次 sync 后 Vite 未重新预构建、.vite 被还原、或 deps 元数据缺失）。
+  // 此时浏览器会一直加载旧预构建包，表现为共享包新增导出恒为 undefined（WARD_TAB 故障）。
+  const viteStale =
+    existsSync(viteCacheDir) && existsSync(copiedDist) && mtime(copiedDist) > mtime(viteDepsMeta);
 
   if (stale) {
     run('pnpm', ['--filter', '@gc/shared', 'build'], '编译共享包');
     run('node', ['scripts/sync-shared.mjs'], '同步共享包到 apps/*');
     // 共享包副本更新会改变依赖图指纹，必须清 Vite 预构建缓存，否则可能整页白屏
-    rmSync(join(root, 'apps/web/node_modules/.vite'), { recursive: true, force: true });
+    rmSync(viteCacheDir, { recursive: true, force: true });
     ok('共享包已同步，Vite 预构建缓存已重置');
+  } else if (viteStale) {
+    rmSync(viteCacheDir, { recursive: true, force: true });
+    ok('共享包无变更，但副本新于 Vite 预构建缓存 → 已清 .vite（防浏览器拿旧包）');
   } else {
     skip('共享包无变更（跳过 build + sync，保留 Vite 缓存）');
   }
