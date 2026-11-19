@@ -253,6 +253,42 @@ body {
   background: linear-gradient(90deg, var(--gc-color-primary) 0%, var(--gc-color-primary-active) 100%);
 }
 
+/* ---------- 血糖报告表格：占满剩余高度、仅 body 内滚（R21，2026-11-19 裁定） ---------- */
+
+/**
+ * antd Table 没有"百分比撑满父容器"的 API（scroll.y 只接受定值并写成 inline max-height），
+ * 需求人裁定表格边框盒必须撑满剩余空间（行数不足一屏也撑满）、分页固定在底部，
+ * 故在此把 wrapper → spin → table → container 的内部 DOM 链转为 flex 列。
+ * 组件侧配合：scroll.y='100%' 仅用于触发 antd 拆分固定表头与滚动 body，
+ * body 实际高度由 flex 决定（inline max-height:100% 相对 flex 定高容器解析，不构成约束）。
+ * 作用域限定 .gc-report-table，其余页面表格不受影响；不含任何色值，明暗模式天然兼容。
+ */
+.gc-report-table,
+.gc-report-table .ant-spin-nested-loading,
+.gc-report-table .ant-spin-container,
+.gc-report-table .ant-table,
+.gc-report-table .ant-table-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* 固定表头与分页不参与伸缩：表头钉在顶部，分页钉在表格区底部（裁定 2） */
+.gc-report-table .ant-table-header {
+  flex-shrink: 0;
+}
+
+/* 唯一滚动区：撑满表头与分页之间的剩余空间（裁定 1），内容超出时 body 内滚 */
+.gc-report-table .ant-table-body {
+  flex: 1;
+  min-height: 0;
+}
+
+.gc-report-table .ant-table-pagination.ant-pagination {
+  flex-shrink: 0;
+}
+
 /* ---------- 打印与导出（15 节） ---------- */
 @media print {
   .gc-no-print,

@@ -55,22 +55,27 @@ export default function PatientDetailTabs({
         onChange={(key) => navigateTab(MAIN_TAB_PATH[key as DetailMainTab])}
         variant="underline"
       />
-      <div
-        style={{
-          flex: 1,
-          minHeight: 0,
-          overflow: 'auto',
-          marginTop: layoutSize.cardGap,
-        }}
-      >
-        {main === 'glucose' ? (
+      {/* R21（2026-11-19 裁定）：子 Tabs 移出滚动区固定展示，内容区是唯一滚动容器。
+          血糖报告页在内容区内再自行接管高度（表格 body 内滚），其余内容页照旧整体滚动 */}
+      {main === 'glucose' ? (
+        <div style={{ marginTop: layoutSize.cardGap, flexShrink: 0 }}>
           <Tabs
             items={GLUCOSE_SUB_TABS}
             value={glucose}
             onChange={(key) => navigateTab(GLUCOSE_TAB_PATH[key as DetailGlucoseTab])}
             variant="background"
           />
-        ) : null}
+        </div>
+      ) : null}
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflow: 'auto',
+          // 有子 Tabs 时内容紧随其下（保持原视觉间距 0）；无子 Tabs 时与主 Tab 拉开 cardGap
+          marginTop: main === 'glucose' ? 0 : layoutSize.cardGap,
+        }}
+      >
         <Outlet context={outletContext} />
       </div>
     </div>

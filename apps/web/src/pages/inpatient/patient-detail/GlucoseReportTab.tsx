@@ -25,6 +25,11 @@ const DATE_COLUMN_WIDTH = 116;
 const VALUE_GAP_PX = 6;
 /** 统计栏段落间距：需求人明确指定 20px（R20），非 token 档位故立常量注明出处 */
 const STATS_GAP_PX = 20;
+/**
+ * 表格区最小高度（R21）：极矮视口下的防塌缩兜底。
+ * 正常视口由 flex 链自动占满剩余空间；空间不足此值时根节点退化为内部滚动。
+ */
+const REPORT_TABLE_MIN_HEIGHT = 200;
 
 /**
  * 字典缺失时的稳定空值。必须是**模块级常量**：
@@ -220,7 +225,18 @@ export default function GlucoseReportTab() {
   }, [data?.columns, resultTypes]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: token.marginXS }}>
+    // R21（2026-11-19 裁定）：根节点撑满内容区高度，统计栏固定、表格占据剩余空间、
+    // 只在表格 body 内滚动。overflow auto 仅作极矮视口兜底（表格区压到最小高度后
+    // 整页在根节点内滚动），正常视口下内容恰好占满、不出现滚动条
+    <div
+      style={{
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: token.marginXS,
+        overflow: 'auto',
+      }}
+    >
       {/* R20 布局预留：统计栏居左；下一个任务的查询筛选表单挂同一行右侧（左右分布），
           本轮不实现表单——space-between 下单个子元素天然左对齐，无需占位节点 */}
       <div
@@ -230,6 +246,7 @@ export default function GlucoseReportTab() {
           alignItems: 'center',
           gap: token.margin,
           flexWrap: 'wrap',
+          flexShrink: 0,
         }}
       >
         {data ? <ReportStatsBar stats={data.stats} resultTypes={resultTypes} /> : null}
@@ -240,6 +257,7 @@ export default function GlucoseReportTab() {
           type="error"
           showIcon
           message={error}
+          style={{ flexShrink: 0 }}
           action={
             <Button size="small" danger onClick={reload}>
               重试
@@ -255,6 +273,11 @@ export default function GlucoseReportTab() {
         columns={columns}
         dataSource={data?.rows ?? []}
         loading={loading}
+        // R21：flex 链与 body 内滚由 global.css 的 .gc-report-table 承接（antd 无百分比
+        // 撑满 API，scroll.y 传 '100%' 只为触发表头/body 拆分，实际高度由 flex 决定）
+        className="gc-report-table"
+        style={{ minHeight: REPORT_TABLE_MIN_HEIGHT }}
+        scroll={{ y: '100%' }}
         // 2026-11-19 二次调整：不横向滚动、日期列不固定——11 列均分页面宽度全部可见
         // （不设 scroll.x；单元格内容允许换行，见 ReportCell 注释）
         pagination={{
