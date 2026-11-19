@@ -10,8 +10,13 @@
  */
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import type { DictItemOption, GlucoseReportCell, GlucoseReportEntry } from '@gc/shared';
-import { ReportCell } from './GlucoseReportTab';
+import type {
+  DictItemOption,
+  GlucoseReportCell,
+  GlucoseReportEntry,
+  GlucoseReportStats,
+} from '@gc/shared';
+import { ReportCell, ReportStatsBar } from './GlucoseReportTab';
 
 /** 与 seed 一致的 DY-RESULT 片段。注意 '3' 的标签是 `Low`（血糖仪超下限），不是"未测" */
 const RESULT_TYPES = [
@@ -19,6 +24,7 @@ const RESULT_TYPES = [
   { code: '1', label: '正常', color: '#389E0D', checkable: false, counted: true },
   { code: '2', label: '偏高', color: '#FF1516', checkable: false, counted: true },
   { code: '3', label: 'Low', color: '#4BB2ED', checkable: true, counted: true },
+  { code: '4', label: 'High', color: '#FF1516', checkable: true, counted: true },
   { code: '5', label: '拒检', color: '#8C8C8C', checkable: true, counted: false },
 ] as unknown as DictItemOption[];
 
@@ -144,5 +150,105 @@ describe('ReportCell — 血糖报告单元格（R3/R4）', () => {
     expect(renderToStaticMarkup(<ReportCell cell={undefined} resultTypes={RESULT_TYPES} />)).toBe(
       '',
     );
+  });
+});
+
+/* -------------------- 统计栏（R20，2026-11-19 需求人裁定） -------------------- */
+
+function stats(overrides: Partial<GlucoseReportStats> = {}): GlucoseReportStats {
+  return {
+    total: 17,
+    qualified: 10,
+    hasHigh: false,
+    hasLow: false,
+    maxValueMmolL: 9.8,
+    maxResultType: '1',
+    minValueMmolL: 5.2,
+    minResultType: '1',
+    ...overrides,
+  };
+}
+
+function renderStats(
+  overrides: Partial<GlucoseReportStats> = {},
+  resultTypes = RESULT_TYPES,
+): string {
+  return renderToStaticMarkup(
+    <ReportStatsBar stats={stats(overrides)} resultTypes={resultTypes} />,
+  );
+}
+
+describe('ReportStatsBar — 报表统计栏（R20）', () => {
+  it('总计与合格次数：`总计：N 次`、`合格次数：M 次`，含 | 分隔符', () => {
+    const html = renderStats();
+    const text = textOf(html);
+
+    expect(text).toContain('总计：17 次');
+    expect(text).toContain('合格次数：10 次');
+    expect(text).toContain('|');
+  });
+
+  it('段落间距 20px：分隔符与后三段各带 margin-left:20px（共 4 处）', () => {
+    const html = renderStats();
+
+    expect(html.split('margin-left:20px').length - 1).toBe(4);
+  });
+
+  it('最高血糖（无 High）：数值 toFixed(1) + mmol/L，按自身 resultType 字典色着色', () => {
+    const html = renderStats({ maxValueMmolL: 12.34, maxResultType: '2' });
+
+    expect(textOf(html)).toContain('最高血糖：12.3 mmol/L');
+    expect(html).toContain('#FF1516'); // '2' 偏高的字典色
+  });
+
+  it('最低血糖（无 Low）：同口径，颜色取自身 resultType', () => {
+    const html = renderStats({ minValueMmolL: 3.2, minResultType: '0' });
+
+    expect(textOf(html)).toContain('最低血糖：3.2 mmol/L');
+    expect(html).toContain('#4BB2ED'); // '0' 偏低的字典色
+  });
+
+  it('hasHigh → 展示字典 label「High」及其色，不再展示数值（裁定 3）', () => {
+    const html = renderStats({ hasHigh: true, maxValueMmolL: 12.3, maxResultType: '2' });
+    const text = textOf(html);
+
+    expect(text).toContain('最高血糖：High');
+    expect(text).not.toContain('12.3');
+    expect(html).toContain('#FF1516'); // '4' High 的字典色
+  });
+
+  it('hasLow → 展示字典 label「Low」及其色，不再展示数值', () => {
+    const html = renderStats({ hasLow: true, minValueMmolL: 5.2, minResultType: '1' });
+    const text = textOf(html);
+
+    expect(text).toContain('最低血糖：Low');
+    expect(text).not.toContain('5.2');
+    expect(html).toContain('#4BB2ED'); // '3' Low 的字典色
+  });
+
+  it('无数值记录且无 High/Low → 最高/最低显示 -（裁定 3a：统计栏照常展示 0 与 -）', () => {
+    const text = textOf(
+      renderStats({
+        total: 0,
+        qualified: 0,
+        maxValueMmolL: null,
+        maxResultType: null,
+        minValueMmolL: null,
+        minResultType: null,
+      }),
+    );
+
+    expect(text).toContain('总计：0 次');
+    expect(text).toContain('合格次数：0 次');
+    expect(text).toContain('最高血糖：-');
+    expect(text).toContain('最低血糖：-');
+  });
+
+  it('字典未加载时不崩：High/Low 回退 code 原文、数值不着色（同 ReportCell 口径）', () => {
+    const html = renderStats({ hasHigh: true, hasLow: true }, []);
+    const text = textOf(html);
+
+    expect(text).toContain('最高血糖：4');
+    expect(text).toContain('最低血糖：3');
   });
 });

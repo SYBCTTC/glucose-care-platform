@@ -2,12 +2,18 @@ import { useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Table, Typography, theme } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useOutletContext, useParams } from 'react-router-dom';
-import { DICT_TYPE, GLUCOSE_REPORT_PAGE_SIZE } from '@gc/shared';
+import {
+  DICT_TYPE,
+  GLUCOSE_REPORT_PAGE_SIZE,
+  GLUCOSE_RESULT_CODE_HIGH,
+  GLUCOSE_RESULT_CODE_LOW,
+} from '@gc/shared';
 import type {
   DictItemOption,
   GlucoseReportCell,
   GlucoseReportEntry,
   GlucoseReportRow,
+  GlucoseReportStats,
 } from '@gc/shared';
 import { useCommonDataStore } from '@/store/common-data';
 import type { DetailOutletContext } from './detail-tabs';
@@ -17,6 +23,8 @@ import { useGlucoseReport } from './useGlucoseReport';
 const DATE_COLUMN_WIDTH = 116;
 /** 值行内间距：需求人明确指定 6px（2026-11-19 三次调整），非 token 档位故立常量注明出处 */
 const VALUE_GAP_PX = 6;
+/** 统计栏段落间距：需求人明确指定 20px（R20），非 token 档位故立常量注明出处 */
+const STATS_GAP_PX = 20;
 
 /**
  * 字典缺失时的稳定空值。必须是**模块级常量**：
@@ -98,6 +106,70 @@ export function ReportCell({
 }
 
 /**
+ * 报表统计栏（R20，2026-11-19 需求人裁定）：替代原「单位：mmol/L」标注
+ * （D5 被推翻：格内数值不再有单位标注，单位只随最高/最低值的后缀出现）。
+ *
+ * 格式：`总计：N 次 ←20px→ | ←20px→ 合格次数：M 次 ←20px→ 最高血糖：X ←20px→ 最低血糖：Y`，左对齐。
+ * 统计数由**服务端按查询范围全量计算**（与分页无关），本组件纯展示：
+ *  - 最高/最低：`hasHigh`/`hasLow` → 展示 `DY-RESULT` 字典 label（禁止硬编码文案/色值）；
+ *    否则数值 `toFixed(1)` + ` mmol/L`，按**该极值自身 resultType** 的字典色着色（裁定 2）；
+ *    两者皆无 → `-`（裁定 3a：总计为 0 时统计栏照常展示）。
+ *
+ * 导出仅为单测（同 `ReportCell` 的理由：外层组件依赖 Outlet context 与网络请求）。
+ */
+export function ReportStatsBar({
+  stats,
+  resultTypes,
+}: {
+  stats: GlucoseReportStats;
+  /** DY-RESULT 字典项，用于取 High/Low 标签与极值着色 */
+  resultTypes: DictItemOption[];
+}) {
+  const gapStyle = { marginLeft: STATS_GAP_PX };
+
+  const extreme = (
+    hasExtreme: boolean,
+    extremeCode: string,
+    value: number | null,
+    resultType: string | null,
+  ) => {
+    const dict = resultTypes.find((option) => option.code === extremeCode);
+    if (hasExtreme) {
+      // 字典未加载时回退 code 原文（同 ReportCell 口径），不硬编码 'High'/'Low' 文案
+      return <span style={{ color: dict?.color ?? undefined }}>{dict?.label ?? extremeCode}</span>;
+    }
+    if (value !== null) {
+      const valueDict = resultTypes.find((option) => option.code === resultType);
+      return (
+        <span className="gc-num">
+          <span style={{ color: valueDict?.color ?? undefined }}>{value.toFixed(1)}</span>
+          {' mmol/L'}
+        </span>
+      );
+    }
+    return <span>-</span>;
+  };
+
+  return (
+    <Typography.Text type="secondary">
+      总计：<span className="gc-num">{stats.total}</span> 次
+      <span style={gapStyle}>|</span>
+      <span style={gapStyle}>
+        合格次数：<span className="gc-num">{stats.qualified}</span> 次
+      </span>
+      <span style={gapStyle}>
+        最高血糖：
+        {extreme(stats.hasHigh, GLUCOSE_RESULT_CODE_HIGH, stats.maxValueMmolL, stats.maxResultType)}
+      </span>
+      <span style={gapStyle}>
+        最低血糖：
+        {extreme(stats.hasLow, GLUCOSE_RESULT_CODE_LOW, stats.minValueMmolL, stats.minResultType)}
+      </span>
+    </Typography.Text>
+  );
+}
+
+/**
  * 血糖报告（路由 `/inpatient/patients/:id/glucose/report`）。
  *
  * 表头由**服务端下发的 `columns`** 生成，不读 `useCommonDataStore().timeSlots`：
@@ -149,8 +221,19 @@ export default function GlucoseReportTab() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: token.marginXS }}>
-      {/* 格内不带单位（三行结构下太挤），在此统一标注一次（D5） */}
-      <Typography.Text type="secondary">单位：mmol/L</Typography.Text>
+      {/* R20 布局预留：统计栏居左；下一个任务的查询筛选表单挂同一行右侧（左右分布），
+          本轮不实现表单——space-between 下单个子元素天然左对齐，无需占位节点 */}
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: token.margin,
+          flexWrap: 'wrap',
+        }}
+      >
+        {data ? <ReportStatsBar stats={data.stats} resultTypes={resultTypes} /> : null}
+      </div>
 
       {error ? (
         <Alert
