@@ -21,6 +21,10 @@ import PlaceholderPage from '@/pages/Placeholder';
 import PatientManagementPage from '@/pages/inpatient/patients';
 import VirtualWardPage from '@/pages/inpatient/virtual-ward';
 import PatientDetailPage from '@/pages/inpatient/patient-detail';
+import DetailFallbackRedirect from '@/pages/inpatient/patient-detail/DetailFallbackRedirect';
+import DetailPlaceholder from '@/pages/inpatient/patient-detail/DetailPlaceholder';
+import GlucoseReportTab from '@/pages/inpatient/patient-detail/GlucoseReportTab';
+import { DETAIL_ROUTE_PATH, DETAIL_TAB_PATH } from '@/pages/inpatient/patient-detail/detail-tabs';
 import type { AppRoute } from './menu';
 
 export type { AppRoute } from './menu';
@@ -64,10 +68,28 @@ export const APP_ROUTES: AppRoute[] = [
   },
   {
     // 患者详情：无 label/icon/menuGroup → 不进菜单（buildMenuTree 跳过无 label 项）；
-    // 守卫与后端详情接口一致（PATIENT_VIEW）。React Router 按特异性排序，与 /inpatient/patients 不冲突
-    path: '/inpatient/patients/:id',
+    // 守卫与后端详情接口一致（PATIENT_VIEW）。React Router 按特异性排序，与 /inpatient/patients 不冲突。
+    //
+    // 5 个内容页是**嵌套子路由**（R10），渲染在本 element 的 <Outlet/> 内 → 天然继承上面的守卫，
+    // 故子路由不重复声明 permissions（父级判 403 时 Outlet 根本不渲染）；
+    // 也一律不带 label/menuGroup，否则会冒出菜单项。
+    // 子路径全部引用 detail-tabs.ts 常量，与 PatientDetailTabs 的高亮派生同源，禁止写字面量。
+    path: DETAIL_ROUTE_PATH,
     permissions: [PERMISSION.PATIENT_VIEW],
     element: <PatientDetailPage />,
+    children: [
+      // 裸详情 URL → 默认落「血糖数据 → 血糖报告」（需求 1）。
+      // 正常入口不经过这里：两处 goDetail 直接跳 .../glucose/report，避开 replace 覆盖 history 的风险
+      { index: true, element: <DetailFallbackRedirect /> },
+      { path: DETAIL_TAB_PATH.basic, element: <DetailPlaceholder label="基本信息" /> },
+      { path: DETAIL_TAB_PATH.admission, element: <DetailPlaceholder label="出入院记录" /> },
+      { path: DETAIL_TAB_PATH.glucoseReport, element: <GlucoseReportTab /> },
+      // 血糖记录 / 趋势图：本次只登记路由、保持占位且不发请求（R2），后续开发只需替换 element
+      { path: DETAIL_TAB_PATH.glucoseRecord, element: <DetailPlaceholder label="血糖记录" /> },
+      { path: DETAIL_TAB_PATH.glucoseTrend, element: <DetailPlaceholder label="趋势图" /> },
+      // 兜底：没有它，未知子路径会让 <Outlet/> 渲染 null（Tab 栏在、内容区空白、无 Tab 高亮）
+      { path: '*', element: <DetailFallbackRedirect /> },
+    ],
   },
   {
     path: '/inpatient/alerts',

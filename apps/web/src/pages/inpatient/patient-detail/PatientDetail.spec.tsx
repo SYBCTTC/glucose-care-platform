@@ -2,14 +2,36 @@
  * 患者详情展示组件测试。
  *
  * 测试环境说明：与 permission-route.spec 一致，web 测试跑在 node 环境（无 jsdom），
- * 用 react-dom/server 的 renderToStaticMarkup 渲染**纯展示子组件**（PatientBasicInfo /
- * PatientDetailTabs）并断言输出 HTML。页面壳 index.tsx 含异步拉取与路由依赖，靠 typecheck + 手工 e2e 验证。
+ * 用 react-dom/server 的 renderToStaticMarkup 渲染展示型子组件并断言输出 HTML。
+ * `PatientDetailTabs` 自 R10 起两层 Tab 都由 URL 派生，故需包一层 `MemoryRouter`
+ * （node 环境可用；`useNavigate` 只在 onChange 时调用，渲染期不触发导航）。
+ * 页面壳 index.tsx 的异步拉取用 `vi.mock('./usePatientDetail')` 同步化后测试（风险 7：
+ * loading / 403 / 加载失败分支不得渲染 `<Outlet/>` 内容，否则越权患者的报表请求仍会发出）。
+ * `GlucoseReportTab` 含数据请求与 Outlet context，靠 typecheck + 手工 e2e 验证；
+ * Tab 派生逻辑本身是纯函数，单测见 `detail-tabs.spec.ts`。
  */
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { describe, expect, it, vi } from 'vitest';
 import type { PatientDetail } from '@gc/shared';
+import DetailPlaceholder from './DetailPlaceholder';
 import PatientBasicInfo from './PatientBasicInfo';
 import PatientDetailTabs from './PatientDetailTabs';
+import PatientDetailPage from './index';
+
+/** 壳组件的详情拉取结果（mock 后可同步切换 loading / 403 / 失败 / 成功四个分支） */
+const detailState = vi.hoisted(() => ({
+  current: {
+    data: null as PatientDetail | null,
+    loading: true,
+    error: null as string | null,
+    forbidden: false,
+  },
+}));
+
+vi.mock('./usePatientDetail', () => ({
+  usePatientDetail: () => detailState.current,
+}));
 
 function makeDetail(overrides: Partial<PatientDetail> = {}): PatientDetail {
   return {
@@ -94,9 +116,24 @@ describe('PatientBasicInfo — 基本信息区渲染', () => {
   });
 });
 
-describe('PatientDetailTabs — 默认占位（决策 A4/E1）', () => {
-  it('默认进入 血糖数据 → 血糖报告，主/子 Tab 与占位文案齐备', () => {
-    const html = renderToStaticMarkup(<PatientDetailTabs />);
+/**
+ * 在指定 pathname 下渲染 Tabs 区。
+ * `PatientDetailTabs` 现在两层 Tab 都由 URL 派生（R10），必须包一层 Router；
+ * `MemoryRouter` 在 node 环境可用，且 `useNavigate` 只在 onChange 时调用，渲染期不会触发导航。
+ */
+function renderTabs(pathname: string): string {
+  return renderToStaticMarkup(
+    <MemoryRouter initialEntries={[pathname]}>
+      <PatientDetailTabs outletContext={{ glucoseVersion: 0 }} />
+    </MemoryRouter>,
+  );
+}
+
+describe('PatientDetailTabs — 双层 Tab 由 URL 驱动（R10）', () => {
+  const BASE = '/inpatient/patients/p1';
+
+  it('血糖子页：主 Tab 三项 + 血糖子 Tab 三项齐备', () => {
+    const html = renderTabs(`${BASE}/glucose/report`);
     // 主 Tab（下划线）
     expect(html).toContain('血糖数据');
     expect(html).toContain('基本信息');
@@ -105,7 +142,107 @@ describe('PatientDetailTabs — 默认占位（决策 A4/E1）', () => {
     expect(html).toContain('血糖报告');
     expect(html).toContain('血糖记录');
     expect(html).toContain('趋势图');
-    // 占位内容
-    expect(html).toContain('建设中');
+  });
+
+  it('裸详情 URL 回落默认：仍按「血糖数据」渲染子 Tab（与 index 重定向目标一致）', () => {
+    const html = renderTabs(BASE);
+    expect(html).toContain('血糖报告');
+    expect(html).toContain('趋势图');
+  });
+
+  it('基本信息 Tab：不渲染血糖子 Tab（子 Tab 只属于「血糖数据」）', () => {
+    const html = renderTabs(`${BASE}/basic`);
+    expect(html).toContain('基本信息');
+    expect(html).not.toContain('血糖记录');
+    expect(html).not.toContain('趋势图');
+  });
+
+  it('出入院记录 Tab：同样不渲染血糖子 Tab', () => {
+    const html = renderTabs(`${BASE}/admission`);
+    expect(html).toContain('出入院记录');
+    expect(html).not.toContain('血糖报告');
+  });
+
+  it('未知子路径回落默认，不出现「两层 Tab 都不亮」的空档', () => {
+    const html = renderTabs(`${BASE}/not-a-real-tab`);
+    expect(html).toContain('血糖报告');
+  });
+
+  it('内容区交给 <Outlet/>：占位文案不再由本组件渲染', () => {
+    // 占位已下沉到各子路由的 DetailPlaceholder；此处无匹配路由，Outlet 渲染 null
+    const html = renderTabs(`${BASE}/glucose/record`);
+    expect(html).not.toContain('建设中');
+  });
+});
+
+describe('DetailPlaceholder — 未实现内容页占位', () => {
+  it('渲染「XXX（建设中）」且不发请求', () => {
+    const html = renderToStaticMarkup(<DetailPlaceholder label="血糖记录" />);
+    expect(html).toContain('血糖记录（建设中）');
+  });
+});
+
+/**
+ * 风险 7（glucose-report.md §12.1）：<Outlet/> 必须留在 data 已加载分支内。
+ * 若提到 loading / !data 分支之外，患者 403/404 时报表子路由仍会挂载并发出
+ * /glucose/report 请求（越权探测面 + 多余审计）。用哨兵子路由直接断言挂载与否。
+ */
+function renderShell(): string {
+  return renderToStaticMarkup(
+    <MemoryRouter initialEntries={['/inpatient/patients/p1/glucose/report']}>
+      <Routes>
+        <Route path="/inpatient/patients/:id" element={<PatientDetailPage />}>
+          <Route path="glucose/report" element={<div>REPORT_SENTINEL</div>} />
+        </Route>
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
+describe('PatientDetailPage 壳 — loading / 失败分支不渲染 <Outlet/> 内容（风险 7）', () => {
+  it('loading：只有 Spin，报表子路由不挂载、Tab 栏不渲染', () => {
+    detailState.current = { data: null, loading: true, error: null, forbidden: false };
+    const html = renderShell();
+    expect(html).toContain('ant-spin');
+    expect(html).not.toContain('REPORT_SENTINEL');
+    expect(html).not.toContain('血糖数据');
+  });
+
+  it('403 越权：显示「无权查看该患者」，报表子路由不挂载（不发 /glucose/report 请求）', () => {
+    detailState.current = {
+      data: null,
+      loading: false,
+      error: '无权访问该患者',
+      forbidden: true,
+    };
+    const html = renderShell();
+    expect(html).toContain('无权查看该患者');
+    expect(html).not.toContain('REPORT_SENTINEL');
+    expect(html).not.toContain('血糖数据');
+  });
+
+  it('其它加载失败：显示「无法加载患者详情」，报表子路由不挂载', () => {
+    detailState.current = {
+      data: null,
+      loading: false,
+      error: '患者不存在或已被删除',
+      forbidden: false,
+    };
+    const html = renderShell();
+    expect(html).toContain('无法加载患者详情');
+    expect(html).not.toContain('REPORT_SENTINEL');
+  });
+
+  it('data 已加载：基本信息区 + Tab 栏 + <Outlet/> 内容一并渲染', () => {
+    detailState.current = {
+      data: makeDetail(),
+      loading: false,
+      error: null,
+      forbidden: false,
+    };
+    const html = renderShell();
+    expect(html).toContain('张**'); // 基本信息摘要区
+    expect(html).toContain('血糖数据'); // 主 Tab 栏
+    expect(html).toContain('REPORT_SENTINEL'); // Outlet 子路由内容
   });
 });

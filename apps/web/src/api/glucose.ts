@@ -1,4 +1,4 @@
-import type { GlucoseCreateResult } from '@gc/shared';
+import type { GlucoseCreateResult, GlucoseReportResponse } from '@gc/shared';
 import { http } from './client';
 
 /**
@@ -28,4 +28,30 @@ export function createGlucose(
   payload: CreateGlucosePayload,
 ): Promise<GlucoseCreateResult> {
   return http.post<GlucoseCreateResult>(`/patients/${patientId}/glucose`, payload);
+}
+
+/**
+ * 血糖报告查询参数（前端以字符串/数字传递，后端用共享 schema 校验）。
+ *
+ * `startDate`/`endDate` 是**本地日期** `YYYY-MM-DD`，本轮前端不传（日期选择器涉及出入院业务，
+ * 单开任务），仅在契约里预留。⚠️ 传值时不要经 `dateOnlyStringSchema` 之类的 UTC 转换。
+ */
+export interface GlucoseReportParams {
+  [key: string]: string | number | undefined;
+  startDate?: string;
+  endDate?: string;
+  page?: number;
+  /** 每页**日期数**（不是血糖记录条数），默认 15 */
+  pageSize?: number;
+}
+
+/**
+ * 血糖报告：日期 × 时段矩阵（只读）。
+ * 属敏感查询，后端每次调用写一条 GLUCOSE_REPORT_VIEW 审计（含越权 DENIED）。
+ */
+export function fetchGlucoseReport(
+  patientId: string,
+  params: GlucoseReportParams = {},
+): Promise<GlucoseReportResponse> {
+  return http.get<GlucoseReportResponse>(`/patients/${patientId}/glucose/report`, params);
 }

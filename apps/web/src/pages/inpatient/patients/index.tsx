@@ -6,6 +6,10 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { admitPatient } from '@/api/patient';
 import { joinWard } from '@/api/ward';
 import Tabs, { type TabItem } from '@/components/common/Tabs';
+import {
+  DETAIL_DEFAULT_TAB,
+  DETAIL_PATH_PREFIX,
+} from '@/pages/inpatient/patient-detail/detail-tabs';
 import { useAuthStore } from '@/store/auth';
 import GlucoseCreateModal from './GlucoseCreateModal';
 import PatientCardGrid from './PatientCardGrid';
@@ -86,9 +90,16 @@ export default function PatientManagementPage() {
     });
   };
 
-  // C1 方式B：进详情时带上来源路径，详情页返回据此 navigate(-1) 还原本页 Tab/筛选/视图/页码
+  // C1 方式B：进详情时带上来源路径，详情页返回据此 navigate(-1) 还原本页 Tab/筛选/视图/页码。
+  //
+  // **直接跳默认子页**而不是裸详情 URL：裸 URL 会命中详情页 index 路由的 <Navigate replace>，
+  // 而 replace 覆盖 history 条目时一旦漏传 state，from 就没了 → 返回退化成兜底跳患者管理，
+  // 本页的 Tab/筛选/页码快照全部失效。直达可让正常入口完全不经过 replace；
+  // index 与 `*` 重定向只服务书签、手输 URL 等直接访问场景。
   const goDetail = (patient: PatientListItem) => {
-    navigate(`/inpatient/patients/${patient.id}`, { state: { from: location.pathname } });
+    navigate(`${DETAIL_PATH_PREFIX}${patient.id}/${DETAIL_DEFAULT_TAB}`, {
+      state: { from: location.pathname },
+    });
   };
 
   if (!enabled) {

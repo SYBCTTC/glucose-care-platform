@@ -1,7 +1,15 @@
-import { useState } from 'react';
-import { Empty } from 'antd';
+import { Outlet, useLocation } from 'react-router-dom';
 import Tabs, { type TabItem } from '@/components/common/Tabs';
 import { layoutSize } from '@/styles/tokens';
+import {
+  GLUCOSE_TAB_PATH,
+  MAIN_TAB_PATH,
+  resolveDetailTab,
+  type DetailGlucoseTab,
+  type DetailMainTab,
+  type DetailOutletContext,
+} from './detail-tabs';
+import { useDetailTabNavigate } from './useDetailTabNavigate';
 
 /** 主 Tab（下划线高亮）。注意：此处"基本信息"是待实现的 Tab，与顶部基本信息区是两回事（决策 D4） */
 const MAIN_TABS: TabItem[] = [
@@ -17,34 +25,36 @@ const GLUCOSE_SUB_TABS: TabItem[] = [
   { key: 'trend', label: '趋势图' },
 ];
 
-const GLUCOSE_SUB_LABELS: Record<string, string> = {
-  report: '血糖报告',
-  record: '血糖记录',
-  trend: '趋势图',
-};
-
-const MAIN_PLACEHOLDER: Record<string, string> = {
-  basic: '基本信息',
-  admission: '出入院记录',
-};
-
 /**
  * 详情页 Tabs 区（占满剩余空间）。
- * 本期全部为占位（决策 A4/E1）：血糖报告/记录/趋势图 + 基本信息 Tab + 出入院记录 Tab 均不实现、不发请求。
- * 默认进入：血糖数据 → 血糖报告。
+ *
+ * **两层 Tab 均由 URL 驱动**（R10）：选中态从 `location.pathname` 派生、切换走路由，
+ * 因此 5 个内容页（基本信息 / 出入院记录 / 血糖报告 / 血糖记录 / 趋势图）刷新后都停在原处。
+ * 内容区由 `<Outlet/>` 渲染对应子路由；本组件不再持有 Tab 状态，
+ * 也不再渲染占位 `Empty`——占位已下沉到各子路由的 `DetailPlaceholder`。
+ *
+ * ⚠️ `<Outlet/>` 必须留在这里：本组件只在壳（`index.tsx`）的 `data` 已加载分支内渲染，
+ * 于是患者 403/404 时子路由根本不会挂载，报表请求也就不会发出
+ * （既避免越权探测面与多余审计，也保住 Spin/Result 占位页）。
+ * 把 `<Outlet/>` 提到壳的外层会同时破坏这两点。
  */
-export default function PatientDetailTabs() {
-  const [mainTab, setMainTab] = useState('glucose');
-  const [glucoseTab, setGlucoseTab] = useState('report');
-
-  const placeholderStyle = {
-    padding: `${layoutSize.cardPadding * 2}px 0`,
-    textAlign: 'center' as const,
-  };
+export default function PatientDetailTabs({
+  outletContext,
+}: {
+  outletContext: DetailOutletContext;
+}) {
+  const { pathname } = useLocation();
+  const navigateTab = useDetailTabNavigate();
+  const { main, glucose } = resolveDetailTab(pathname);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-      <Tabs items={MAIN_TABS} value={mainTab} onChange={setMainTab} variant="underline" />
+      <Tabs
+        items={MAIN_TABS}
+        value={main}
+        onChange={(key) => navigateTab(MAIN_TAB_PATH[key as DetailMainTab])}
+        variant="underline"
+      />
       <div
         style={{
           flex: 1,
@@ -53,23 +63,15 @@ export default function PatientDetailTabs() {
           marginTop: layoutSize.cardGap,
         }}
       >
-        {mainTab === 'glucose' ? (
-          <>
-            <Tabs
-              items={GLUCOSE_SUB_TABS}
-              value={glucoseTab}
-              onChange={setGlucoseTab}
-              variant="background"
-            />
-            <div style={placeholderStyle}>
-              <Empty description={`${GLUCOSE_SUB_LABELS[glucoseTab]}（建设中）`} />
-            </div>
-          </>
-        ) : (
-          <div style={placeholderStyle}>
-            <Empty description={`${MAIN_PLACEHOLDER[mainTab]}（建设中）`} />
-          </div>
-        )}
+        {main === 'glucose' ? (
+          <Tabs
+            items={GLUCOSE_SUB_TABS}
+            value={glucose}
+            onChange={(key) => navigateTab(GLUCOSE_TAB_PATH[key as DetailGlucoseTab])}
+            variant="background"
+          />
+        ) : null}
+        <Outlet context={outletContext} />
       </div>
     </div>
   );

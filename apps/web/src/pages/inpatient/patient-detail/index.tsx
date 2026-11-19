@@ -23,6 +23,8 @@ export default function PatientDetailPage() {
   const hasPermission = useAuthStore((state) => state.hasPermission);
   const { data, loading, error, forbidden } = usePatientDetail(id);
   const [glucoseOpen, setGlucoseOpen] = useState(false);
+  // 录入成功后自增，经 Outlet context 通知血糖报告子路由重新拉取（弹窗在壳上、报表数据在子路由里）
+  const [glucoseVersion, setGlucoseVersion] = useState(0);
 
   // C1 方式B：从入口点进来时 location.state.from 有值 → navigate(-1) 回来源页并还原其 Tab/筛选/视图/页码；
   // 直接访问详情 URL / 新标签打开（无 from，无可靠历史）→ 兜底回患者管理（决策 C1）。
@@ -92,8 +94,8 @@ export default function PatientDetailPage() {
               onAddGlucose={() => setGlucoseOpen(true)}
             />
           </div>
-          {/* Tabs 区占满剩余空间 */}
-          <PatientDetailTabs />
+          {/* Tabs 区占满剩余空间；子路由内容经其内部的 <Outlet/> 渲染 */}
+          <PatientDetailTabs outletContext={{ glucoseVersion }} />
         </>
       )}
 
@@ -102,8 +104,10 @@ export default function PatientDetailPage() {
         open={glucoseOpen && data !== null}
         onClose={() => setGlucoseOpen(false)}
         onSuccess={() => {
-          // 详情页血糖区为占位、基本信息不含血糖，录入成功无需刷新本页；
+          // 血糖报告已是真实数据：录入成功后必须让它重取，否则表格停在旧数据上。
+          // 患者摘要区不含血糖字段，故本页其余部分无需刷新。
           // 成功提示由 GlucoseCreateModal 内部给出（决策 D5）。
+          setGlucoseVersion((version) => version + 1);
         }}
       />
     </Card>

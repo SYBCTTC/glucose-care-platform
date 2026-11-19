@@ -17,11 +17,12 @@ import type { ComponentType, ReactNode } from 'react';
  * 新增页面只改 `routes.tsx` 的 APP_ROUTES：有 `label/icon` 才会出现在菜单，
  * 有 `permissions` 才会被守卫检查。
  *
- * 菜单层级用 `menuGroup` 表达（顶级大模块 → 可选的中分组），仅影响菜单渲染；
- * 路由本身始终扁平、由 `path` 唯一定位。
+ * 菜单层级用 `menuGroup` 表达（顶级大模块 → 可选的中分组），仅影响菜单渲染。
+ * 路由本身以 `path` 唯一定位；**菜单可见的路由始终是顶层扁平的**——
+ * `children`（如患者详情页的 5 个内容页）是页面内部的嵌套路由，一律不带 `label`，不进菜单。
  */
-export interface AppRoute {
-  path: string;
+/** 路由项的公共字段（`path` / `index` 在下面的联合分支里单独约束） */
+interface AppRouteBase {
   element: ReactNode;
   /** 有值才出现在侧边菜单 */
   label?: string;
@@ -30,7 +31,26 @@ export interface AppRoute {
   permissions?: PermissionCode[];
   /** 菜单层级：['顶级大模块'] 或 ['顶级大模块', '中分组']；缺省 = 一级菜单 */
   menuGroup?: string[];
+  /**
+   * 嵌套子路由，对应 React Router v6 `<Route>` 的 children。
+   *
+   * 子路由渲染在父 `element` 的 `<Outlet/>` 内，因此**天然继承父级守卫**，
+   * 不必重复声明 `permissions`；也一律不写 `label`/`menuGroup`，
+   * 否则会被 `buildMenuTree` 当成菜单项收进去（详情页的子页不该出现在侧栏）。
+   */
+  children?: AppRoute[];
 }
+
+/**
+ * 路由项。
+ *
+ * 用**可辨识联合**而不是把 `path` 直接改成可选：普通路由的 `path` 保持必填，
+ * 不削弱既有全部路由的类型约束；只有 index 路由能省略 `path`，且必须显式写 `index: true`。
+ * 这样"漏写 path"会直接编译报错，而不是静默变成一条匹配不到任何东西的无效路由。
+ */
+export type AppRoute =
+  | (AppRouteBase & { path: string; index?: false })
+  | (AppRouteBase & { path?: undefined; index: true });
 
 /** 顶级大模块：决定菜单分组顺序与图标。无权限的分组会自动隐藏（见 buildMenuTree）。 */
 export const MENU_GROUPS: { key: string; label: string; icon: ComponentType }[] = [
@@ -54,6 +74,8 @@ export interface MenuNode {
  * - 按 `menuGroup` 聚合为分组（顶级大模块 + 可选中分组）
  * - 无权限的菜单项不出现；最终无可展开子项的空分组会被剪枝（避免空菜单）
  * - 返回需要默认展开的分组 key（openKeys）
+ * - **只遍历顶层，不递归 `route.children`**：子路由是页面内部路由（如患者详情的 5 个内容页），
+ *   按约定不带 `label`，本就不该进菜单；不递归也避免了"给子路由误加 label 就冒出菜单项"的隐患
  *
  * 纯函数、无 DOM 依赖，单测见 `routes.spec.tsx`。
  */
@@ -76,7 +98,10 @@ export function buildMenuTree(
 
   const openKeys: string[] = [];
   for (const route of routes) {
-    if (!route.label) {
+    // index 路由没有 path，本就无法生成菜单项；与"无 label 不进菜单"同为跳过条件。
+    // 取到局部常量后，下面的 route.path 均已被收窄为 string。
+    const path = route.path;
+    if (!route.label || !path) {
       continue;
     }
     if (route.permissions?.length && !route.permissions.some(hasPermission)) {
@@ -87,10 +112,10 @@ export function buildMenuTree(
     if (!parent) {
       // 无分组：直接挂到一级（如未来的概览/首页路由）
       root.push({
-        key: route.path,
+        key: path,
         label: route.label,
         icon: route.icon ? <route.icon /> : undefined,
-        path: route.path,
+        path,
       });
       continue;
     }
@@ -104,10 +129,10 @@ export function buildMenuTree(
       parent = mid;
     }
     parent.children!.push({
-      key: route.path,
+      key: path,
       label: route.label,
       icon: route.icon ? <route.icon /> : undefined,
-      path: route.path,
+      path,
     });
   }
 

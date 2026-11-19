@@ -4,6 +4,7 @@ import type { VirtualWardListItem } from '@gc/shared';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { joinWard, leaveWard } from '@/api/ward';
 import Tabs, { type TabItem } from '@/components/common/Tabs';
+import { DETAIL_DEFAULT_TAB, DETAIL_PATH_PREFIX } from '../patient-detail/detail-tabs';
 import PatientCardGrid from '../patients/PatientCardGrid';
 import PatientTable from '../patients/PatientTable';
 import { useVirtualWardQuery, type WardViewMode } from './useVirtualWardQuery';
@@ -43,9 +44,15 @@ export default function VirtualWardPage() {
   /** 正在提交的患者 ID，用于禁用菜单防连点 */
   const [pendingId, setPendingId] = useState<string | null>(null);
 
-  // C1 方式B：进详情时带上来源路径，详情页返回据此 navigate(-1) 还原本页 Tab/筛选/视图/页码
+  // C1 方式B：进详情时带上来源路径，详情页返回据此 navigate(-1) 还原本页 Tab/筛选/视图/页码。
+  //
+  // **直接跳默认子页**而不是裸详情 URL：裸 URL 会命中详情页 index 路由的 <Navigate replace>，
+  // 而 replace 覆盖 history 条目时一旦漏传 state，from 就没了 → 返回会退化成兜底跳**患者管理**，
+  // 从虚拟病区进来的用户被送错页，本页快照也一并失效。直达可让正常入口完全不经过 replace。
   const goDetail = (patient: VirtualWardListItem) => {
-    navigate(`/inpatient/patients/${patient.id}`, { state: { from: location.pathname } });
+    navigate(`${DETAIL_PATH_PREFIX}${patient.id}/${DETAIL_DEFAULT_TAB}`, {
+      state: { from: location.pathname },
+    });
   };
 
   const handleAction = async (patient: VirtualWardListItem) => {
