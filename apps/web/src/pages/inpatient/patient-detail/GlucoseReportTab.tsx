@@ -15,6 +15,8 @@ import { useGlucoseReport } from './useGlucoseReport';
 
 /** 日期列宽提示：容纳 `YYYY-MM-DD` 等宽数字；时段列不定宽，均分剩余空间（2026-11-19 二次调整：不横向滚动） */
 const DATE_COLUMN_WIDTH = 116;
+/** 值行内间距：需求人明确指定 6px（2026-11-19 三次调整），非 token 档位故立常量注明出处 */
+const VALUE_GAP_PX = 6;
 
 /**
  * 字典缺失时的稳定空值。必须是**模块级常量**：
@@ -76,11 +78,20 @@ export function ReportCell({
         return (
           <div key={`${entry.time}-${index}`} style={index > 0 ? separatorStyle : undefined}>
             {/* gc-num 提供等宽数字；其默认右对齐被 inline center 覆盖（2026-11-19 二次调整：格内居中）。
-                不设 nowrap：列宽均分页面时允许括号段换行，保证表格不横向滚动 */}
+                不设 nowrap：列宽均分页面时允许括号段换行，保证表格不横向滚动。
+                间距（2026-11-19 三次调整，需求人指定 6px）：
+                有强化时段 → `值(时间)` 与 `(强化名)` 之间加间距；无强化 → `值` 与 `(时间)` 之间加间距。
+                用 margin 而非空格字符：文本口径仍是「紧邻无空格」（R3），且 inline margin 不破坏居中 */}
             <div className="gc-num" style={{ textAlign: 'center' }}>
               <span style={{ color: dict?.color ?? undefined }}>{text}</span>
-              <span>({entry.time})</span>
-              {entry.intensiveName ? <span>({entry.intensiveName})</span> : null}
+              {entry.intensiveName ? (
+                <>
+                  <span>({entry.time})</span>
+                  <span style={{ marginLeft: VALUE_GAP_PX }}>({entry.intensiveName})</span>
+                </>
+              ) : (
+                <span style={{ marginLeft: VALUE_GAP_PX }}>({entry.time})</span>
+              )}
             </div>
             <div style={{ color: token.colorTextSecondary }}>{entry.nurseName ?? '-'}</div>
           </div>
