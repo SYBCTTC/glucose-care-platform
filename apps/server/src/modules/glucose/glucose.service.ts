@@ -1,10 +1,15 @@
 import { Injectable } from '@nestjs/common';
 import {
+  DICT_TYPE,
   ERROR_CODES,
   formatDateTime,
   formatLocalDate,
   formatLocalTime,
   GLUCOSE_ENTRY_DETECT,
+  GLUCOSE_RESULT_CODE_HIGH,
+  GLUCOSE_RESULT_CODE_LOW,
+  GLUCOSE_RESULT_CODE_NORMAL,
+  GLUCOSE_VALUE_RESULT_CODES,
   parseLocalDate,
   PATIENT_STATUS,
   pickTimeSlotByTime,
@@ -23,6 +28,7 @@ import type {
   GlucoseReportQuery,
   GlucoseReportResponse,
   GlucoseReportRow,
+  GlucoseReportStats,
   TimeSlotOption,
 } from '@gc/shared';
 import { Prisma } from '@prisma/client';
@@ -202,6 +208,9 @@ export class GlucoseService {
       ? await this.buildReportRows(patientId, pageDates, slots, columns)
       : { rows: [], count: 0 };
 
+    // 统计栏（R20）：与分页无关，按查询范围全量计算
+    const stats = await this.buildReportStats(patientId, range.where);
+
     return {
       columns,
       rows,
@@ -211,6 +220,71 @@ export class GlucoseService {
       rangeFrom: range.from,
       rangeTo: range.to,
       count,
+      stats,
+    };
+  }
+
+  /**
+   * 报表统计栏（R20，2026-11-19 需求人裁定，详见 docs/specs/glucose-report.md）：
+   *  - **总计**：`resultType` ∈ 字典 `counted=true` 集合的记录数。集合查 `DictItem` 动态取
+   *    （字典是数据不是代码：临床改 counted 标志，统计口径即跟随），当前种子为 0~4，
+   *    拒检/外出/请假/已吃饭/未进食（5~9，counted=false）不计入；
+   *  - **合格次数**：`resultType='1'`（正常）的记录数；
+   *  - **最高/最低**：范围内存在 High('4')/Low('3') 记录 → 前端展示字典 label；
+   *    否则取数值型(0/1/2)记录的极值及其自身 resultType（前端按该码字典色着色）；
+   *  - 统计范围 = 报表查询的 where 条件（本轮仅患者；后续新增筛选自动跟随），**不受分页影响**。
+   */
+  private async buildReportStats(
+    patientId: string,
+    measuredAt: Prisma.DateTimeFilter,
+  ): Promise<GlucoseReportStats> {
+    const [countedDicts, grouped, maxRecord, minRecord] = await Promise.all([
+      this.prisma.dictItem.findMany({
+        where: { dictType: DICT_TYPE.GLUCOSE_RESULT, counted: true },
+        select: { code: true },
+      }),
+      this.prisma.glucoseRecord.groupBy({
+        by: ['resultType'],
+        where: { patientId, measuredAt },
+        _count: { _all: true },
+      }),
+      // 极值取**记录本身**（而非 aggregate）：还要带回 resultType 供前端按字典色着色
+      this.prisma.glucoseRecord.findFirst({
+        where: this.numericRecordWhere(patientId, measuredAt),
+        select: { valueMmolL: true, resultType: true },
+        orderBy: { valueMmolL: 'desc' },
+      }),
+      this.prisma.glucoseRecord.findFirst({
+        where: this.numericRecordWhere(patientId, measuredAt),
+        select: { valueMmolL: true, resultType: true },
+        orderBy: { valueMmolL: 'asc' },
+      }),
+    ]);
+
+    const countByType = new Map(grouped.map((item) => [item.resultType, item._count._all]));
+    const total = countedDicts.reduce((sum, dict) => sum + (countByType.get(dict.code) ?? 0), 0);
+    const maxValue = maxRecord?.valueMmolL ?? null;
+    const minValue = minRecord?.valueMmolL ?? null;
+
+    return {
+      total,
+      qualified: countByType.get(GLUCOSE_RESULT_CODE_NORMAL) ?? 0,
+      hasHigh: (countByType.get(GLUCOSE_RESULT_CODE_HIGH) ?? 0) > 0,
+      hasLow: (countByType.get(GLUCOSE_RESULT_CODE_LOW) ?? 0) > 0,
+      maxValueMmolL: maxValue === null ? null : Number(maxValue),
+      maxResultType: maxRecord?.resultType ?? null,
+      minValueMmolL: minValue === null ? null : Number(minValue),
+      minResultType: minRecord?.resultType ?? null,
+    };
+  }
+
+  /** 数值型极值查询条件：只数 0/1/2 且有值的记录（3~9 无 valueMmolL，天然不参与极值） */
+  private numericRecordWhere(patientId: string, measuredAt: Prisma.DateTimeFilter) {
+    return {
+      patientId,
+      measuredAt,
+      resultType: { in: [...GLUCOSE_VALUE_RESULT_CODES] },
+      valueMmolL: { not: null },
     };
   }
 

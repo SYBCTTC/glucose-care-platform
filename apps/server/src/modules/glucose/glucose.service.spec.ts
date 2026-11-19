@@ -80,7 +80,20 @@ function createService() {
   const prisma = {
     patient: { findUnique: vi.fn() },
     user: { findFirst: vi.fn().mockResolvedValue({ id: 'u-nurse' }) },
-    glucoseRecord: { create: vi.fn(), findUnique: vi.fn(), findMany: vi.fn() },
+    glucoseRecord: {
+      create: vi.fn(),
+      findUnique: vi.fn(),
+      findMany: vi.fn(),
+      // 报表统计栏（R20）：默认空统计，统计用例各自覆盖
+      groupBy: vi.fn().mockResolvedValue([]),
+      findFirst: vi.fn().mockResolvedValue(null),
+    },
+    // 统计「总计」的 counted 码集来源；默认与 seed 一致（0~4 计入，5~9 不计入）
+    dictItem: {
+      findMany: vi
+        .fn()
+        .mockResolvedValue([{ code: '0' }, { code: '1' }, { code: '2' }, { code: '3' }, { code: '4' }]),
+    },
   };
   // 时段默认存在且启用；单个用例用 mockResolvedValueOnce 覆盖为停用或不存在
   const timeSlots = {
@@ -802,5 +815,102 @@ describe('GlucoseService.report — 血糖报告', () => {
     expect(result.total).toBe(0);
     expect(result.count).toBe(0);
     expect(prisma.glucoseRecord.findMany).toHaveBeenCalledTimes(1);
+  });
+});
+
+/* ---------------------- 报表统计栏（R20，2026-11-19 裁定） ---------------------- */
+
+describe('GlucoseService.report — 统计栏（R20）', () => {
+  /** groupBy 夹具：码 → 条数 映射转 `{ resultType, _count }` 形状 */
+  function groupFixture(counts: Record<string, number>) {
+    return Object.entries(counts).map(([resultType, n]) => ({
+      resultType,
+      _count: { _all: n },
+    }));
+  }
+
+  it('总计只数字典 counted=true 的码（当前种子 0~4），5~9 不计入；合格 = "1" 条数', async () => {
+    const { service, prisma } = createReportService([]);
+    prisma.glucoseRecord.groupBy.mockResolvedValue(
+      groupFixture({ '0': 2, '1': 10, '2': 3, '3': 1, '4': 1, '5': 4, '6': 2, '9': 7 }),
+    );
+
+    const { stats } = await service.report(deptUser, 'p-1', query());
+
+    expect(stats.total).toBe(17); // 2+10+3+1+1，不含 5/6/9 的 13 条
+    expect(stats.qualified).toBe(10);
+  });
+
+  it('counted 码集是字典数据驱动：改字典 counted 码集，总计口径即跟随', async () => {
+    const { service, prisma } = createReportService([]);
+    prisma.dictItem.findMany.mockResolvedValue([{ code: '0' }, { code: '1' }, { code: '2' }]);
+    prisma.glucoseRecord.groupBy.mockResolvedValue(groupFixture({ '1': 5, '3': 2, '4': 3 }));
+
+    const { stats } = await service.report(deptUser, 'p-1', query());
+
+    expect(stats.total).toBe(5); // '3'/'4' 不在 counted 集合
+    expect(prisma.dictItem.findMany.mock.calls[0][0].where).toMatchObject({ counted: true });
+  });
+
+  it('hasHigh/hasLow：范围内存在 "4"/"3" 记录即为 true', async () => {
+    const { service, prisma } = createReportService([]);
+    prisma.glucoseRecord.groupBy.mockResolvedValue(groupFixture({ '1': 1, '3': 1, '4': 2 }));
+
+    const { stats } = await service.report(deptUser, 'p-1', query());
+
+    expect(stats.hasHigh).toBe(true);
+    expect(stats.hasLow).toBe(true);
+  });
+
+  it('数值极值取记录本身：valueMmolL 转 number + 自身 resultType（供前端按字典色着色）', async () => {
+    const { service, prisma } = createReportService([]);
+    prisma.glucoseRecord.findFirst
+      .mockResolvedValueOnce({ valueMmolL: new Prisma.Decimal('18.5'), resultType: '2' }) // desc → 最大
+      .mockResolvedValueOnce({ valueMmolL: new Prisma.Decimal('3.2'), resultType: '0' }); // asc → 最小
+
+    const { stats } = await service.report(deptUser, 'p-1', query());
+
+    expect(stats.maxValueMmolL).toBe(18.5);
+    expect(stats.maxResultType).toBe('2');
+    expect(stats.minValueMmolL).toBe(3.2);
+    expect(stats.minResultType).toBe('0');
+    // 极值只查数值型(0/1/2)且有值的记录
+    expect(prisma.glucoseRecord.findFirst.mock.calls[0][0].where.resultType).toEqual({
+      in: ['0', '1', '2'],
+    });
+    expect(prisma.glucoseRecord.findFirst.mock.calls[0][0].where.valueMmolL).toEqual({
+      not: null,
+    });
+  });
+
+  it('无数值记录 → 极值为 null（前端显示 -）；hasHigh/hasLow 仍按存在性判定', async () => {
+    const { service, prisma } = createReportService([]);
+    prisma.glucoseRecord.groupBy.mockResolvedValue(groupFixture({ '4': 1 }));
+
+    const { stats } = await service.report(deptUser, 'p-1', query());
+
+    expect(stats.maxValueMmolL).toBeNull();
+    expect(stats.maxResultType).toBeNull();
+    expect(stats.minValueMmolL).toBeNull();
+    expect(stats.minResultType).toBeNull();
+    expect(stats.hasHigh).toBe(true);
+    expect(stats.hasLow).toBe(false);
+  });
+
+  it('统计与分页无关：page=2 时 groupBy/极值仍用全范围 where（含日期范围条件）', async () => {
+    const { service, prisma } = createReportService([]);
+
+    await service.report(
+      deptUser,
+      'p-1',
+      query({ page: 2, startDate: '2026-11-01', endDate: '2026-11-30' }),
+    );
+
+    const expectedWhere = {
+      patientId: 'p-1',
+      measuredAt: { gte: new Date(2026, 10, 1), lt: new Date(2026, 11, 1) },
+    };
+    expect(prisma.glucoseRecord.groupBy.mock.calls[0][0].where).toEqual(expectedWhere);
+    expect(prisma.glucoseRecord.findFirst.mock.calls[0][0].where).toMatchObject(expectedWhere);
   });
 });
