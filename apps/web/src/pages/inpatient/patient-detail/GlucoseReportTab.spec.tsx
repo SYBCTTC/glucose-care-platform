@@ -122,13 +122,13 @@ describe('ReportCell — 血糖报告单元格（R3/R4）', () => {
     expect(text).toContain('3(08:30)');
   });
 
-  it('空单元格显示占位 -', () => {
-    expect(textOf(render([]))).toContain('-');
+  it('空单元格渲染为空，不展示任何内容（2026-11-19 二次调整，替代原 - 占位）', () => {
+    expect(render([])).toBe('');
   });
 
-  it('cell 为 undefined（列与数据不匹配）时不抛异常', () => {
-    expect(() =>
-      renderToStaticMarkup(<ReportCell cell={undefined} resultTypes={RESULT_TYPES} />),
-    ).not.toThrow();
+  it('cell 为 undefined（列与数据不匹配）时不抛异常且渲染为空', () => {
+    expect(renderToStaticMarkup(<ReportCell cell={undefined} resultTypes={RESULT_TYPES} />)).toBe(
+      '',
+    );
   });
 });

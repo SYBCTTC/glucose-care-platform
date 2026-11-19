@@ -41,6 +41,8 @@
 | R14 | `formatLocalDate` / `formatLocalTime` **加进 `shared/date.ts`**（不在 service 内联实现） |
 | R15 | Tab 切换用 **`replace: true`**：浏览器后退键不在 Tab 间穿梭，直接回列表页 |
 | R16 | **`parseLocalDate` 一并落地**（入参侧把 `YYYY-MM-DD` 解析为本地零点），与 R14 的两个出参函数同批加入 `shared/date.ts` |
+| R17 | **（2026-11-19 实现后二次调整）表格不横向滚动**：日期列**不固定**（去 `fixed: 'left'` 与 `scroll.x`），11 列均分页面宽度全部可见；时段列不定宽，格内内容允许换行 |
+| R18 | **（同批）格内内容居中**（列 `align: 'center'`，`gc-num` 的默认右对齐被 inline 覆盖）；**无数据的单元格渲染为空**，不放 `-` 占位（D7 的 `nurseName=null` 显示 `-` 口径不变，那是有记录但缺记录者） |
 
 > ⚠️ **R3 与原始需求的差异**（需求人 2026-11-19 主动变更，按新口径实施）：
 > 原需求 4a 为「强化时段名紧跟血糖值」，现改为「**紧跟检测时间之后**」；括号由中文全角「（）」改为**英文半角** `()`。
@@ -340,7 +342,7 @@ export function useDetailTabNavigate() {
 
 - **表头**：日期列 + `columns`（8 普通 + 2 特殊 = 10 列）= **11 列**；表头文字取 `column.name`
   （库里维护，**禁止硬编码、禁止按名称匹配** —— `time-slots.ts:21` code 才是契约）。
-- **日期列**：`YYYY-MM-DD`（R11，**不附星期**），`gc-num` 等宽数字，`fixed: 'left'`。
+- **日期列**：`YYYY-MM-DD`（R11，**不附星期**），`gc-num` 等宽数字，居中、**不固定**（R17）。
 - **单元格**（R3/R4）：`entries` 纵向堆叠，每条**两行**，组间用 `token.lineWidth` 分隔线：
   - **第 1 行** `{值或标签}({HH:mm})`，强化再追加 `({强化时段名})`：
     - `valueMmolL !== null` → `value.toFixed(1)`，颜色取 `DY-RESULT` 字典 `color`
@@ -354,7 +356,9 @@ export function useDetailTabNavigate() {
 - **单位**：格内不带 `mmol/L`；表格上方说明处标注一次「单位：mmol/L」（D5）。
 - **分页**：Antd `Table` `pagination`，`pageSize=15`、`total` 取响应 `total`（**日期数**）、`onChange` 重新请求（服务端分页）。
 - **空态/加载态**：`rows` 为空 → `Table` 自带空态（不补空行）；请求中 → `Table loading`。
-- **横向滚动**：11 列在窄屏需 `scroll={{ x: ... }}`，日期列固定左侧。
+  有行但**无数据的单元格渲染为空**（R18，不放 `-` 占位）。
+- **不横向滚动**（R17，替代原「窄屏 `scroll.x` + 日期列固定」方案）：所有列 `align: 'center'`，
+  时段列不定宽、均分页面宽度，格内内容允许换行（不设 `nowrap`）。
 - **样式口径**：颜色取 `theme.useToken()`、间距取 `layoutSize`、边框取 `token.lineWidth`，
   **无硬编码色值/魔法数字**（沿用 `patient-detail.md` §6.2）。
 - **打印**：报表属临床数据，本次**不加** `gc-no-print`（返回栏已有）。
@@ -424,7 +428,7 @@ export function useDetailTabNavigate() {
     且**网络面板中不出现 `/glucose/report` 请求**
   - 强化时段记录显示为 `值(HH:mm)(强化-上午)` 且落在**正确的普通时段列**
   - 翻到第 2 页：日期连续、无重复、无遗漏
-  - 窄屏（<1264px）横向滚动，日期列固定左侧
+  - 表格**无横向滚动条**：11 列全部在页面内可见，格内内容居中（R17/R18）
   - `device.admin`（`NONE` 档）访问 → 403 占位页
 
 ## 9. 非功能要求
@@ -434,7 +438,7 @@ export function useDetailTabNavigate() {
 | 性能 | 两次查询（distinct 日期 + 本页记录）；现有 `@@index([patientId, measuredAt(sort: Desc)])` 支撑；单页最多 15 天 × 每天数十条，量级可控。若长期住院患者记录量增大导致 distinct 日期查询变慢，再考虑 `$queryRaw` + `date_trunc(... AT TIME ZONE)` 或 `GlucoseDailySummary`（`ROADMAP.md:159` 待立项），**本次不做** |
 | 内网 | 不引入新依赖，不引用公网资源 |
 | 等保 | 每次查询落 `GLUCOSE_REPORT_VIEW` 审计（含越权 `DENIED`）；不返回患者身份明文；detail 走既有白名单，不新增患者敏感字段 |
-| 兼容 | 复用 `layoutSize`/token，继承大字号与明暗模式；数值/时间 `gc-num` 等宽；11 列横向滚动 + 日期列固定 |
+| 兼容 | 复用 `layoutSize`/token，继承大字号与明暗模式；数值/时间 `gc-num` 等宽（对齐被 inline 覆盖为居中，R18）；11 列均分页宽、不横向滚动（R17） |
 | 时区 | 服务端运行环境须 `TZ=Asia/Shanghai`（`date.ts:7` 既有约定）；本地日期分组**不得**依赖数据库时区设置 |
 
 ## 10. 验收标准

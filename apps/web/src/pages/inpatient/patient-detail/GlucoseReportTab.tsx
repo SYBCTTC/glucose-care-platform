@@ -13,10 +13,8 @@ import { useCommonDataStore } from '@/store/common-data';
 import type { DetailOutletContext } from './detail-tabs';
 import { useGlucoseReport } from './useGlucoseReport';
 
-/** 日期列宽：容纳 `YYYY-MM-DD` 等宽数字 */
+/** 日期列宽提示：容纳 `YYYY-MM-DD` 等宽数字；时段列不定宽，均分剩余空间（2026-11-19 二次调整：不横向滚动） */
 const DATE_COLUMN_WIDTH = 116;
-/** 时段列宽：容纳 `6.8(08:30)(强化-上午)` 这类最长组合 */
-const SLOT_COLUMN_WIDTH = 168;
 
 /**
  * 字典缺失时的稳定空值。必须是**模块级常量**：
@@ -55,8 +53,9 @@ export function ReportCell({
 }) {
   const { token } = theme.useToken();
 
+  // 2026-11-19 二次调整：无数据的格子渲染为空，不放 `-` 占位
   if (!cell?.entries.length) {
-    return <span style={{ color: token.colorTextQuaternary }}>-</span>;
+    return null;
   }
 
   const separatorStyle = {
@@ -76,7 +75,9 @@ export function ReportCell({
 
         return (
           <div key={`${entry.time}-${index}`} style={index > 0 ? separatorStyle : undefined}>
-            <div className="gc-num" style={{ whiteSpace: 'nowrap' }}>
+            {/* gc-num 提供等宽数字；其默认右对齐被 inline center 覆盖（2026-11-19 二次调整：格内居中）。
+                不设 nowrap：列宽均分页面时允许括号段换行，保证表格不横向滚动 */}
+            <div className="gc-num" style={{ textAlign: 'center' }}>
               <span style={{ color: dict?.color ?? undefined }}>{text}</span>
               <span>({entry.time})</span>
               {entry.intensiveName ? <span>({entry.intensiveName})</span> : null}
@@ -117,8 +118,9 @@ export default function GlucoseReportTab() {
       title: '日期',
       dataIndex: 'date',
       key: 'date',
-      fixed: 'left',
+      align: 'center',
       width: DATE_COLUMN_WIDTH,
+      // span 是行内元素，居中由列的 align: 'center'（td text-align）驱动，无需 inline 覆盖
       render: (date: string) => <span className="gc-num">{date}</span>,
     };
 
@@ -126,7 +128,7 @@ export default function GlucoseReportTab() {
       // 表头文字取库里的 TimeSlot.name，禁止硬编码、禁止按名称匹配（code 才是契约）
       title: column.name,
       key: column.code,
-      width: SLOT_COLUMN_WIDTH,
+      align: 'center',
       render: (_: unknown, row: GlucoseReportRow) => (
         <ReportCell
           cell={row.cells.find((cell) => cell.slotCode === column.code)}
@@ -163,8 +165,8 @@ export default function GlucoseReportTab() {
         columns={columns}
         dataSource={data?.rows ?? []}
         loading={loading}
-        // 11 列在窄屏必然溢出：横向滚动 + 日期列固定左侧，保证滚动时仍知道在看哪一天
-        scroll={{ x: 'max-content' }}
+        // 2026-11-19 二次调整：不横向滚动、日期列不固定——11 列均分页面宽度全部可见
+        // （不设 scroll.x；单元格内容允许换行，见 ReportCell 注释）
         pagination={{
           current: page,
           pageSize: GLUCOSE_REPORT_PAGE_SIZE,
