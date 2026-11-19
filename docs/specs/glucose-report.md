@@ -1,7 +1,7 @@
 # 血糖报告（患者详情 · 日期 × 时段矩阵）
 
 > 按 `docs/FEATURE-SPEC-TEMPLATE.md` 归档。状态：✅ **已实现**（2026-11-19 出规格并三轮裁定，同日实现落地；
-> lint / typecheck / test / build 全绿，test 373：shared 71 / server 227 / web 75；手工 e2e 待联调环境执行，见 §8）
+> lint / typecheck / test / build 全绿，test 389：shared 71 / server 233 / web 85；手工 e2e 待联调环境执行，见 §8）
 >
 > 上游规格：`docs/specs/patient-detail.md`（详情页框架；其决策 A4 把血糖报告留为 `Empty` 占位，本规格填充其中「血糖报告」一项）。
 > 口径来源：`docs/COMMON-DATA.md:114` 已预裁定报表表头与着色口径，本规格与其一致。
@@ -44,6 +44,7 @@
 | R17 | **（2026-11-19 实现后二次调整）表格不横向滚动**：日期列**不固定**（去 `fixed: 'left'` 与 `scroll.x`），11 列均分页面宽度全部可见；时段列不定宽，格内内容允许换行 |
 | R18 | **（同批）格内内容居中**（列 `align: 'center'`，`gc-num` 的默认右对齐被 inline 覆盖）；**无数据的单元格渲染为空**，不放 `-` 占位（D7 的 `nurseName=null` 显示 `-` 口径不变，那是有记录但缺记录者） |
 | R19 | **（2026-11-19 三次调整）值行加 6px 视觉间距**：`值` 与 `(时间)` 之间**恒有**间距；有强化时段时 `(时间)` 与 `(强化名)` 之间同样加间距。用 **inline margin** 实现（非空格字符，R3「紧邻无空格」的文本口径不变；inline margin 不破坏 R18 居中）。6px 为需求人指定值，非 token 档位，立常量 `VALUE_GAP_PX` 注明出处 |
+| R20 | **（2026-11-19 四次调整）「单位：mmol/L」标注删除（D5 被推翻），原位替换为统计栏**：`总计：N 次 ←20px→ \| ←20px→ 合格次数：M 次 ←20px→ 最高血糖：X ←20px→ 最低血糖：Y`，左对齐；20px 为需求人指定值（常量 `STATS_GAP_PX`）。口径：①总计 = `DictItem.counted=true` 码集的记录数（**数据驱动**，当前种子 0~4；5~9 不计入；需求人更正裁定：3/4 计入总计）；②合格 = `'1'` 正常条数；③最高：存在 `'4'`(High) → 展示字典 label，否则数值最大值 `toFixed(1)` + ` mmol/L`；最低对称（`'3'`/Low）；④极值颜色取**该记录自身 resultType** 的字典色，High/Low 文案色取 `'4'`/`'3'` 字典色；⑤统计由**服务端按查询范围全量计算**、随报表响应 `stats` 字段下发（不新增接口/权限/审计），**与分页无关**，后续新增筛选条件（时间/住院记录/科室，本轮不做）自动跟随；⑥无数据时统计栏照常展示 `总计：0 次`、极值 `-`（裁定 3a）；⑦**布局预留**：统计栏居左，下一个任务的查询筛选表单挂同一行右侧（左右分布，本轮不实现） |
 
 > ⚠️ **R3 与原始需求的差异**（需求人 2026-11-19 主动变更，按新口径实施）：
 > 原需求 4a 为「强化时段名紧跟血糖值」，现改为「**紧跟检测时间之后**」；括号由中文全角「（）」改为**英文半角** `()`。
@@ -56,7 +57,7 @@
 | D2 | 审计动作 `GLUCOSE_REPORT_VIEW`，**一次接口调用一条**（非每条血糖一行），`targetType='PATIENT'` | `AGENTS.md` §5.2「查询患者血糖数据属敏感操作，必须逐条留痕」 |
 | D3 | **归组在服务端做**，响应下发 `columns`，前端不依赖 `useCommonDataStore().timeSlots` 画表头 | 单一口径、可单测；避免前端 store 未加载完或与库数据漂移 |
 | D4 | 着色只作用于**血糖数值/标签**，色值取 `DY-RESULT` 字典 `color`；时间与检测人用正文色 | `COMMON-DATA.md:114`「按服务端返回 `resultType` 着色，不要在前端拿阈值自己比」；`LastGlucose.tsx` 先例 |
-| D5 | 格内**不带单位**，`mmol/L` 在表格说明处标注一次 | 两行结构下格内空间紧张 |
+| D5 | ~~格内**不带单位**，`mmol/L` 在表格说明处标注一次~~ **已被 R20 推翻**（2026-11-19）：单位标注删除，格内数值无单位；`mmol/L` 只随统计栏最高/最低值后缀出现 | 两行结构下格内空间紧张 |
 | D6 | 日期列仅 `YYYY-MM-DD`，不附星期 | 需求人裁定（R11） |
 | D7 | 检测人 `operatorId` 为空 → 第 2 行显示 `-` | 与 `LastGlucose.tsx` 空值口径一致 |
 | D8 | 数据层用**手写 hook**（`useState`/`useEffect` + `cancelled` 防竞态），不引入 `useQuery` | 全仓零 `useQuery` 使用，`usePatientDetail.ts:23-58` 为现行约定 |
@@ -131,6 +132,28 @@ interface GlucoseReportResponse {
   rangeTo: string | null;
   /** 本页血糖记录条数；同样为审计 detail 而回显 */
   count: number;
+  /** 统计栏（R20，2026-11-19 追加）：按查询范围**全量**统计，与分页无关 */
+  stats: GlucoseReportStats;
+}
+
+/**
+ * 报表统计栏（R20）。总计的 counted 码集由服务端查 `DictItem.counted` 动态取
+ * （字典是数据不是代码），当前种子为 0~4；5~9（拒检/外出/请假/已吃饭/未进食）不计入。
+ */
+interface GlucoseReportStats {
+  /** 总计：resultType ∈ counted=true 集合的记录数 */
+  total: number;
+  /** 合格次数：resultType='1'（正常）的记录数 */
+  qualified: number;
+  /** 存在 High('4') 记录 → 最高血糖展示字典 label 而非数值 */
+  hasHigh: boolean;
+  /** 存在 Low('3') 记录 → 最低血糖展示字典 label 而非数值 */
+  hasLow: boolean;
+  /** 数值型(0/1/2)极值及其自身 resultType（前端按其字典色着色）；无数值记录为 null */
+  maxValueMmolL: number | null;
+  maxResultType: string | null;
+  minValueMmolL: number | null;
+  minResultType: string | null;
 }
 
 interface GlucoseReportColumn {
@@ -355,7 +378,10 @@ export function useDetailTabNavigate() {
     - 判定「是否数值型」**以 `valueMmolL === null` 为准**，不在前端复制 `VALUE_RESULT_CODES` 码集
       （避免与 `LastGlucose.tsx:6` 形成第二份实现，`shared-package.md` 硬规则 3）
   - **第 2 行** `nurseName`，为 `null` 显示 `-`（D7）
-- **单位**：格内不带 `mmol/L`；表格上方说明处标注一次「单位：mmol/L」（D5）。
+- **统计栏**（R20，替代原「单位：mmol/L」标注，D5 已推翻）：表格上方左对齐展示
+  `总计：N 次 | 合格次数：M 次 最高血糖：X 最低血糖：Y`（段落间 20px，`|` 仅在前两段之间）；
+  数据取响应 `stats`（服务端全量统计，翻页不变）；High/Low 的 label 与色、极值着色全部取 `DY-RESULT` 字典；
+  极值无数值时显示 `-`。外层为 `space-between` flex 行——**右侧预留给下一个任务的查询筛选表单**（本轮不实现）。
 - **分页**：Antd `Table` `pagination`，`pageSize=15`、`total` 取响应 `total`（**日期数**）、`onChange` 重新请求（服务端分页）。
 - **空态/加载态**：`rows` 为空 → `Table` 自带空态（不补空行）；请求中 → `Table loading`。
   有行但**无数据的单元格渲染为空**（R18，不放 `-` 占位）。
@@ -387,7 +413,7 @@ export function useDetailTabNavigate() {
 
 ## 8. 测试要求
 
-- [x] **单测（server）`glucose.service.spec.ts`**（21 用例，下列各点全覆盖）：
+- [x] **单测（server）`glucose.service.spec.ts`**（27 用例，下列各点全覆盖；含 R20 统计栏 6 例）：
   - 强化归组：`INTENSIVE_AM` + 检测时间 `09:00` → 落 `BREAKFAST_POST` 列，`intensiveName='强化-上午'`
   - 归组**忽略 `enabled`**：普通时段停用后，强化记录仍归入该列（R5）
   - 区间空洞 → 落 `RANDOM` 列且**保留** `intensiveName`
@@ -400,11 +426,17 @@ export function useDetailTabNavigate() {
   - `operatorId=null` → `nurseName=null`
   - **时区（必测）**：构造 UTC 时间使本地日期跨日（如 UTC `2026-11-18 17:00` = 北京 `11-19 01:00`）→ 必须归入 **11-19**
   - 越权：跨科室 → `30002`；`NONE` 档 → `30006`
+  - **统计栏（R20）**：总计只数字典 `counted=true` 码集（5~9 不计入）且**码集数据驱动**（改字典即改口径）；
+    合格 = `'1'` 条数；`hasHigh`/`hasLow` 存在性；极值取记录本身（值 + 自身 `resultType`）、只查数值型且有值记录；
+    无数值记录 → 极值 null；**统计与分页无关**（page=2 时 where 仍为全范围）
 - [x] **单测（shared）`time-slots.spec.ts`**：`pickTimeSlotByTime` 的 `ignoreEnabled`
       （不传/`false` 保持原行为跳过停用项、`true` 时命中停用时段）—— 回归保护既有调用方
 - [x] **单测（shared）`date.spec.ts`**：`formatLocalDate` / `formatLocalTime`，并断言与 `formatDateOnly`（UTC）在跨日场景下**结果不同**
-- [x] **单测（web）`GlucoseReportTab`**（13 用例）：两行结构、强化后缀、`valueMmolL=null` 显示字典标签、
-      同日同时段多条堆叠、`nurseName=null` 显示 `-`、半角括号无空格
+- [x] **单测（web）`GlucoseReportTab`**（23 用例）：两行结构、强化后缀、`valueMmolL=null` 显示字典标签、
+      同日同时段多条堆叠、`nurseName=null` 显示 `-`、半角括号无空格；空格子渲染为空（R18）；
+      值行 6px 间距两种形态（R19）；**统计栏 `ReportStatsBar`（R20，8 例）**：总计/合格文案、20px 间距 ×4、
+      极值 `toFixed(1)`+` mmol/L` 按自身 resultType 着色、`hasHigh`/`hasLow` 展示字典 label 及色、
+      无数值且无 High/Low → `-`、字典未加载回退 code 原文
 - [x] **单测（web）`routes.spec.tsx`**：菜单结构仍绿（5 条子路由 + `*` 兜底均不进菜单）；可辨识联合改造后类型不破
 - [x] **单测（web）`detail-tabs.spec.ts`**（13 用例）：`resolveDetailTab` 纯函数 —— 5 条子路径各自派生出正确的
       `{ main, glucose }`；裸详情路径 / 未知子路径 → 回落默认 `glucose`+`report`（覆盖风险 5、6）
@@ -431,6 +463,8 @@ export function useDetailTabNavigate() {
   - 强化时段记录显示为 `值(HH:mm)(强化-上午)` 且落在**正确的普通时段列**
   - 翻到第 2 页：日期连续、无重复、无遗漏
   - 表格**无横向滚动条**：11 列全部在页面内可见，格内内容居中（R17/R18）
+  - **统计栏（R20）**：翻页时四个统计值**不变**（与分页无关）；有 High/Low 记录的患者最高/最低显示字典标签及色；
+    无数据患者显示 `总计：0 次` 与 `-`；原「单位：mmol/L」标注已消失
   - `device.admin`（`NONE` 档）访问 → 403 占位页
 
 ## 9. 非功能要求
@@ -445,8 +479,8 @@ export function useDetailTabNavigate() {
 
 ## 10. 验收标准
 
-- [x] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` 全绿（test 373：shared 71 / server 227 / web 75）
-- [x] 接口返回符合 §3 契约，错误码符合 §7（server 单测 21 用例）
+- [x] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` 全绿（test 389：shared 71 / server 233 / web 85）
+- [x] 接口返回符合 §3 契约，错误码符合 §7（server 单测 27 用例）
 - [x] 越权被拒（后端 `30002`/`30006` 单测；前端 403 分支不渲染 `<Outlet/>` 单测），正常访问落 `GLUCOSE_REPORT_VIEW`
       （`@Audit` 已登记，`DENIED` 号段判定为既有拦截器行为；审计落库实测归入 §8 集成项）
 - [x] **五条子路由**（basic / admission / glucose-report / glucose-record / glucose-trend）独立可达、**刷新均保持**
@@ -459,6 +493,9 @@ export function useDetailTabNavigate() {
 - [x] 强化时段记录正确归入普通时段列并带后缀（server 归组单测 + `GlucoseReportTab` 渲染单测）
 - [x] **跨日 UTC 记录归入正确的本地日期**（server 时区单测 + shared `date.spec` 跨日差异断言）
 - [x] 分页单位为日期、`pageSize=15`、不补空行（server 单测：18 日期 → total=18、第 2 页 3 行）
+- [x] **统计栏（R20）**：`stats` 随报表响应下发、按查询范围全量统计、与分页无关（server 6 例：counted 码集数据驱动、
+      合格口径、High/Low 存在性、极值带自身 resultType、分页无关性）；前端展示字典驱动、20px 间距、左对齐、
+      右侧预留筛选表单位（web 8 例）；浏览器视觉确认归入 §8 e2e
 - [x] 共享包改动已走 build → sync:shared → 清 `.vite` 三步，前端无 `undefined`
 - [x] 文档更新：本规格状态改「✅ 已实现」+ `ROADMAP.md` P3-2 推进为 ⚠️ 部分完成 + `COMMON-DATA.md:114` 报表口径核对
 - [ ] 手工 e2e（§8）待联调环境执行
