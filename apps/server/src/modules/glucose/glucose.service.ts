@@ -2,11 +2,29 @@ import { Injectable } from '@nestjs/common';
 import {
   ERROR_CODES,
   formatDateTime,
+  formatLocalDate,
+  formatLocalTime,
   GLUCOSE_ENTRY_DETECT,
+  parseLocalDate,
   PATIENT_STATUS,
+  pickTimeSlotByTime,
   RESOURCE,
+  TIME_SLOT_CATEGORY,
+  TIME_SLOT_CODE_RANDOM,
 } from '@gc/shared';
-import type { CreateGlucoseInput, FieldError, GlucoseCreateResult } from '@gc/shared';
+import type {
+  CreateGlucoseInput,
+  FieldError,
+  GlucoseCreateResult,
+  GlucoseReportCell,
+  GlucoseReportColumn,
+  GlucoseReportColumnType,
+  GlucoseReportEntry,
+  GlucoseReportQuery,
+  GlucoseReportResponse,
+  GlucoseReportRow,
+  TimeSlotOption,
+} from '@gc/shared';
 import { Prisma } from '@prisma/client';
 import { assertInScope } from '../../common/data-scope/scope.util';
 import { BusinessException } from '../../common/exceptions/business.exception';
@@ -133,6 +151,70 @@ export class GlucoseService {
   }
 
   /**
+   * 血糖报告：日期 × 时段矩阵（只读）。
+   *
+   * 口径（详见 docs/specs/glucose-report.md）：
+   *  1. 患者存在、未归档、在数据范围内；**不要求住院中**——出院患者的历史血糖同样要能查；
+   *  2. 表头 = 普通(type=1) + 特殊(type=4) 时段，**含停用项**；强化(type=0) 不单独成列，
+   *     按检测时间落点归入普通时段列并以后缀标注；
+   *  3. 「日期」一律是 `measuredAt` 的**本地日历日**，不是 UTC 日（否则北京时间 00:00–08:00
+   *     的记录会被归到前一天）；
+   *  4. **分页单位是日期而非记录条数**：先取范围内全部 measuredAt 换算本地日期去重、降序、
+   *     切出本页日期，再查该日期窗口内的记录组装矩阵。禁止用 Prisma take/skip 直接切记录；
+   *  5. 不补空行：无血糖数据的日期不出现在 rows 里；
+   *  6. 响应回显 rangeFrom/rangeTo/count，供 AuditLogInterceptor 按既有白名单自动落审计 detail。
+   */
+  async report(
+    user: AuthenticatedUser,
+    patientId: string,
+    query: GlucoseReportQuery,
+  ): Promise<GlucoseReportResponse> {
+    await this.assertPatientReadable(user, patientId);
+
+    const range = this.resolveLocalRange(query);
+
+    // 时段一次查全（含停用）：既生成表头又作为归组依据，保证两者同源、不与前端 store 漂移
+    const slots = await this.timeSlots.list(user);
+    const columns = this.buildReportColumns(slots);
+
+    // 只取 measuredAt 一列做本地日期去重；长期住院患者量级增大后再考虑 $queryRaw + date_trunc
+    const stamps = await this.prisma.glucoseRecord.findMany({
+      where: { patientId, measuredAt: range.where },
+      select: { measuredAt: true },
+      orderBy: { measuredAt: 'desc' },
+    });
+
+    const dates = [
+      ...new Set(
+        stamps
+          .map((record) => formatLocalDate(record.measuredAt))
+          .filter((date): date is string => date !== null),
+      ),
+    ];
+    // formatLocalDate 产出定宽 YYYY-MM-DD，字典序即时间序 → 降序（最新在前）
+    dates.sort((left, right) => right.localeCompare(left));
+
+    const total = dates.length;
+    const offset = (query.page - 1) * query.pageSize;
+    const pageDates = dates.slice(offset, offset + query.pageSize);
+
+    const { rows, count } = pageDates.length
+      ? await this.buildReportRows(patientId, pageDates, slots, columns)
+      : { rows: [], count: 0 };
+
+    return {
+      columns,
+      rows,
+      total,
+      page: query.page,
+      pageSize: query.pageSize,
+      rangeFrom: range.from,
+      rangeTo: range.to,
+      count,
+    };
+  }
+
+  /**
    * 写入血糖记录；命中唯一约束 `(patientId, measuredAt)` 时按**幂等**处理。
    *
    * 重复提交（连点、网络重试）不抛错，回读已有记录并置 `skipped = true`，
@@ -194,5 +276,229 @@ export class GlucoseService {
       { field: 'mealContext', message: slot ? '检测时段已停用' : '检测时段不存在' },
     ];
     throw new BusinessException(ERROR_CODES.VALIDATION_FAILED, undefined, details);
+  }
+
+  /* ---------------------------- 血糖报告（只读） ---------------------------- */
+
+  /**
+   * 报表读取前的患者校验：存在、未归档、在数据范围内。
+   * 与 create() 的区别是**不要求住院中**——出院患者的历史血糖同样要能查（只读不改状态）。
+   */
+  private async assertPatientReadable(user: AuthenticatedUser, patientId: string): Promise<void> {
+    const patient = await this.prisma.patient.findUnique({
+      where: { id: patientId },
+      select: { departmentId: true, archivedAt: true },
+    });
+    if (!patient || patient.archivedAt) {
+      throw new BusinessException(ERROR_CODES.PATIENT_NOT_FOUND);
+    }
+    assertInScope(user, RESOURCE.PATIENT, { departmentId: patient.departmentId });
+  }
+
+  /**
+   * 把 `YYYY-MM-DD` 的**本地日期**入参换算成 `measuredAt`（timestamptz）的过滤区间。
+   *
+   * ⚠️ 必须用 `parseLocalDate`（本地零点）而不是 `dateOnlyStringSchema`（UTC 零点）：
+   * 后者会让日界整体偏 8 小时，本地 00:00–08:00 的记录被划到范围之外。
+   * 终点取「次日本地零点」并配 `lt`（左闭右开），避免漏掉 23:59:59.999。
+   */
+  private resolveLocalRange(query: GlucoseReportQuery): {
+    where: Prisma.DateTimeFilter;
+    from: string | null;
+    to: string | null;
+  } {
+    const where: Prisma.DateTimeFilter = {};
+    let from: string | null = null;
+    let to: string | null = null;
+
+    if (query.startDate !== undefined) {
+      const start = parseLocalDate(query.startDate);
+      if (!start) {
+        throw this.invalidDateError('startDate');
+      }
+      where.gte = start;
+      from = formatLocalDate(start);
+    }
+
+    if (query.endDate !== undefined) {
+      const end = parseLocalDate(query.endDate);
+      if (!end) {
+        throw this.invalidDateError('endDate');
+      }
+      where.lt = new Date(end.getFullYear(), end.getMonth(), end.getDate() + 1);
+      to = formatLocalDate(end);
+    }
+
+    if (where.gte && where.lt && where.gte >= where.lt) {
+      const details: FieldError[] = [{ field: 'endDate', message: '结束日期不能早于开始日期' }];
+      throw new BusinessException(ERROR_CODES.VALIDATION_FAILED, undefined, details);
+    }
+
+    return { where, from, to };
+  }
+
+  /** Zod 已校验格式，走到这里说明是 `2026-02-30` 这类不存在的日期 */
+  private invalidDateError(field: 'startDate' | 'endDate'): BusinessException {
+    const details: FieldError[] = [{ field, message: '日期不合法' }];
+    return new BusinessException(ERROR_CODES.VALIDATION_FAILED, undefined, details);
+  }
+
+  /**
+   * 表头列 = 普通(type=1) + 特殊(type=4)，按 sortOrder、code 升序；强化(type=0) **不单独成列**。
+   * **含停用项**：停用时段的历史血糖必须有列可落（COMMON-DATA.md「停用时段历史可展示」）。
+   */
+  private buildReportColumns(slots: TimeSlotOption[]): GlucoseReportColumn[] {
+    return slots
+      .filter(
+        (slot) =>
+          slot.type === TIME_SLOT_CATEGORY.NORMAL || slot.type === TIME_SLOT_CATEGORY.SPECIAL,
+      )
+      // list() 已按 sortOrder、code 排序，这里再排一次是不依赖上游顺序的防御
+      .sort((left, right) => left.sortOrder - right.sortOrder || left.code.localeCompare(right.code))
+      .map(
+        (slot): GlucoseReportColumn => ({
+          code: slot.code,
+          name: slot.name,
+          type: slot.type as GlucoseReportColumnType,
+          sortOrder: slot.sortOrder,
+          enabled: slot.enabled,
+        }),
+      );
+  }
+
+  /**
+   * 取本页日期窗口内的全部记录，组装成矩阵。
+   *
+   * 窗口 = [本页最早日期的本地零点, 本页最晚日期的次日本地零点)。
+   * `pageDates` 是从**完整** distinct 日期集合切出的连续片段，故窗口内任何有数据的日期
+   * 必然也在 `pageDates` 中，不会混入别页数据，无需再叠加用户的范围条件。
+   *
+   * 记录按 `measuredAt` **升序**取，因此每个单元格的 entries 天然满足 R4 的堆叠顺序。
+   */
+  private async buildReportRows(
+    patientId: string,
+    pageDates: string[],
+    slots: TimeSlotOption[],
+    columns: GlucoseReportColumn[],
+  ): Promise<{ rows: GlucoseReportRow[]; count: number }> {
+    // pageDates 降序：末尾是最早日期，首个是最晚日期
+    const earliest = parseLocalDate(pageDates[pageDates.length - 1]);
+    const latest = parseLocalDate(pageDates[0]);
+    if (!earliest || !latest) {
+      return { rows: [], count: 0 };
+    }
+
+    const records = await this.prisma.glucoseRecord.findMany({
+      where: {
+        patientId,
+        measuredAt: {
+          gte: earliest,
+          lt: new Date(latest.getFullYear(), latest.getMonth(), latest.getDate() + 1),
+        },
+      },
+      select: {
+        resultType: true,
+        valueMmolL: true,
+        mealContext: true,
+        measuredAt: true,
+        // 记录者姓名：库表无 denormalize 的 nurseName，走关联 select（同 patient.service 先例）
+        operator: { select: { name: true } },
+      },
+      orderBy: { measuredAt: 'asc' },
+    });
+
+    const slotByCode = new Map(slots.map((slot) => [slot.code, slot]));
+    const columnIndex = new Map(columns.map((column, index) => [column.code, index]));
+    const fallbackCode = this.resolveFallbackColumn(columns);
+
+    // 预建空矩阵：保证 rows 与 pageDates 同序、每行 cells 与 columns 等长同序
+    const rowByDate = new Map<string, GlucoseReportRow>();
+    for (const date of pageDates) {
+      rowByDate.set(date, {
+        date,
+        cells: columns.map(
+          (column): GlucoseReportCell => ({ slotCode: column.code, entries: [] }),
+        ),
+      });
+    }
+
+    let count = 0;
+    for (const record of records) {
+      const date = formatLocalDate(record.measuredAt);
+      const row = date === null ? undefined : rowByDate.get(date);
+      if (!row) {
+        // 窗口即本页日期跨度，正常不会发生；真发生说明本地日期换算与窗口不一致，跳过而非错放
+        continue;
+      }
+
+      const resolved = this.resolveColumn(record.mealContext, record.measuredAt, slots, slotByCode, fallbackCode);
+      let index = columnIndex.get(resolved.code);
+      if (index === undefined && fallbackCode !== null) {
+        // 归到的列不在表头里（如库里出现了非 0/1/4 的脏 type）→ 退回兜底列，不丢记录
+        index = columnIndex.get(fallbackCode);
+      }
+      if (index === undefined) {
+        // 库里连一个普通/特殊时段都没有：表格无列可画，属数据完整性故障。
+        // 此时 count 不计入该记录，审计 detail 与 total 的差异即可暴露异常
+        continue;
+      }
+
+      const entry: GlucoseReportEntry = {
+        valueMmolL: record.valueMmolL === null ? null : Number(record.valueMmolL),
+        resultType: record.resultType,
+        time: formatLocalTime(record.measuredAt) ?? '',
+        nurseName: record.operator?.name ?? null,
+        intensiveName: resolved.intensiveName,
+      };
+      row.cells[index].entries.push(entry);
+      count += 1;
+    }
+
+    return { rows: pageDates.map((date) => rowByDate.get(date) as GlucoseReportRow), count };
+  }
+
+  /**
+   * 决定一条记录落在哪一列。
+   *
+   *  - 普通 / 特殊时段：直接落自己的列（特殊时段**不做**时间归组）；
+   *  - 强化时段：按检测时间的本地 HH:mm 归入普通时段列，并带上强化时段名作后缀；
+   *    归组时**忽略 `enabled`**（R5）——停用时段的历史血糖仍应落回原本所属的列；
+   *  - 归组失败（区间空洞）/ `mealContext` 为空 / code 在库里不存在 → 兜底列，
+   *    **不静默丢弃记录**（R13）。强化记录即使兜底也保留后缀。
+   */
+  private resolveColumn(
+    mealContext: string | null,
+    measuredAt: Date,
+    slots: TimeSlotOption[],
+    slotByCode: Map<string, TimeSlotOption>,
+    fallbackCode: string | null,
+  ): { code: string; intensiveName: string | null } {
+    const slot = mealContext ? slotByCode.get(mealContext) : undefined;
+    if (!slot) {
+      return { code: fallbackCode ?? '', intensiveName: null };
+    }
+    if (slot.type !== TIME_SLOT_CATEGORY.INTENSIVE) {
+      return { code: slot.code, intensiveName: null };
+    }
+    const host = pickTimeSlotByTime(slots, formatLocalTime(measuredAt) ?? '', {
+      ignoreEnabled: true,
+    });
+    return { code: host?.code ?? fallbackCode ?? '', intensiveName: slot.name };
+  }
+
+  /**
+   * 归组兜底列（R13）：优先「随机」；库里没有 RANDOM 时退到第一个特殊时段列，再退到最后一列。
+   * 返回 null 表示库里连一个普通/特殊时段都没有——此时无列可画，属数据完整性故障。
+   */
+  private resolveFallbackColumn(columns: GlucoseReportColumn[]): string | null {
+    const random = columns.find((column) => column.code === TIME_SLOT_CODE_RANDOM);
+    if (random) {
+      return random.code;
+    }
+    const special = columns.find((column) => column.type === TIME_SLOT_CATEGORY.SPECIAL);
+    if (special) {
+      return special.code;
+    }
+    return columns.length > 0 ? columns[columns.length - 1].code : null;
   }
 }
