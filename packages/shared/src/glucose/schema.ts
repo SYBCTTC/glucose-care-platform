@@ -47,6 +47,14 @@ export type GlucoseEntryResultType = (typeof GLUCOSE_ENTRY_RESULT_TYPES)[number]
 /** 数值型结果类型（有具体读数）：只有这三类展示血糖值 */
 export const GLUCOSE_VALUE_RESULT_CODES = ['0', '1', '2'] as const;
 
+/**
+ * DY-RESULT 契约码（统计栏口径，R20）：合格=正常('1')；血糖仪超上限 High('4') / 超下限 Low('3')。
+ * 前端据此**取字典 label/color**，禁止硬编码文案与色值（COMMON-DATA 硬规则）。
+ */
+export const GLUCOSE_RESULT_CODE_NORMAL = '1';
+export const GLUCOSE_RESULT_CODE_LOW = '3';
+export const GLUCOSE_RESULT_CODE_HIGH = '4';
+
 /** 是否为数值型结果（0/1/2） */
 export function isGlucoseValueResult(resultType: string | null | undefined): boolean {
   return resultType !== null && resultType !== undefined
@@ -249,6 +257,34 @@ export interface GlucoseReportRow {
   cells: GlucoseReportCell[];
 }
 
+/**
+ * 报表统计栏（R20，2026-11-19 需求人裁定）：按查询范围内**全部记录**统计，
+ * **与分页无关**（翻页不变）；后续新增筛选条件（时间/住院记录/科室）时跟随同一条件。
+ * 由服务端计算后随报表响应下发，前端不自行聚合。
+ */
+export interface GlucoseReportStats {
+  /**
+   * 总计：`resultType` 属于字典 `counted=true` 集合的记录数（当前种子为 0~4；
+   * 拒检/外出/请假/已吃饭/未进食等 5~9 不计入）。集合以 **DictItem.counted 数据为准**，
+   * 服务端查字典计算，不在代码里固化码集。
+   */
+  total: number;
+  /** 合格次数：`resultType = '1'`（正常）的记录数 */
+  qualified: number;
+  /** 范围内是否存在 High('4') 记录：true 时「最高血糖」展示字典 label 而非数值 */
+  hasHigh: boolean;
+  /** 范围内是否存在 Low('3') 记录：true 时「最低血糖」展示字典 label 而非数值 */
+  hasLow: boolean;
+  /** 数值型(0/1/2)记录的最大值；无数值记录为 null（展示 `-`）。展示口径 `toFixed(1)` + ` mmol/L` */
+  maxValueMmolL: number | null;
+  /** 最大值记录自身的 resultType，前端按其字典色着色（裁定 2）；无数值记录为 null */
+  maxResultType: string | null;
+  /** 数值型(0/1/2)记录的最小值；无数值记录为 null */
+  minValueMmolL: number | null;
+  /** 最小值记录自身的 resultType，前端按其字典色着色；无数值记录为 null */
+  minResultType: string | null;
+}
+
 export interface GlucoseReportResponse {
   /** 普通 + 特殊时段，按 `sortOrder` 升序 */
   columns: GlucoseReportColumn[];
@@ -267,4 +303,6 @@ export interface GlucoseReportResponse {
   rangeTo: string | null;
   /** 本页血糖记录条数，同为审计 detail 而回显 */
   count: number;
+  /** 统计栏数据（R20）：按查询范围全量统计，与分页无关 */
+  stats: GlucoseReportStats;
 }
