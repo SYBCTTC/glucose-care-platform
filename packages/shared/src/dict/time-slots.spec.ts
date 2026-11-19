@@ -69,6 +69,24 @@ describe('pickTimeSlotByTime — 按检测时间归入普通时段', () => {
     expect(pickTimeSlotByTime(disabled, '03:00')).toBeNull();
   });
 
+  it('ignoreEnabled=true 时停用时段也参与匹配（血糖报表归组用）', () => {
+    const disabled = slots.map((slot) =>
+      slot.code === 'FASTING' ? { ...slot, enabled: false } : slot,
+    );
+
+    // 不传 / 显式 false → 保持既有行为（录入场景不该把停用时段当默认值）
+    expect(pickTimeSlotByTime(disabled, '03:00', { ignoreEnabled: false })).toBeNull();
+    // true → 停用时段的历史血糖仍落回原本所属的列
+    expect(pickTimeSlotByTime(disabled, '03:00', { ignoreEnabled: true })?.code).toBe('FASTING');
+  });
+
+  it('ignoreEnabled 只放宽 enabled，不填补区间空洞：仍返回 null', () => {
+    // 这条断言解释了服务端为何必须有「归组失败 → 落 RANDOM 列」的兜底
+    const withHole = slots.filter((slot) => slot.code !== 'FASTING');
+
+    expect(pickTimeSlotByTime(withHole, '03:00', { ignoreEnabled: true })).toBeNull();
+  });
+
   it('无命中或时间非法返回 null', () => {
     expect(pickTimeSlotByTime([], '08:00')).toBeNull();
     expect(pickTimeSlotByTime(slots, '8:00')).toBeNull();

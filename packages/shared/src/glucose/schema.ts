@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { dateTimeStringSchema } from '../date';
+import { DATE_ONLY_FORMAT, DATE_ONLY_PATTERN, dateTimeStringSchema } from '../date';
+import type { TIME_SLOT_CATEGORY } from '../dict/time-slots';
 import type { PatientListItem } from '../patient/schema';
 
 /**
@@ -160,4 +161,110 @@ export interface GlucoseCreateResult {
   /** YYYY-MM-DD HH:mm:ss */
   measuredAt: string;
   item: PatientListItem;
+}
+
+/* -------------------------------------------------------------------------- */
+/* 血糖报告（GET /patients/:id/glucose/report）                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 血糖报告默认每页**日期数**。
+ * ⚠️ 分页单位是「有血糖数据的日期」，**不是**血糖记录条数：
+ * 服务端必须先按日期分组、再对日期集合分页，禁止用 Prisma `take`/`skip` 直接切记录。
+ */
+export const GLUCOSE_REPORT_PAGE_SIZE = 15;
+
+/**
+ * 血糖报告查询入参。
+ *
+ * ⚠️ `startDate`/`endDate` 刻意**不用** `dateOnlyStringSchema`：后者转 **UTC 零点**（服务 `@db.Date` 列），
+ * 而报表要按**本地日历日**过滤 `measuredAt`（`timestamptz`）。故此处保持字符串原样，
+ * 由服务端用 `parseLocalDate` 解析为本地零点，否则日界会整体偏移 8 小时。
+ */
+export const glucoseReportQuerySchema = z.object({
+  /** YYYY-MM-DD，本地日期，含当日；不传则不限起点 */
+  startDate: z
+    .string()
+    .trim()
+    .regex(DATE_ONLY_PATTERN, `日期格式应为 ${DATE_ONLY_FORMAT}`)
+    .optional(),
+  /** YYYY-MM-DD，本地日期，含当日；不传则不限终点 */
+  endDate: z
+    .string()
+    .trim()
+    .regex(DATE_ONLY_PATTERN, `日期格式应为 ${DATE_ONLY_FORMAT}`)
+    .optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(GLUCOSE_REPORT_PAGE_SIZE),
+});
+export type GlucoseReportQuery = z.infer<typeof glucoseReportQuerySchema>;
+
+/** 报表列的时段类型：只有普通(1)与特殊(4)成列；强化(0)按检测时间归入普通列，不单独成列 */
+export type GlucoseReportColumnType =
+  | typeof TIME_SLOT_CATEGORY.NORMAL
+  | typeof TIME_SLOT_CATEGORY.SPECIAL;
+
+/**
+ * 报表列定义，由**服务端下发**。
+ * 前端据此画表头，不读 `useCommonDataStore().timeSlots`——保证表头与归组口径同源、不漂移。
+ */
+export interface GlucoseReportColumn {
+  /** TimeSlot.code，落库契约值 */
+  code: string;
+  /** TimeSlot.name，表头文字（库里维护，前端禁止硬编码、禁止按名称匹配） */
+  name: string;
+  type: GlucoseReportColumnType;
+  sortOrder: number;
+  /** 停用时段**也会下发**：其历史血糖必须有列可落 */
+  enabled: boolean;
+}
+
+/** 单元格内的一条血糖记录（前端渲染为两行：`值(HH:mm)[(强化名)]` / 记录者） */
+export interface GlucoseReportEntry {
+  /** mmol/L；`null` 表示非数值型结果（`resultType` 3~9），前端改显示字典标签 */
+  valueMmolL: number | null;
+  /** DY-RESULT code '0'~'9'，前端据此取字典 `label` / `color`，不自行比阈值 */
+  resultType: string;
+  /** HH:mm，**本地时间** */
+  time: string;
+  /** 记录者姓名（`User.name`）；`operatorId` 为空时为 null，前端显示 `-` */
+  nurseName: string | null;
+  /** 强化时段名（如「强化-上午」）；非强化记录为 null */
+  intensiveName: string | null;
+}
+
+/** 一个「日期 × 时段」单元格 */
+export interface GlucoseReportCell {
+  /** 对应 `columns[i].code` */
+  slotCode: string;
+  /** 同日同时段多条 → 按 `measuredAt` **升序**堆叠 */
+  entries: GlucoseReportEntry[];
+}
+
+/** 一个日期行 */
+export interface GlucoseReportRow {
+  /** YYYY-MM-DD，**本地日期**（非 UTC） */
+  date: string;
+  /** 与 `columns` **等长同序**；无数据的列 `entries` 为空数组 */
+  cells: GlucoseReportCell[];
+}
+
+export interface GlucoseReportResponse {
+  /** 普通 + 特殊时段，按 `sortOrder` 升序 */
+  columns: GlucoseReportColumn[];
+  /** 按日期**降序**（最新在前）；只含有数据的日期，**不补空行** */
+  rows: GlucoseReportRow[];
+  /** **日期总数**，不是记录总数 */
+  total: number;
+  page: number;
+  pageSize: number;
+  /**
+   * 实际生效的查询区间（本地日期 YYYY-MM-DD）；未传时为 null。
+   * 回显这三个字段是为了让 `AuditLogInterceptor` 按既有 `AUDIT_DETAIL_ALLOW_LIST`
+   * 自动把查询区间与条数落进审计 detail，**无需改白名单**。
+   */
+  rangeFrom: string | null;
+  rangeTo: string | null;
+  /** 本页血糖记录条数，同为审计 detail 而回显 */
+  count: number;
 }

@@ -6,7 +6,8 @@
  * 本文件保留三类内容：
  *  1. `TIME_SLOT_CATEGORY`：type 取值语义（0 强化 / 1 普通 / 4 特殊）；
  *  2. `TIME_SLOTS`：**仅 seed 灌库数据源**（`apps/server/prisma/seed.ts`），运行时一律以库数据为准；
- *  3. `pickTimeSlotByTime`：按检测时间求所属普通时段（录入默认值，后续报表归组复用），入参必须是接口下发的时段。
+ *  3. `pickTimeSlotByTime`：按检测时间求所属普通时段，入参必须是接口下发的时段。
+ *     两个调用场景口径**不同**：录入默认值跳过停用时段；血糖报表归组须传 `{ ignoreEnabled: true }`。
  *
  * ⚠️ 本文件**不再提供任何静态兜底**（原 `getFallbackTimeSlots` / `getTimeSlotLabel` 已移除）：
  *  - 时段可用性由服务端查 `TimeSlot` 表运行时校验，静态清单兜底会让"库里已停用/已改名"的时段
@@ -21,7 +22,7 @@
  * 注意：`code` 是**契约**（`GlucoseRecord.mealContext` 的落库值），改名不改码。
  */
 export const TIME_SLOT_CATEGORY = {
-  /** 强化时段：更密集监测；展示时按检测时间落点归入对应普通时段（展示逻辑后续实现） */
+  /** 强化时段：更密集监测；报表中**不单独成列**，按检测时间落点归入对应普通时段并加后缀标注 */
   INTENSIVE: 0,
   /** 普通时段：血糖报表表头分组的主体，区间必须 24 小时全覆盖 */
   NORMAL: 1,
@@ -29,6 +30,15 @@ export const TIME_SLOT_CATEGORY = {
   SPECIAL: 4,
 } as const;
 export type TimeSlotCategory = (typeof TIME_SLOT_CATEGORY)[keyof typeof TIME_SLOT_CATEGORY];
+
+/**
+ * 「随机」时段码。
+ *
+ * 它是 `TimeSlot.code` 的**契约值**（seed 灌库、`GlucoseRecord.mealContext` 落库都用它），
+ * 在此显式导出是为了让血糖报表的「归组失败 → 兜底到随机列」不散落字面量。
+ * 改名不改码（见文件头口径说明）。
+ */
+export const TIME_SLOT_CODE_RANDOM = 'RANDOM';
 
 /** 时段接口下发项（`GET /time-slots`） */
 export interface TimeSlotOption {
@@ -151,7 +161,7 @@ export const TIME_SLOTS: TimeSlotSeed[] = [
   },
   // 特殊时段：无区间、无控糖目标，排在普通时段之后
   {
-    code: 'RANDOM',
+    code: TIME_SLOT_CODE_RANDOM,
     name: '随机',
     type: TIME_SLOT_CATEGORY.SPECIAL,
     startTime: null,
@@ -217,21 +227,41 @@ export function timeToMinutes(time: string): number | null {
   return hour * 60 + minute;
 }
 
+/** `pickTimeSlotByTime` 的可选项 */
+export interface PickTimeSlotOptions {
+  /**
+   * 是否让**停用**（`enabled=false`）的普通时段也参与匹配，默认 `false`（保持原行为）。
+   *
+   * 录入场景必须用默认值：停用时段不该再被选为默认值。
+   * **报表归组须传 `true`**：时段停用后，其历史血糖仍应落在原本所属的列，
+   * 与 `COMMON-DATA.md`「停用时段历史可展示」口径一致；否则这些记录会归组失败。
+   */
+  ignoreEnabled?: boolean;
+}
+
 /**
  * 按检测时间求所属**普通时段**：区间左闭右开 `[startTime, endTime)`，'24:00' 可作终点。
  *
- * @param slots 时段列表（接口下发或 store 缓存）
- * @param time  'HH:mm'，即检测时间的时分
+ * @param slots   时段列表（接口下发或 store 缓存）
+ * @param time    'HH:mm'，即检测时间的时分
+ * @param options 见 `PickTimeSlotOptions`；不传时跳过停用时段（既有行为，现有调用方不受影响）
  * @returns 命中的普通时段；无区间/无命中（如数据有空洞）返回 null
  */
-export function pickTimeSlotByTime(slots: TimeSlotOption[], time: string): TimeSlotOption | null {
+export function pickTimeSlotByTime(
+  slots: TimeSlotOption[],
+  time: string,
+  options?: PickTimeSlotOptions,
+): TimeSlotOption | null {
   const minutes = timeToMinutes(time);
   if (minutes === null) {
     return null;
   }
 
   for (const slot of slots) {
-    if (slot.type !== TIME_SLOT_CATEGORY.NORMAL || !slot.enabled) {
+    if (slot.type !== TIME_SLOT_CATEGORY.NORMAL) {
+      continue;
+    }
+    if (!options?.ignoreEnabled && !slot.enabled) {
       continue;
     }
     if (!slot.startTime || !slot.endTime) {
