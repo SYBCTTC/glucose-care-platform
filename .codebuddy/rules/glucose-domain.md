@@ -59,6 +59,20 @@ globs:
   **禁止**在运行时用它做校验或展示兜底（会与库数据漂移）
 - 因此库里新增/停用时段**无需改代码、无需发版**
 
+## 住院记录与科室停留（R24，2026-11-20）
+- 患者是**多次住院**模型：`Admission`（一行 = 一次住院，`seq` 第几次，`dischargedAt NULL` = 在院）+
+  `AdmissionDepartment`（转科轨迹，一行 = 一段科室停留，`endedAt NULL` = 当前在科，
+  「每次住院至多一条进行中」由部分唯一索引 `admission_department_one_active` 保证）。
+  **实现转科/出院功能前必读** `docs/specs/glucose-report-query.md`（含双写口径与防御性关闭）
+- `Patient.admissionAt/dischargeAt/status` 旧字段**保留且必须双写**（裁定 Q2）：建档 → `Admission(seq=1)`；
+  办理住院 `admit()` → `seq=max+1` + 关闭上一次进行中记录；出院功能落地时须关闭
+  `Admission.dischargedAt` + 进行中停留 `endedAt`（当前无出院接口）
+- 血糖报告查询是**秒粒度闭区间** `startTime/endTime`（`YYYY-MM-DD HH:mm:ss` 本地时间，
+  原天粒度 `startDate/endDate` 已废弃）；行分组/统计/分页全部基于过滤后记录；
+  `buildReportRows` 窗口查询**必须叠加范围条件**（窗口内可能有范围外记录）
+- 报表查询表单联动（住院 → 科室 → 时间默认值与上下限）是纯前端状态机，
+  见 `ReportQueryForm.tsx` 导出纯函数与其 spec；服务端只认时间范围，不认住院/科室 id
+
 ## 去重（唯一约束兜底）
 - 实现：`@@unique([patientId, measuredAt])`（索引 `GlucoseRecord_patientId_measuredAt_key`）。
   **没有 `dedupeKey` 字段**，也不要再拼 `manual:{...}` / `device:{...}` 键
