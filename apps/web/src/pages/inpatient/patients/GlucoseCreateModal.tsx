@@ -1,69 +1,47 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { DatePicker, Form, Input, InputNumber, Modal, Radio, Select, message } from 'antd';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Form, Modal, message } from 'antd';
 import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
-import {
-  createGlucoseSchema,
-  DATE_TIME_FORMAT,
-  DICT_TYPE,
-  GLUCOSE_ENTRY_DETECT,
-  GLUCOSE_UNIT,
-  GLUCOSE_VALUE_MAX,
-  GLUCOSE_VALUE_MIN,
-  pickTimeSlotByTime,
-  TEST_STRIP_MAX,
-  TEST_STRIP_MIN,
-  TIME_SLOT_CATEGORY,
-} from '@gc/shared';
-import type { GlucoseCreateResult, PatientListItem } from '@gc/shared';
+import { createGlucoseSchema, GLUCOSE_ENTRY_DETECT, pickTimeSlotByTime } from '@gc/shared';
+import type { GlucoseCreateResult } from '@gc/shared';
 import { ApiError } from '@/api/client';
-import { createGlucose, type CreateGlucosePayload } from '@/api/glucose';
+import { createGlucose } from '@/api/glucose';
+import GlucoseFormFields, {
+  toPayload,
+  type GlucoseFormValues,
+} from '@/components/glucose/GlucoseFormFields';
 import { useAuthStore } from '@/store/auth';
 import { useCommonDataStore } from '@/store/common-data';
 
-interface GlucoseFormValues {
-  measuredAt: Dayjs;
-  mealContext: string;
-  /** `DETECT` 或 '3'~'9' */
-  resultType: string;
-  valueMmolL?: number | null;
-  testStrip?: number | null;
-  operatorId: string;
-  remark?: string;
-}
-
 interface GlucoseCreateModalProps {
-  /** 目标患者；null 表示关闭 */
-  patient: PatientListItem | null;
+  /**
+   * 目标患者；null 表示关闭。
+   * R25 起放宽为摘要形状（标题只用脱敏姓名、提交只用 id）：
+   * 患者列表/详情壳传完整 `PatientListItem`/`PatientDetail`，报表子路由传 context 下发的摘要。
+   */
+  patient: { id: string; nameMasked: string } | null;
   open: boolean;
+  /**
+   * R25：预填（报表空白格点击触发）——`measuredAt` = 行日期 + 当前时分秒（裁定 Q15）、
+   * `mealContext` = 该列时段 code，且视为「已手动选择」，不被按时间自动推荐覆盖（裁定 Q16 口径）。
+   * 不传（列表页/详情壳入口）时保持原默认行为：当前时刻 + 自动推荐时段。
+   * ⚠️ 传入对象需引用稳定（父层用 state 持有），否则打开期间 effect 会反复重置表单。
+   */
+  prefill?: { measuredAt: Dayjs; mealContext: string } | null;
   onClose: () => void;
   /** 录入成功回调：带回更新后的列表项，供页面替换该行 */
   onSuccess: (result: GlucoseCreateResult) => void;
 }
 
-/** 表单值 → 接口传输格式 */
-function toPayload(values: GlucoseFormValues): CreateGlucosePayload {
-  const isDetect = values.resultType === GLUCOSE_ENTRY_DETECT;
-  return {
-    measuredAt: values.measuredAt.format(DATE_TIME_FORMAT),
-    mealContext: values.mealContext,
-    resultType: values.resultType,
-    // 非检测类型由服务端强制为空，这里主动不收，避免脏值
-    valueMmolL: isDetect ? (values.valueMmolL ?? null) : null,
-    testStrip: isDetect ? (values.testStrip ?? null) : null,
-    operatorId: values.operatorId,
-    remark: values.remark?.trim() ? values.remark.trim() : null,
-  };
-}
-
 /**
  * 添加血糖弹窗（住院患者）。
- * 表单单列排布，顺序：检测时间 → 检测时段 → 血糖值 → 检测结果类型 → 试纸 → 记录者 → 备注。
- * 「检测结果类型」无标签，紧跟血糖值输入框下方："检测"用真实读数，3~9 为无读数的检测结果类型。
+ * 表单字段组已抽取为 `GlucoseFormFields`（R25，与编辑弹框复用），本组件只保留：
+ * 打开重置/预填、时段自动推荐（touched 语义）、提交与幂等/字段级错误处理、Modal 壳。
  */
 export default function GlucoseCreateModal({
   patient,
   open,
+  prefill,
   onClose,
   onSuccess,
 }: GlucoseCreateModalProps) {
@@ -71,39 +49,13 @@ export default function GlucoseCreateModal({
   const [submitting, setSubmitting] = useState(false);
 
   const profile = useAuthStore((state) => state.profile);
-  const staff = useCommonDataStore((state) => state.staff);
-  const dicts = useCommonDataStore((state) => state.dicts);
   const timeSlots = useCommonDataStore((state) => state.timeSlots);
   /** 用户是否手动改过检测时段：改过就不再被「按检测时间自动选中」覆盖 */
   const mealContextTouched = useRef(false);
 
-  const resultType = Form.useWatch('resultType', form);
-  const isDetect = resultType === GLUCOSE_ENTRY_DETECT;
-  const dictItems = dicts[DICT_TYPE.GLUCOSE_RESULT] ?? [];
-
-  /**
-   * 检测时段：普通 → 特殊（随机/复测）→ 强化 分组，顺序由接口 sortOrder 决定。
-   * 数据来自动态时段（GET /time-slots），只渲染 enabled 项；空分组不显示。
-   */
-  const timeSlotOptions = useMemo(() => {
-    const enabled = timeSlots.filter((slot) => slot.enabled);
-    return [
-      { label: '普通时段', type: TIME_SLOT_CATEGORY.NORMAL },
-      { label: '特殊时段', type: TIME_SLOT_CATEGORY.SPECIAL },
-      { label: '强化时段', type: TIME_SLOT_CATEGORY.INTENSIVE },
-    ]
-      .map((group) => ({
-        label: group.label,
-        options: enabled
-          .filter((slot) => slot.type === group.type)
-          .map((slot) => ({ value: slot.code, label: slot.name })),
-      }))
-      .filter((group) => group.options.length > 0);
-  }, [timeSlots]);
-
   /**
    * 检测时段默认值：按检测时间落入的普通时段自动选中（区间左闭右开，见 pickTimeSlotByTime）。
-   * 用户手动改过时段后不再覆盖。
+   * 用户手动选过时段后不再覆盖；R25 预填（空白格点击）在打开时即置 touched，同样不被覆盖。
    */
   const applyTimeSlotByMeasuredAt = useCallback(
     (value: Dayjs | null | undefined) => {
@@ -119,34 +71,9 @@ export default function GlucoseCreateModal({
   );
 
   /**
-   * 检测结果类型：'检测' + 字典里可选的项（3~9）。
-   * 0/1/2 由后端判定，字典里 checkable=false，天然不会出现在这里。
-   */
-  const resultTypeOptions = useMemo(
-    () => [
-      { value: GLUCOSE_ENTRY_DETECT, label: '检测' },
-      ...dictItems
-        .filter((item) => item.checkable)
-        .map((item) => ({ value: item.code, label: item.label })),
-    ],
-    [dictItems],
-  );
-
-  /**
-   * 记录者：DY-OPERATOR（本科室在职医护）。
-   * 当前登录账号不在其中时（如系统管理员）临时补一条，仅前端展示，不写回 DY-OPERATOR。
-   */
-  const operatorOptions = useMemo(() => {
-    const options = staff.map((item) => ({ value: item.id, label: item.name }));
-    if (profile && !staff.some((item) => item.id === profile.userId)) {
-      options.unshift({ value: profile.userId, label: `${profile.displayName}（本人）` });
-    }
-    return options;
-  }, [staff, profile]);
-
-  /**
    * 打开时重置：检测时间取当前时刻、结果类型默认「检测」、记录者默认当前账号。
    * 检测时段由下面的 effect 按检测时间自动选中。
+   * R25：带 prefill 打开时改用预填值（日期+时段已知，用户无需重复选择），并视为已手动选择。
    *
    * 注意不要给 Form 加 preserve={false}：Modal 的 body 在首帧后会再挂载一次，
    * 非保留字段在 Form 卸载时会被 destroyForm 清空，导致这里写入的默认值在首帧渲染时被抹掉
@@ -156,14 +83,15 @@ export default function GlucoseCreateModal({
     if (!open) {
       return;
     }
-    mealContextTouched.current = false;
+    mealContextTouched.current = prefill !== undefined && prefill !== null;
     form.resetFields();
     form.setFieldsValue({
-      measuredAt: dayjs(),
+      measuredAt: prefill?.measuredAt ?? dayjs(),
       resultType: GLUCOSE_ENTRY_DETECT,
       operatorId: profile?.userId,
+      ...(prefill ? { mealContext: prefill.mealContext } : {}),
     });
-  }, [open, form, profile?.userId]);
+  }, [open, form, profile?.userId, prefill]);
 
   /**
    * 检测时段默认值。公共数据可能晚于弹窗到达（timeSlots 变化会再次触发），
@@ -176,10 +104,9 @@ export default function GlucoseCreateModal({
     applyTimeSlotByMeasuredAt(form.getFieldValue('measuredAt') as Dayjs | undefined);
   }, [open, applyTimeSlotByMeasuredAt, form]);
 
-  /** 切换结果类型：非检测类型没有读数，血糖值与试纸一并清空（输入框同时置灰） */
-  const handleResultTypeChange = () => {
-    form.setFieldsValue({ valueMmolL: null, testStrip: null });
-  };
+  const handleMealContextManualSelect = useCallback(() => {
+    mealContextTouched.current = true;
+  }, []);
 
   const handleSubmit = async () => {
     if (!patient) {
@@ -254,106 +181,11 @@ export default function GlucoseCreateModal({
         wrapperCol={{ flex: '1 1 0' }}
         requiredMark
       >
-        <Form.Item
-          name="measuredAt"
-          label="检测时间"
-          rules={[{ required: true, message: '请选择检测时间' }]}
-        >
-          <DatePicker
-            showTime
-            format={DATE_TIME_FORMAT}
-            style={{ width: '100%' }}
-            disabledDate={(current) => current.isAfter(dayjs(), 'day')}
-            // 改检测时间时同步推荐时段（用户已手动选过则保持不变）
-            onChange={(value) => applyTimeSlotByMeasuredAt(value)}
-          />
-        </Form.Item>
-
-        <Form.Item
-          name="mealContext"
-          label="检测时段"
-          rules={[{ required: true, message: '请选择检测时段' }]}
-        >
-          <Select
-            options={timeSlotOptions}
-            placeholder="请选择检测时段"
-            // 时段接口失败时不再用静态清单兜底（见 store/common-data.ts），
-            // 这里明确告知原因，避免被误读成"库里没有可选时段"
-            notFoundContent="时段数据未加载，请刷新页面重试"
-            // 手动选择后不再被时间自动推荐覆盖
-            onChange={() => {
-              mealContextTouched.current = true;
-            }}
-          />
-        </Form.Item>
-
-        <Form.Item
-          name="valueMmolL"
-          label="血糖值"
-          rules={[{ required: isDetect, message: '请输入血糖值' }]}
-        >
-          <InputNumber
-            style={{ width: '100%' }}
-            min={GLUCOSE_VALUE_MIN}
-            max={GLUCOSE_VALUE_MAX}
-            step={0.1}
-            precision={1}
-            disabled={!isDetect}
-            addonAfter={GLUCOSE_UNIT}
-            placeholder={`${GLUCOSE_VALUE_MIN} ~ ${GLUCOSE_VALUE_MAX}`}
-          />
-        </Form.Item>
-
-        {/*
-          无 label：选项直接跟在血糖值下方，与血糖值共同构成"这次检测的结果"。
-          仍占用一个空 label 单元格（label=" "），否则本行控件会顶到最左侧、与上面的输入框错位。
-        */}
-        <Form.Item
-          name="resultType"
-          label=" "
-          colon={false}
-          rules={[{ required: true, message: '请选择检测结果类型' }]}
-        >
-          <Radio.Group
-            onChange={handleResultTypeChange}
-            style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 16px' }}
-          >
-            {resultTypeOptions.map((option) => (
-              <Radio key={option.value} value={option.value}>
-                {option.label}
-              </Radio>
-            ))}
-          </Radio.Group>
-        </Form.Item>
-
-        <Form.Item name="testStrip" label="试纸">
-          <InputNumber
-            style={{ width: '100%' }}
-            min={TEST_STRIP_MIN}
-            max={TEST_STRIP_MAX}
-            step={1}
-            precision={0}
-            disabled={!isDetect}
-            placeholder={`${TEST_STRIP_MIN} ~ ${TEST_STRIP_MAX}`}
-          />
-        </Form.Item>
-
-        <Form.Item
-          name="operatorId"
-          label="记录者"
-          rules={[{ required: true, message: '请选择记录者' }]}
-        >
-          <Select
-            showSearch
-            optionFilterProp="label"
-            options={operatorOptions}
-            placeholder="请选择记录者"
-          />
-        </Form.Item>
-
-        <Form.Item name="remark" label="备注">
-          <Input.TextArea rows={4} maxLength={500} showCount placeholder="请输入备注" />
-        </Form.Item>
+        <GlucoseFormFields
+          form={form}
+          onMeasuredAtChange={applyTimeSlotByMeasuredAt}
+          onMealContextManualSelect={handleMealContextManualSelect}
+        />
       </Form>
     </Modal>
   );
