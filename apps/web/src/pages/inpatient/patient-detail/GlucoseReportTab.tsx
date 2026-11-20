@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
-import { FullscreenExitOutlined, FullscreenOutlined } from '@ant-design/icons';
-import { Alert, Button, Table, Typography, message, theme } from 'antd';
+import { Alert, Button, Table, message, theme } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useOutletContext, useParams } from 'react-router-dom';
 import dayjs from 'dayjs';
@@ -9,8 +8,6 @@ import type { Dayjs } from 'dayjs';
 import {
   DICT_TYPE,
   GLUCOSE_REPORT_PAGE_SIZE,
-  GLUCOSE_RESULT_CODE_HIGH,
-  GLUCOSE_RESULT_CODE_LOW,
   PATIENT_STATUS,
   PERMISSION,
   TIME_SLOT_CATEGORY,
@@ -20,31 +17,31 @@ import type {
   GlucoseReportCell,
   GlucoseReportEntry,
   GlucoseReportRow,
-  GlucoseReportStats,
 } from '@gc/shared';
+import {
+  FALLBACK_FORM_STATE,
+  GlucoseQueryForm,
+  deriveQueryDefaults,
+  isRangeInverted,
+  toQueryRange,
+} from '@/components/glucose/GlucoseQueryForm';
+import type { GlucoseQueryFormState } from '@/components/glucose/GlucoseQueryForm';
+import { GlucoseToolbar } from '@/components/glucose/GlucoseToolbar';
+import { useFullscreen } from '@/components/glucose/useFullscreen';
 import { useAuthStore } from '@/store/auth';
 import { useCommonDataStore } from '@/store/common-data';
 import GlucoseCreateModal from '../patients/GlucoseCreateModal';
 import type { DetailChildContext, GlucoseReportDisplay } from './detail-tabs';
 import GlucoseReviewModal from './GlucoseReviewModal';
+import { buildReportStatsItems } from './buildReportStatsItems';
 import { useGlucoseReport } from './useGlucoseReport';
 import type { GlucoseReportRange } from './useGlucoseReport';
 import { useAdmissions } from './useAdmissions';
-import {
-  FALLBACK_FORM_STATE,
-  ReportQueryForm,
-  deriveQueryDefaults,
-  isRangeInverted,
-  toReportRange,
-} from './ReportQueryForm';
-import type { ReportQueryFormState } from './ReportQueryForm';
 
 /** 日期列宽提示：容纳 `YYYY-MM-DD` 等宽数字；时段列不定宽，均分剩余空间（2026-11-19 二次调整：不横向滚动） */
 const DATE_COLUMN_WIDTH = 116;
 /** 值行内间距：需求人明确指定 6px（2026-11-19 三次调整），非 token 档位故立常量注明出处 */
 const VALUE_GAP_PX = 6;
-/** 统计栏段落间距：需求人明确指定 20px（R20），非 token 档位故立常量注明出处 */
-const STATS_GAP_PX = 20;
 /**
  * 表格区最小高度（R21）：极矮视口下的防塌缩兜底。
  * 正常视口由 flex 链自动占满剩余空间；空间不足此值时根节点退化为内部滚动。
@@ -278,99 +275,6 @@ export function buildAddPrefill(
 }
 
 /**
- * R23（2026-11-20 需求人提出）：全屏切换按钮。
- *
- * 挂在统计栏行右侧（该行本就是 space-between 且右侧预留，R20）。图标 + 文字双通道
- * （ui-design-tokens 规则 5 的可达性口径），图标用 @ant-design/icons（规则 10）。
- * 打印时隐藏（交互控件对纸质输出无意义）。导出仅为单测（同 ReportCell 的理由）。
- */
-export function FullscreenToggle({
-  fullscreen,
-  onToggle,
-}: {
-  fullscreen: boolean;
-  onToggle: (next: boolean) => void;
-}) {
-  return (
-    <Button
-      className="gc-no-print"
-      type="text"
-      size="small"
-      icon={fullscreen ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
-      onClick={() => onToggle(!fullscreen)}
-      // marginLeft auto：统计栏未加载（data 为 null）时按钮仍靠右，避免布局跳动
-      style={{ marginLeft: 'auto', flexShrink: 0 }}
-    >
-      {fullscreen ? '退出全屏' : '全屏'}
-    </Button>
-  );
-}
-
-/**
- * 报表统计栏（R20，2026-11-19 需求人裁定）：替代原「单位：mmol/L」标注
- * （D5 被推翻：格内数值不再有单位标注，单位只随最高/最低值的后缀出现）。
- *
- * 格式：`总计：N 次 ←20px→ | ←20px→ 合格次数：M 次 ←20px→ 最高血糖：X ←20px→ 最低血糖：Y`，左对齐。
- * 统计数由**服务端按查询范围全量计算**（与分页无关），本组件纯展示：
- *  - 最高/最低：`hasHigh`/`hasLow` → 展示 `DY-RESULT` 字典 label（禁止硬编码文案/色值）；
- *    否则数值 `toFixed(1)` + ` mmol/L`，按**该极值自身 resultType** 的字典色着色（裁定 2）；
- *    两者皆无 → `-`（裁定 3a：总计为 0 时统计栏照常展示）。
- *
- * 导出仅为单测（同 `ReportCell` 的理由：外层组件依赖 Outlet context 与网络请求）。
- */
-export function ReportStatsBar({
-  stats,
-  resultTypes,
-}: {
-  stats: GlucoseReportStats;
-  /** DY-RESULT 字典项，用于取 High/Low 标签与极值着色 */
-  resultTypes: DictItemOption[];
-}) {
-  const gapStyle = { marginLeft: STATS_GAP_PX };
-
-  const extreme = (
-    hasExtreme: boolean,
-    extremeCode: string,
-    value: number | null,
-    resultType: string | null,
-  ) => {
-    const dict = resultTypes.find((option) => option.code === extremeCode);
-    if (hasExtreme) {
-      // 字典未加载时回退 code 原文（同 ReportCell 口径），不硬编码 'High'/'Low' 文案
-      return <span style={{ color: dict?.color ?? undefined }}>{dict?.label ?? extremeCode}</span>;
-    }
-    if (value !== null) {
-      const valueDict = resultTypes.find((option) => option.code === resultType);
-      return (
-        <span className="gc-num">
-          <span style={{ color: valueDict?.color ?? undefined }}>{value.toFixed(1)}</span>
-          {' mmol/L'}
-        </span>
-      );
-    }
-    return <span>-</span>;
-  };
-
-  return (
-    <Typography.Text type="secondary">
-      总计：<span className="gc-num">{stats.total}</span> 次
-      <span style={gapStyle}>|</span>
-      <span style={gapStyle}>
-        合格次数：<span className="gc-num">{stats.qualified}</span> 次
-      </span>
-      <span style={gapStyle}>
-        最高血糖：
-        {extreme(stats.hasHigh, GLUCOSE_RESULT_CODE_HIGH, stats.maxValueMmolL, stats.maxResultType)}
-      </span>
-      <span style={gapStyle}>
-        最低血糖：
-        {extreme(stats.hasLow, GLUCOSE_RESULT_CODE_LOW, stats.minValueMmolL, stats.minResultType)}
-      </span>
-    </Typography.Text>
-  );
-}
-
-/**
  * 血糖报告（路由 `/inpatient/patients/:id/glucose/report`）。
  *
  * 表头由**服务端下发的 `columns`** 生成，不读 `useCommonDataStore().timeSlots`：
@@ -384,12 +288,13 @@ export default function GlucoseReportTab() {
     useOutletContext<DetailChildContext>();
   const { token } = theme.useToken();
   const [page, setPage] = useState(1);
-  // R23：全屏态（表格撑满视口）。纯视图状态，不持久化、不影响请求与分页
-  const [fullscreen, setFullscreen] = useState(false);
+  // R23：全屏态（表格撑满视口）收拢进公共 hook——状态、ESC 退出、fixed 覆盖样式、
+  // 换患者重置原本分散在本组件四处，三页复用后由 useFullscreen 统一保证行为一致
+  const { fullscreen, toggle, exit: exitFullscreen, overlayStyle } = useFullscreen();
   // R24：查询表单态（null = 住院记录未就绪）与**已应用**的查询范围分离——
   // 改表单不触发请求，点「查询」/初始默认态/重置才更新 appliedRange（裁定 Q15/Q16）
   const admissions = useAdmissions(id);
-  const [queryForm, setQueryForm] = useState<ReportQueryFormState | null>(null);
+  const [queryForm, setQueryForm] = useState<GlucoseQueryFormState | null>(null);
   const [appliedRange, setAppliedRange] = useState<GlucoseReportRange>({});
   const { data, loading, error, reload } = useGlucoseReport(
     id,
@@ -424,10 +329,10 @@ export default function GlucoseReportTab() {
   // state 需手动重置。表单置回 null（未就绪）→ 报表请求挂起，等新患者的住院记录到达
   useEffect(() => {
     setPage(1);
-    setFullscreen(false);
+    exitFullscreen();
     setQueryForm(null);
     setAppliedRange({});
-  }, [id]);
+  }, [id, exitFullscreen]);
 
   // R24：住院记录就绪 → 初始化默认表单态并自动按默认条件查询（裁定 Q15）；
   // 请求失败 → 退化为「全部 + 无限制」可用态（规格 §6，不阻塞报表本体）
@@ -438,7 +343,7 @@ export default function GlucoseReportTab() {
     if (admissions.data) {
       const defaults = deriveQueryDefaults(admissions.data);
       setQueryForm(defaults);
-      setAppliedRange(toReportRange(defaults));
+      setAppliedRange(toQueryRange(defaults));
     } else if (admissions.error) {
       setQueryForm({ ...FALLBACK_FORM_STATE });
       setAppliedRange({});
@@ -454,7 +359,7 @@ export default function GlucoseReportTab() {
       void message.warning('开始时间不能晚于结束时间');
       return;
     }
-    setAppliedRange(toReportRange(queryForm));
+    setAppliedRange(toQueryRange(queryForm));
     setPage(1);
   };
 
@@ -465,23 +370,9 @@ export default function GlucoseReportTab() {
     }
     const defaults = deriveQueryDefaults(admissions.data);
     setQueryForm(defaults);
-    setAppliedRange(toReportRange(defaults));
+    setAppliedRange(toQueryRange(defaults));
     setPage(1);
   };
-
-  // R23：ESC 退出全屏（通用全屏交互；仅全屏态挂监听，退出即卸载）
-  useEffect(() => {
-    if (!fullscreen) {
-      return;
-    }
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setFullscreen(false);
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [fullscreen]);
 
   // R22 规则 4：勾选变化实时过滤已下发数据，不重新请求（裁定 Q5）
   const rows = useMemo(
@@ -520,56 +411,50 @@ export default function GlucoseReportTab() {
     return [dateColumn, ...slotColumns];
   }, [data?.columns, resultTypes, reportDisplay, handleEntryClick, handleEmptyClick, canAdd]);
 
+  // 统计项：把报表 stats 适配成公共统计栏的 items（R20 口径，见 buildReportStatsItems）。
+  // useMemo 保持引用稳定——data/resultTypes 未变时不产生新数组，避免工具栏无谓重渲染
+  const statsItems = useMemo(
+    () => (data ? buildReportStatsItems(data.stats, resultTypes) : undefined),
+    [data, resultTypes],
+  );
+
   // R21（2026-11-19 裁定）：根节点撑满内容区高度，统计栏固定、表格占据剩余空间、
   // 只在表格 body 内滚动。overflow auto 仅作极矮视口兜底（表格区压到最小高度后
   // 整页在根节点内滚动），正常视口下内容恰好占满、不出现滚动条。
-  // R23 全屏态：fixed 覆盖整个视口（不用浏览器 Fullscreen API——antd 弹层挂 body，
-  // 该模式下会不可见，且纯 CSS 方案无兼容性问题）；flex 链与 .gc-report-table 不变，
-  // 表格随之撑满视口、body 内滚、分页钉底。zIndex 取 token 不写魔法数字，
-  // 低于 message（zIndexPopupBase 之上还有弹层增量），全屏中操作反馈不被遮挡
+  // R23 全屏态：叠加 useFullscreen 产出的 fixed 覆盖样式（不用浏览器 Fullscreen API——
+  // antd 弹层挂 body，该模式下会不可见，且纯 CSS 方案无兼容性问题）；flex 链与
+  // .gc-report-table 不变，表格随之撑满视口、body 内滚、分页钉底
   const rootStyle: CSSProperties = {
     height: '100%',
     display: 'flex',
     flexDirection: 'column',
     gap: token.marginXS,
     overflow: 'auto',
-    ...(fullscreen
-      ? {
-          position: 'fixed',
-          inset: 0,
-          zIndex: token.zIndexPopupBase,
-          background: token.colorBgContainer,
-          padding: token.padding,
-        }
-      : null),
+    ...overlayStyle,
   };
 
   return (
     <div style={rootStyle}>
-      {/* R20 预留位兑现（R24，裁定 Q18a）：统计栏居左 + 查询表单 + 全屏按钮最右
-          （marginLeft auto）；窄屏接受换行（flexWrap）。全屏态该行随统计栏固定在
-          视口顶部、表单照常可用（R23 的 fixed 覆盖层包住整棵子树，无需额外处理） */}
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          gap: token.margin,
-          flexWrap: 'wrap',
-          flexShrink: 0,
-        }}
-      >
-        {data ? <ReportStatsBar stats={data.stats} resultTypes={resultTypes} /> : null}
-        <ReportQueryForm
-          data={admissions.data}
-          loading={admissions.loading}
-          state={queryForm}
-          onChange={setQueryForm}
-          onSearch={handleSearch}
-          onReset={handleReset}
-        />
-        <FullscreenToggle fullscreen={fullscreen} onToggle={setFullscreen} />
-      </div>
+      {/* R20 预留位兑现（R24，裁定 Q18a）：统计栏居左 + 查询表单 + 全屏按钮最右。
+          这一行的布局（space-between / flexWrap / flexShrink:0）与打印隐藏口径由公共
+          GlucoseToolbar 承接，记录页与趋势图复用同一行；全屏态它随覆盖层固定在视口
+          顶部、表单照常可用。统计项经 buildReportStatsItems 把报表 stats 适配成公共
+          items（R20 口径不变），data 未到时不传 → 统计区不渲染、按钮仍靠右 */}
+      <GlucoseToolbar
+        stats={statsItems}
+        form={
+          <GlucoseQueryForm
+            data={admissions.data}
+            loading={admissions.loading}
+            state={queryForm}
+            onChange={setQueryForm}
+            onSearch={handleSearch}
+            onReset={handleReset}
+          />
+        }
+        fullscreen={fullscreen}
+        onToggleFullscreen={toggle}
+      />
 
       {error ? (
         <Alert

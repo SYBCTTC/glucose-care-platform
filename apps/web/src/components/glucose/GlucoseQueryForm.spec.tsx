@@ -1,6 +1,8 @@
 /**
- * R24 报表查询表单测试：联动状态机纯函数 + label 构造 + 受控组件渲染。
+ * 血糖数据**公共查询表单**测试：联动状态机纯函数 + label 构造 + 受控组件渲染。
  *
+ * 来源 R24 报表查询表单，2026-11-20 提升为报告/记录/趋势图三页共用（联动口径不变，
+ * 仅改名 Report* → Glucose* 并新增 `extra` 扩展插槽）。
  * 纯函数是 18 项裁定中联动规则（Q5~Q13/Q15/Q17）的验收主体；
  * 组件渲染沿用 `renderToStaticMarkup` 口径（无 jsdom，交互靠手工 e2e）。
  */
@@ -12,7 +14,7 @@ import type { AdmissionsResponse } from '@gc/shared';
 import {
   ADMISSION_ALL,
   FALLBACK_FORM_STATE,
-  ReportQueryForm,
+  GlucoseQueryForm,
   buildAdmissionLabel,
   buildAdmissionOptions,
   buildDepartmentLabel,
@@ -22,9 +24,9 @@ import {
   deriveStaySelection,
   deriveTimeBounds,
   isRangeInverted,
-  toReportRange,
-} from './ReportQueryForm';
-import type { ReportQueryFormState } from './ReportQueryForm';
+  toQueryRange,
+} from './GlucoseQueryForm';
+import type { GlucoseQueryFormState } from './GlucoseQueryForm';
 
 /**
  * 夹具：住院患者、两次住院——
@@ -132,7 +134,7 @@ describe('deriveAdmissionSelection — 切换住院记录', () => {
 /* -------------------- 科室记录切换联动（裁定 Q10/Q11 + §11-1） -------------------- */
 
 describe('deriveStaySelection — 切换/清空科室记录', () => {
-  const base: ReportQueryFormState = {
+  const base: GlucoseQueryFormState = {
     admissionId: 'a-2',
     departmentStayId: 'ad-2b',
     startTime: '2026-11-10 08:00:00',
@@ -272,10 +274,10 @@ describe('buildAdmissionOptions / buildDepartmentOptions', () => {
 
 /* -------------------- 查询范围与校验（裁定 Q13） -------------------- */
 
-describe('toReportRange / isRangeInverted', () => {
+describe('toQueryRange / isRangeInverted', () => {
   it('null → undefined（该侧不限）', () => {
     expect(
-      toReportRange({
+      toQueryRange({
         admissionId: ADMISSION_ALL,
         departmentStayId: null,
         startTime: '2026-11-01 09:00:00',
@@ -314,10 +316,10 @@ describe('toReportRange / isRangeInverted', () => {
 
 /* -------------------- 受控组件渲染 -------------------- */
 
-describe('ReportQueryForm — 渲染', () => {
+describe('GlucoseQueryForm — 渲染', () => {
   it('数据未就绪：控件禁用、打印隐藏', () => {
     const html = renderToStaticMarkup(
-      <ReportQueryForm
+      <GlucoseQueryForm
         data={null}
         loading
         state={null}
@@ -336,7 +338,7 @@ describe('ReportQueryForm — 渲染', () => {
 
   it('就绪态：渲染选中 label 与时间值', () => {
     const html = renderToStaticMarkup(
-      <ReportQueryForm
+      <GlucoseQueryForm
         data={fixture()}
         loading={false}
         state={deriveQueryDefaults(fixture())}

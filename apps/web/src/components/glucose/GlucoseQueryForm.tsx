@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Button, DatePicker, Select, theme } from 'antd';
 import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
@@ -9,11 +10,18 @@ import type {
 } from '@gc/shared';
 
 /**
- * R24 报表查询表单（2026-11-20 需求人 18 项裁定，规格 docs/specs/glucose-report-query.md）。
+ * 血糖数据三页共用的**查询表单**（公共四项 + `extra` 扩展插槽）。
+ *
+ * 来源：R24 报表查询表单（2026-11-20 需求人 18 项裁定，规格 docs/specs/glucose-report-query.md），
+ * 2026-11-20 提升为公共模块——血糖记录 / 趋势图两页需要同一套「住院记录 → 科室记录 →
+ * 时间范围」联动，三页各写一遍必然漂移（尤其时间上下限的三层回退与边界日时分秒禁用）。
  *
  * 联动状态机（§4）：住院记录 → 决定科室下拉选项集；科室记录 → 决定时间默认值与上下限；
  * 「查询」才把表单态应用为请求范围（改表单不触发请求）。
- * 本文件 = 纯函数（联动推导，导出供单测）+ 受控展示组件（状态由 GlucoseReportTab 持有）。
+ * 本文件 = 纯函数（联动推导，导出供单测）+ 受控展示组件（状态由调用页持有）。
+ *
+ * **不取数**：住院记录树由调用页用 `useAdmissions` 拉取后传入，本组件不发请求——
+ * 公共组件一旦自己取数，三页就会各发一次相同请求，且无法在占位页保持「不发请求」约定。
  */
 
 /** 秒粒度本地时间格式（与服务端 dateTimeStringSchema 契约一致） */
@@ -22,7 +30,7 @@ export const QUERY_TIME_FORMAT = 'YYYY-MM-DD HH:mm:ss';
 export const ADMISSION_ALL = 'ALL';
 
 /** 表单状态：admissionId 'ALL' = 全部；departmentStayId null = 已清空（裁定 Q11） */
-export interface ReportQueryFormState {
+export interface GlucoseQueryFormState {
   admissionId: string;
   departmentStayId: string | null;
   /** YYYY-MM-DD HH:mm:ss；null = 不限（裁定 Q13 允许单独清空） */
@@ -30,8 +38,14 @@ export interface ReportQueryFormState {
   endTime: string | null;
 }
 
+/** 查询范围（`toQueryRange` 的产出）：字段缺省 = 该侧不限 */
+export interface GlucoseQueryRange {
+  startTime?: string;
+  endTime?: string;
+}
+
 /** 「全部 + 无限制」态：出院患者初始态（裁定 Q15），也是 admissions 请求失败的退化态 */
-export const FALLBACK_FORM_STATE: ReportQueryFormState = {
+export const FALLBACK_FORM_STATE: GlucoseQueryFormState = {
   admissionId: ADMISSION_ALL,
   departmentStayId: null,
   startTime: null,
@@ -70,7 +84,7 @@ function defaultStayOf(admission: AdmissionOption): AdmissionDepartmentOption | 
  *  - 在院 → 「本次住院」+ 当前所在科室 + 该科室起止（在科则结束为空）；
  *  - 出院 / 无本次住院记录（防御）→ 「全部」+ 无限制。
  */
-export function deriveQueryDefaults(data: AdmissionsResponse): ReportQueryFormState {
+export function deriveQueryDefaults(data: AdmissionsResponse): GlucoseQueryFormState {
   if (data.status === PATIENT_STATUS.INPATIENT) {
     const current = data.admissions.find((item) => item.isCurrent);
     if (current) {
@@ -94,7 +108,7 @@ export function deriveQueryDefaults(data: AdmissionsResponse): ReportQueryFormSt
 export function deriveAdmissionSelection(
   data: AdmissionsResponse,
   admissionId: string,
-): ReportQueryFormState {
+): GlucoseQueryFormState {
   if (admissionId === ADMISSION_ALL) {
     return { ...FALLBACK_FORM_STATE };
   }
@@ -118,9 +132,9 @@ export function deriveAdmissionSelection(
  */
 export function deriveStaySelection(
   data: AdmissionsResponse,
-  state: ReportQueryFormState,
+  state: GlucoseQueryFormState,
   stayId: string | null,
-): ReportQueryFormState {
+): GlucoseQueryFormState {
   if (stayId === null) {
     if (state.admissionId === ADMISSION_ALL) {
       return { ...state, departmentStayId: null, startTime: null, endTime: null };
@@ -148,7 +162,7 @@ export function deriveStaySelection(
  */
 export function deriveTimeBounds(
   data: AdmissionsResponse,
-  state: ReportQueryFormState,
+  state: GlucoseQueryFormState,
 ): { min: Dayjs | null; max: Dayjs | null } {
   const endOfToday = () => dayjs().endOf('day');
   const toBounds = (start: string | null, end: string | null) => ({
@@ -232,11 +246,8 @@ export function buildDepartmentOptions(
   );
 }
 
-/** 表单态 → 报表请求范围（null → undefined = 该侧不限） */
-export function toReportRange(state: ReportQueryFormState): {
-  startTime?: string;
-  endTime?: string;
-} {
+/** 表单态 → 查询范围（null → undefined = 该侧不限）。三页共用同一套时间参数契约 */
+export function toQueryRange(state: GlucoseQueryFormState): GlucoseQueryRange {
   return {
     startTime: state.startTime ?? undefined,
     endTime: state.endTime ?? undefined,
@@ -244,7 +255,7 @@ export function toReportRange(state: ReportQueryFormState): {
 }
 
 /** 开始 > 结束（裁定 Q13：阻止查询）。定宽格式字典序即时间序，直接字符串比较 */
-export function isRangeInverted(state: ReportQueryFormState): boolean {
+export function isRangeInverted(state: GlucoseQueryFormState): boolean {
   return Boolean(state.startTime && state.endTime && state.startTime > state.endTime);
 }
 
@@ -283,29 +294,39 @@ const ADMISSION_SELECT_WIDTH = 250;
 const DEPARTMENT_SELECT_WIDTH = 250;
 const TIME_PICKER_WIDTH = 195;
 
-export interface ReportQueryFormProps {
+export interface GlucoseQueryFormProps {
   /** 住院记录树；null = 尚未就绪（表单禁用） */
   data: AdmissionsResponse | null;
   loading: boolean;
   /** 当前表单态；null = 尚未初始化 */
-  state: ReportQueryFormState | null;
-  onChange: (next: ReportQueryFormState) => void;
+  state: GlucoseQueryFormState | null;
+  onChange: (next: GlucoseQueryFormState) => void;
   onSearch: () => void;
   onReset: () => void;
+  /**
+   * 各页特有的追加条件，渲染在时间控件之后、「查询/重置」按钮之前。
+   *
+   * 为什么用插槽而不是把字段做进公共组件：三页的筛选维度不同（记录页可能要
+   * 时段/结果类型/录入人/含作废，趋势图可能要粒度/指标），全塞进公共组件会让
+   * props 膨胀成配置地狱，且任一页改动都要三页回归。插槽让公共部分稳定、
+   * 特有部分各页自理；按钮恒在最右，视觉顺序一致。
+   */
+  extra?: ReactNode;
 }
 
 /**
- * 查询表单（统计栏行内，裁定 Q18a：接受换行；打印隐藏，同 FullscreenToggle 口径）。
- * 受控组件：状态与联动推导都在父级（GlucoseReportTab），本组件只做渲染与事件转发。
+ * 查询表单（工具栏行内，裁定 Q18a：接受换行；打印隐藏，同 `FullscreenToggle` 口径）。
+ * 受控组件：状态与联动推导都在调用页，本组件只做渲染与事件转发。
  */
-export function ReportQueryForm({
+export function GlucoseQueryForm({
   data,
   loading,
   state,
   onChange,
   onSearch,
   onReset,
-}: ReportQueryFormProps) {
+  extra,
+}: GlucoseQueryFormProps) {
   const { token } = theme.useToken();
   const disabled = data === null || state === null;
 
@@ -410,6 +431,7 @@ export function ReportQueryForm({
         }}
         {...timePickerProps('max')}
       />
+      {extra}
       <Button type="primary" disabled={disabled} onClick={onSearch}>
         查询
       </Button>
