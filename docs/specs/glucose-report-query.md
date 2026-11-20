@@ -288,14 +288,22 @@ export const glucoseReportQuerySchema = z.object({
 ## 6. 前端交互
 
 - **位置**（Q18a）：统计栏行（R20 行）——统计（左）+ 表单 + 全屏按钮（最右，`marginLeft:auto` 保持）；
-  该行已有 `flexWrap`，窄屏接受换行；全屏态（R23）该行随统计栏固定视口顶部、表单照常可用
+  该行已有 `flexWrap`，窄屏接受换行；全屏态（R23）该行随统计栏固定视口顶部、表单照常可用。
+  **R26 起**这一行由公共 `components/glucose/GlucoseToolbar` 承接（布局与打印隐藏口径三页共用）
 - **控件**：`Select`（住院记录）、`Select allowClear`（科室记录）、`DatePicker showTime` ×2、
-  `Button type="primary"`（查询）、`Button`（重置）；图标如需仅 `@ant-design/icons`
+  `Button type="primary"`（查询）、`Button`（重置）；图标如需仅 `@ant-design/icons`。
+  **R26 起**另有 `extra?: ReactNode` 插槽（渲染在时间控件后、按钮前），供血糖记录页追加
+  时段/结果类型/录入人/含作废、趋势图页追加粒度/指标——公共四项保持稳定，特有条件各页自理
 - **打印**：表单控件与按钮加 `gc-no-print`（交互控件对纸质输出无意义，同 `FullscreenToggle` 口径）
-- **状态归属**：表单状态与联动推导在报表子页内（新组件 `ReportQueryForm` + 纯函数
-  `deriveQueryDefaults/deriveTimeBounds/buildAdmissionLabel/buildDepartmentLabel`，
-  导出供单测——同 `filterReportRows` 模式）；`admissions` 数据走**手写 hook**
-  `useAdmissions`（实施修正：全仓零 TanStack Query 使用，与 `useGlucoseReport` 同风格，见 §12-2）
+- **状态归属**：表单状态与联动推导在**调用页**（受控组件），组件与纯函数
+  `deriveQueryDefaults/deriveTimeBounds/buildAdmissionLabel/buildDepartmentLabel` 导出供单测
+  （同 `filterReportRows` 模式）。**R26 起**组件位于公共 `components/glucose/GlucoseQueryForm.tsx`
+  （原 `patient-detail/ReportQueryForm.tsx` 改名迁移：`ReportQueryFormState`→`GlucoseQueryFormState`、
+  `toReportRange`→`toQueryRange`；三层联动状态机与本文 18 项裁定口径**一字未改**）；
+  `admissions` 数据走**手写 hook** `useAdmissions`（实施修正：全仓零 TanStack Query 使用，
+  与 `useGlucoseReport` 同风格，见 §12-2）——**留在 `patient-detail/` 不搬**：公共表单只收
+  `data: AdmissionsResponse | null`、不自己取数，既避免三页各发一次相同请求，
+  也不产生 `components/` → `pages/` 的反向依赖
 - **加载/异常**：admissions 请求中 → 两个 Select `loading`；请求失败 → 全局拦截器 toast，
   表单退化为「全部 + 无限制」可用态（不阻塞报表本体）；字段级错误（10001 details）映射表单项
 - **可访问性**：大字号档、暗色模式、键盘可达（antd 默认能力，不自造）
@@ -318,18 +326,22 @@ export const glucoseReportQuerySchema = z.object({
       `admit()` → `seq=max+1` 新住院 + 首条停留、防御性关闭用原出院时间（为空则以办理时刻近似）、
       无历史记录兜底 seq=1；并发幂等由 where 带状态条件 + 事务回滚保证（既有模式）
 - [x] **shared**：query schema 复用 `dateTimeStringSchema`（既有格式校验，71 用例全绿）
-- [x] **web 单测**（21 用例）：`deriveQueryDefaults`（在院/出院/脏数据三态）、
+- [x] **web 单测**（21 用例；R26 起随组件迁至 `components/glucose/GlucoseQueryForm.spec.tsx`，用例一字未删）：
+      `deriveQueryDefaults`（在院/出院/脏数据三态）、
       `deriveAdmissionSelection`/`deriveStaySelection`（Q9/Q10/Q11/§11-1）、`deriveTimeBounds`
       （科室 > 住院 > 无限制三层回退，进行中上限=今天）、`buildAdmissionLabel/buildDepartmentLabel`
       （Q5/Q7/Q8 格式、空日期省略）、选项集构造（降序保持、全部末项、平铺）、
-      `toReportRange/isRangeInverted`（Q13）、组件渲染两态
+      `toQueryRange/isRangeInverted`（Q13）、组件渲染两态
 - [x] **迁移回填演练**：dev 库 1000 患者 → 1000 住院 + 1000 停留；700 在院 = 700 进行中停留；
       部分唯一索引与枚举新值落库核验通过
 - [x] **接口 e2e（实测）**：`dr.wang` 查林*——admissions 树（2 次住院、转科 2 段停留、isCurrent、
       本地时刻格式）✓；秒粒度过滤（范围 4 天 total vs 全量 18 天，stats 25 vs 102）✓；
       start>end → 10001 + details ✓；`ADMISSION_QUERY`/`GLUCOSE_REPORT_VIEW` 审计落库 ✓
 - [ ] **手工 e2e（浏览器，待需求人验收）**：表单默认态、下拉联动、时间上下限、查询/重置、
-      全屏态表单可用、打印预览无表单
+      全屏态表单可用、打印预览无表单。
+      **R26 公共化后需一并复验**（组件已迁移改名、渲染路径改变，但联动与样式逻辑未变）：
+      统计栏四项文案与 20px 间距、`|` 位置、极值着色；全屏进入/退出/ESC/换患者重置；
+      工具栏窄屏换行与打印预览隐藏
 
 ## 9. 非功能要求
 

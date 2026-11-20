@@ -49,6 +49,8 @@
 | R22 | **（2026-11-19 六次调整）展示项勾选 + 弃用时段合并展示**：①子 Tabs 同一水平线紧跟四个 Checkbox——**常规血糖 / 强化血糖 / 检测时间 / 操作人**，仅「血糖报告」子 Tab 渲染（切主 Tab 或其他子 Tab 即隐藏），默认全勾选；②常规与强化**至少保留一项**：取消其中一项时若另一项已未勾选 → 阻止 + `message.warning('常规血糖与强化血糖至少需勾选一项')`（裁定 Q7），双向都拦；③勾选变化**纯前端实时过滤**已下发数据，不重新请求（裁定 Q5：统计栏与分页 `total` 不受影响）——常规/强化控制**记录显隐不控列显隐**（裁定 Q3），检测时间控制格内 `(HH:mm)`、操作人控制第 2 行；④**特殊时段来源记录恒展示且时间恒展示**（规则 6），记录者仍受「操作人」控制；⑤**弃用时段不再成列**（推翻 R5 的「停用时段仍下发列」口径，裁定 Q2）：其历史记录按检测时间合并进**启用的**普通列，展示方式与强化一致——`值(时间)(弃用时段名)`，后缀是**弃用时段自己的名称**（裁定 Q1）；entry 契约随之变更：`intensiveName` 泛化为 `sourceSlotName`、新增 `sourceType`（原时段类型 0/1/4），弃用记录按**原时段类型**跟随勾选（裁定 Q4），归组失败兜底记录按特殊对待（恒展示）；⑥强化归组宿主只认**启用**普通时段（R5 的 `ignoreEnabled:true` 不再使用）；⑦记录全被过滤的日期行**保留为空行**（裁定 Q6：`total` 由服务端按日期算，前端抽行会页内不一致）；⑧勾选状态详情页会话内记忆，换患者/重进详情页重置全勾选（裁定 Q8），不持久化；⑨演示数据（裁定 Q9）：林*（`de6f6beb`）经 API 新增随机 ×3（含 1 条 High 无值型）+ 复测 ×2，随后 dev 库弃用 `RETEST`——复测记录即合并进早餐后/晚餐后列带 `(复测)` 后缀 |
 | R23 | **（2026-11-20 七次调整）表格全屏切换**：需求人反馈表格可视范围太小，要求加「全屏/退出」按钮让表格撑满、看到更多条目。实现：①统计栏行右侧挂 `FullscreenToggle` 按钮（图标 + 文字双通道，`@ant-design/icons` 的 `FullscreenOutlined`/`FullscreenExitOutlined`，`gc-no-print` 打印隐藏；`marginLeft:auto` 保证统计栏未加载时也靠右）；②全屏态 = 报表根节点 `position:fixed; inset:0; zIndex:token.zIndexPopupBase; background:token.colorBgContainer; padding:token.padding`——**不用浏览器 Fullscreen API**（antd 弹层挂 body 在该模式下不可见、且有兼容性问题；纯 CSS 覆盖层零风险、明暗主题天然兼容）；③R21 的 flex 链与 `.gc-report-table` 不变：全屏下表格撑满视口、仍 body 内滚、分页钉底、统计栏与勾选框行固定在顶部；④**ESC 退出**（仅全屏态挂 `keydown` 监听）；⑤全屏是纯视图状态：不持久化、不影响请求/分页/勾选，换患者时与 `page` 一起重置 |
 | R24 | **（2026-11-20 八次调整）表单查询（住院记录 × 科室记录 × 时间范围）——✅ 已实施**：统计栏行（R20 预留位）挂查询表单：住院记录下拉（本次住院/第N次区间/全部，Q5/Q6）、科室记录下拉（转科轨迹，allowClear，Q8/Q9/Q11）、开始/结束时间（秒粒度，上下限随科室记录联动，Q12/Q13）、查询/重置（Q15/Q17）；报表契约 `startDate/endDate` 升级为秒粒度 `startTime/endTime`（Q16，破坏性）；范围外记录不展示不统计（Q14，含窗口查询叠加范围条件）；布局接受换行、全屏态表单可用（Q18）。**新表 `Admission` + `AdmissionDepartment`**（Q2/Q3，迁移 `20261120000000_add_admission_records` 含存量回填 + 部分唯一索引 SQL）与新接口 `GET /patients/:id/admissions`（Q4，`ADMISSION_QUERY` 审计）；建档/办理住院双写；转科功能未做、只落表结构。同轮修复既有缺陷：`GLUCOSE_REPORT_VIEW` 枚举漏登记致报表审计从未落表。完整规格（18 项裁定全录、联动状态机、实施记录）见 **`docs/specs/glucose-report-query.md`** |
+| R25 | **（2026-11-20 九次调整）报表单元格直接添加 / 编辑 / 作废血糖——✅ 已实施**：点击格内已有记录弹 **review 弹框**（只读）可转编辑模式（回填）/ 作废；点击**空白格**复用添加弹框并预填「该行日期 + 当前时分秒、该列时段」（裁定 Q15：历史日期同样拼接当前时刻）。删除按**软删除（作废）**实现（裁定 Q1a）——库内保留行 + `voidedAt`/`voidedById` 留痕 + 部分唯一索引 `glucose_record_active_unique`（`WHERE voidedAt IS NULL`），报表/统计/最新血糖不再展示；新权限点 `glucose:update`（医生/护士/护士长/系管，同 create 四角色）与 `glucose:delete`（**仅**护士长 + 系统管理员）；审计 `changedFields` **只记字段名不记值**（裁定 Q5）；患者无任何血糖 → 维持「暂无数据」空态、空白格不可点（裁定 Q14，走壳上按钮）。新错误码 `41001 GLUCOSE_RECORD_NOT_FOUND`(404/toast-refresh)、`41003 GLUCOSE_MEASURED_AT_DUPLICATE`(409/field)。完整规格（16 项裁定全录）见 **`docs/specs/glucose-report-edit.md`** |
+| R26 | **（2026-11-20 重构）统计栏 / 查询表单 / 全屏三模块抽取为血糖数据三页共用公共模块——✅ 已实施**：血糖记录与趋势图两页（现仍 `DetailPlaceholder`，待「血糖查询/图表」立项）需要同一套工具栏，故把报表页三个模块提升到 `apps/web/src/components/glucose/`。①**`GlucoseStatsBar`**：统计栏改为**字段可配置** `items: {label,value,color?,suffix?,numeric?,divider?}[]`，不再绑定 `GlucoseReportStats`；报表口径由**页面侧**适配函数 `buildReportStatsItems` 产出（公共模块不认识任何业务类型），趋势图将来可传 TIR/达标率/日均值而无需改公共组件。②**`GlucoseQueryForm`**：原 `ReportQueryForm` 改名迁移（`ReportQueryFormState`→`GlucoseQueryFormState`、`toReportRange`→`toQueryRange`），R24 的三层联动状态机与 18 项裁定口径**一字未改**；新增 `extra?: ReactNode` 插槽（渲染在时间控件后、按钮前）供各页追加特有条件——记录页的时段/结果类型/录入人/含作废、趋势图的粒度/指标。③**`useFullscreen` + `GlucoseToolbar`**：R23 分散在**四处**的全屏逻辑（按钮 / 根节点 `fixed` 覆盖样式 / ESC 监听 / 换患者重置）收拢进 hook，返回 `{fullscreen, toggle, exit, overlayStyle}` 并暴露 `onResize`（rAF 后触发，供趋势图 ECharts 在容器尺寸突变后 `resize`）；工具栏行承接 R20 预留位与 R24 裁定 Q18a 的 `space-between`/`flexWrap`/`flexShrink:0`/打印隐藏布局。**不纳入**：R22 展示勾选（报表专属视图过滤，位置在子 Tabs 行尾而非工具栏）、分页（三页语义不可统一：报表按「天」、记录按「条」、趋势图不分页）。**纯 UI 骨架**：公共模块不取数（表单只收 `data: AdmissionsResponse\|null`，住院记录树仍由页面侧 `useAdmissions` 拉取），数据与回调全由调用方注入，故 record/trend 接口立项后**零改动接入**；代价是本轮无法端到端验证，靠报表页回归 + 单测保证。报表页视觉与行为**零变化**（20px 间距 ×4、`\|` 位置、`gc-num`、字典着色、全屏/ESC/打印/换患者重置均由迁移后测试钉住） |
 
 > ⚠️ **R3 与原始需求的差异**（需求人 2026-11-19 主动变更，按新口径实施）：
 > 原需求 4a 为「强化时段名紧跟血糖值」，现改为「**紧跟检测时间之后**」；括号由中文全角「（）」改为**英文半角** `()`。
@@ -396,10 +398,13 @@ export function useDetailTabNavigate() {
     - 判定「是否数值型」**以 `valueMmolL === null` 为准**，不在前端复制 `VALUE_RESULT_CODES` 码集
       （避免与 `LastGlucose.tsx:6` 形成第二份实现，`shared-package.md` 硬规则 3）
   - **第 2 行** `nurseName`，为 `null` 显示 `-`（D7）；整行受「操作人」勾选控制（对所有来源生效，规则 6「其他几个继续受控」）
-- **统计栏**（R20，替代原「单位：mmol/L」标注，D5 已推翻）：表格上方左对齐展示
+- **统计栏**（R20，替代原「单位：mmol/L」标注，D5 已推翻；R26 起为公共组件）：表格上方左对齐展示
   `总计：N 次 | 合格次数：M 次 最高血糖：X 最低血糖：Y`（段落间 20px，`|` 仅在前两段之间）；
   数据取响应 `stats`（服务端全量统计，翻页不变）；High/Low 的 label 与色、极值着色全部取 `DY-RESULT` 字典；
-  极值无数值时显示 `-`。外层为 `space-between` flex 行——**右侧预留给下一个任务的查询筛选表单**（本轮不实现）。
+  极值无数值时显示 `-`。**实现（R26）**：渲染层是公共 `components/glucose/GlucoseStatsBar`，只认
+  `items: {label,value,color?,suffix?,numeric?,divider?}[]`、不认识任何业务类型；报表口径由**页面侧**
+  适配函数 `buildReportStatsItems(stats, resultTypes)` 产出（趋势图将来可传 TIR/达标率而无需改公共组件）。
+  外层 `space-between` flex 行由公共 `GlucoseToolbar` 承接（R20 的右侧预留位已在 R24 兑现为查询表单）。
 - **分页**：Antd `Table` `pagination`，`pageSize=15`、`total` 取响应 `total`（**日期数**）、`onChange` 重新请求（服务端分页）。
 - **空态/加载态**：`rows` 为空 → `Table` 自带空态（不补空行）；请求中 → `Table loading`。
   有行但**无数据的单元格渲染为空**（R18，不放 `-` 占位）。
@@ -410,11 +415,15 @@ export function useDetailTabNavigate() {
   报表根节点 `height:100%` flex 列 → `Table` 挂 `.gc-report-table`（`global.css` flex 链穿透 antd
   内部 DOM，作用域限定本表格）+ `scroll.y='100%'`（仅触发固定表头/body 拆分）+
   `minHeight=REPORT_TABLE_MIN_HEIGHT`（极矮屏兜底，此时根节点内滚）。
-- **全屏切换**（R23）：统计栏行右侧「全屏/退出全屏」按钮（`FullscreenToggle`，图标 + 文字，
-  打印隐藏）。全屏态根节点 `position:fixed; inset:0`（zIndex/背景/内边距全取 token）覆盖视口，
+- **全屏切换**（R23；R26 起收拢为公共 hook）：统计栏行右侧「全屏/退出全屏」按钮（`FullscreenToggle`，
+  图标 + 文字，打印隐藏）。全屏态根节点 `position:fixed; inset:0`（zIndex/背景/内边距全取 token）覆盖视口，
   R21 的 flex 链不变——表格撑满视口、body 内滚、分页钉底；ESC 可退出；纯视图状态，
   换患者重置，不影响请求/分页/展示勾选。**不用浏览器 Fullscreen API**（antd 弹层挂 body
   会不可见 + 兼容性问题），纯 CSS 覆盖层明暗主题天然兼容。
+  **实现（R26）**：按钮在公共 `GlucoseToolbar` 内；原本分散四处的逻辑（按钮 / 根节点 `fixed` 覆盖样式 /
+  ESC 监听 / 换患者重置）收拢进公共 `useFullscreen()`，返回 `{fullscreen, toggle, exit, overlayStyle}`——
+  页面只需把 `overlayStyle` 展开进根节点样式、在换患者 effect 里调 `exit()`。hook 另暴露 `onResize`
+  （在 `requestAnimationFrame` 里触发，等布局完成）供趋势图 ECharts 在容器尺寸突变后 `resize`，报表页不传。
 - **样式口径**：颜色取 `theme.useToken()`、间距取 `layoutSize`、边框取 `token.lineWidth`，
   **无硬编码色值/魔法数字**（沿用 `patient-detail.md` §6.2）。
 - **打印**：报表属临床数据，本次**不加** `gc-no-print`（返回栏已有）。
@@ -464,16 +473,28 @@ export function useDetailTabNavigate() {
       （不传/`false` 保持原行为跳过停用项、`true` 时命中停用时段）—— 选项行为仍被钉住；
       R22 起报表归组**不再传 `true`**（宿主只认启用时段），当前无生产调用方使用 `true`
 - [x] **单测（shared）`date.spec.ts`**：`formatLocalDate` / `formatLocalTime`，并断言与 `formatDateOnly`（UTC）在跨日场景下**结果不同**
-- [x] **单测（web）`GlucoseReportTab`**（35 用例）：两行结构、来源时段名后缀、`valueMmolL=null` 显示字典标签、
+- [x] **单测（web）`GlucoseReportTab`**（27 用例；R26 前为 37，统计栏 8 例与全屏按钮 2 例随组件迁至公共模块 spec）：
+      两行结构、来源时段名后缀、`valueMmolL=null` 显示字典标签、
       同日同时段多条堆叠、`nurseName=null` 显示 `-`、半角括号无空格；空格子渲染为空（R18）；
-      值行 6px 间距两种形态（R19）；**统计栏 `ReportStatsBar`（R20，8 例）**：总计/合格文案、20px 间距 ×4、
-      极值 `toFixed(1)`+` mmol/L` 按自身 resultType 着色、`hasHigh`/`hasLow` 展示字典 label 及色、
-      无数值且无 High/Low → `-`、字典未加载回退 code 原文；
+      值行 6px 间距两种形态（R19）；
       **R22 展示勾选（10 例）**：`ReportCell` 取消「检测时间」常规记录隐藏 `(HH:mm)` 而特殊来源恒展示、
       取消「操作人」第 2 行隐藏（含特殊来源）、弃用特殊记录后缀显示弃用时段名；
       `filterReportRows` 全勾选返回原引用、取消常规/强化各自只滤对应来源（特殊恒保留）、
       弃用记录按原类型跟随（Q4）、整行滤空保留空行（Q6）、时间/操作人勾选不触发行级过滤；
-      **R23 `FullscreenToggle`（2 例）**：非全屏态文案「全屏」+ `gc-no-print`、全屏态文案「退出全屏」
+      **R25 `buildAddPrefill`（2 例）**：空白格预填「该行日期 + 当前时分秒」（裁定 Q15，历史日期同样拼接）
+- [x] **单测（web）R26 公共模块**（`apps/web/src/components/glucose/` + 页面侧适配，共 30 例）：
+      **`GlucoseStatsBar`（9 例）**——`label：value suffix` 全角冒号、20px 间距 ×4 且首项豁免、`divider` 竖线、
+      `numeric` 走 `gc-num`、着色只作用于值本身（suffix 不染色）、不传 color 不输出内联色、空数组不崩；
+      **`GlucoseToolbar`（7 例）**——三部分同行渲染、不传/空 `stats` 时统计区不渲染而全屏按钮仍
+      `margin-left:auto` 靠右、`space-between`/`flex-wrap`/`flex-shrink:0` 布局、全屏态文案透传、
+      `FullscreenToggle` 的「全屏」/「退出全屏」双态与 `gc-no-print`（原 R23 2 例迁入）；
+      **`useFullscreen`（4 例）**——`buildFullscreenOverlayStyle` 非全屏返回空对象、全屏 `fixed`+`inset:0`、
+      zIndex/背景/内边距全取 token、换 token 即跟随（暗色主题）；hook 本体（ESC 监听 / rAF 尺寸通知）
+      依赖浏览器环境，web 测试跑在 node 无 jsdom 无法触发，靠 typecheck + 手工 e2e（同 `detail-tabs` 口径）；
+      **`buildReportStatsItems`（10 例，页面侧适配）**——承接原 `ReportStatsBar` 8 例的 R20 口径且**一字未改**：
+      四项顺序与 label、总计/合格取服务端计数、合格带 `divider`、极值 `toFixed(1)`+` mmol/L` 按自身
+      resultType 着色、`hasHigh`/`hasLow` 展示字典 label 及色、无数值且无 High/Low → `-`、
+      字典未加载回退 code 原文且不着色
 - [x] **单测（web）`PatientDetail.spec.tsx`**（R22 补 3 例）：血糖报告子 Tab 渲染四个勾选且默认全勾选；
       其他血糖子 Tab / 主 Tab 非血糖数据 → 不渲染勾选（规则 2）
 - [x] **单测（web）`routes.spec.tsx`**：菜单结构仍绿（5 条子路由 + `*` 兜底均不进菜单）；可辨识联合改造后类型不破
