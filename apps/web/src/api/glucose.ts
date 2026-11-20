@@ -1,4 +1,10 @@
-import type { GlucoseCreateResult, GlucoseReportResponse } from '@gc/shared';
+import type {
+  GlucoseCreateResult,
+  GlucoseRecordDetail,
+  GlucoseReportResponse,
+  GlucoseUpdateResult,
+  GlucoseVoidResult,
+} from '@gc/shared';
 import { http } from './client';
 
 /**
@@ -56,4 +62,35 @@ export function fetchGlucoseReport(
   params: GlucoseReportParams = {},
 ): Promise<GlucoseReportResponse> {
   return http.get<GlucoseReportResponse>(`/patients/${patientId}/glucose/report`, params);
+}
+
+/**
+ * R25：单条血糖详情（review/编辑弹框回填）。
+ * 后端不单独审计（报表查询已留痕）；记录不存在/已作废 → 41001（拦截器 toast，调用方刷新报表）。
+ */
+export function fetchGlucoseDetail(
+  patientId: string,
+  recordId: string,
+): Promise<GlucoseRecordDetail> {
+  return http.get<GlucoseRecordDetail>(`/patients/${patientId}/glucose/${recordId}`);
+}
+
+/**
+ * R25：编辑血糖。请求体与添加完全一致（复用 createGlucoseSchema 口径）。
+ * 编辑撞检测时间 → 41003（字段级挂 measuredAt）；并发冲突 → 10008。
+ */
+export function updateGlucose(
+  patientId: string,
+  recordId: string,
+  payload: CreateGlucosePayload,
+): Promise<GlucoseUpdateResult> {
+  return http.patch<GlucoseUpdateResult>(`/patients/${patientId}/glucose/${recordId}`, payload);
+}
+
+/**
+ * R25：作废血糖（软删除）。HTTP DELETE，但后端只置 voidedAt/voidedById，不物理删行。
+ * 需要 glucose:delete 权限（仅护士长/系统管理员）；重复作废 → 10008。
+ */
+export function voidGlucose(patientId: string, recordId: string): Promise<GlucoseVoidResult> {
+  return http.delete<GlucoseVoidResult>(`/patients/${patientId}/glucose/${recordId}`);
 }
