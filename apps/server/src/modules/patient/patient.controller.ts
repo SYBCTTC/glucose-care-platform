@@ -85,6 +85,25 @@ export class PatientController {
     return ok(result);
   }
 
+  /**
+   * 住院记录树（R24）：报表查询表单「住院记录/科室记录」下拉的数据源。
+   * 一次性树形下发（裁定 Q4），前端联动纯本地。属敏感查询：逐条审计 ADMISSION_QUERY。
+   */
+  @Get(':id/admissions')
+  @RequirePermissions(PERMISSION.PATIENT_VIEW)
+  @RequireDataScope(RESOURCE.PATIENT)
+  @Audit('ADMISSION_QUERY', { targetType: 'PATIENT' })
+  async admissions(
+    @Req() request: Request,
+    @Param(new ZodValidationPipe(patientIdSchema)) params: { id: string },
+  ) {
+    const result = await this.patientService.admissions(
+      request.user as AuthenticatedUser,
+      params.id,
+    );
+    return ok(result);
+  }
+
   /** 患者信息编辑：出院校验与数据范围校验都在 service，controller 只做鉴权与转发 */
   @Patch(':id')
   @RequirePermissions(PERMISSION.PATIENT_UPDATE)

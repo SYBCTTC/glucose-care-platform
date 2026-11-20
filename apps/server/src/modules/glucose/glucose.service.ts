@@ -178,7 +178,7 @@ export class GlucoseService {
   ): Promise<GlucoseReportResponse> {
     await this.assertPatientReadable(user, patientId);
 
-    const range = this.resolveLocalRange(query);
+    const range = this.resolveTimeRange(query);
 
     // 时段一次查全（含停用）：既生成表头又作为归组依据，保证两者同源、不与前端 store 漂移
     const slots = await this.timeSlots.list(user);
@@ -206,7 +206,7 @@ export class GlucoseService {
     const pageDates = dates.slice(offset, offset + query.pageSize);
 
     const { rows, count } = pageDates.length
-      ? await this.buildReportRows(patientId, pageDates, slots, columns)
+      ? await this.buildReportRows(patientId, pageDates, slots, columns, range.where)
       : { rows: [], count: 0 };
 
     // 统计栏（R20）：与分页无关，按查询范围全量计算
@@ -371,51 +371,38 @@ export class GlucoseService {
   }
 
   /**
-   * 把 `YYYY-MM-DD` 的**本地日期**入参换算成 `measuredAt`（timestamptz）的过滤区间。
+   * 把秒粒度入参换算成 `measuredAt`（timestamptz）的过滤区间。
    *
-   * ⚠️ 必须用 `parseLocalDate`（本地零点）而不是 `dateOnlyStringSchema`（UTC 零点）：
-   * 后者会让日界整体偏 8 小时，本地 00:00–08:00 的记录被划到范围之外。
-   * 终点取「次日本地零点」并配 `lt`（左闭右开），避免漏掉 23:59:59.999。
+   * R24（2026-11-20 裁定 Q16）：原天粒度 `startDate/endDate` 升级为秒粒度
+   * `startTime/endTime`——`dateTimeStringSchema` 已按**本地时区**转成 Date（与录入侧
+   * `measuredAt` 同口径，无 UTC 日界偏移问题），过滤为**闭区间** `[startTime, endTime]`
+   * （裁定 Q14：范围外记录不展示、不统计）。单侧不传则该侧不限。
+   * rangeFrom/rangeTo 回显本地时刻字符串，供审计 detail（字段名沿用既有白名单）。
    */
-  private resolveLocalRange(query: GlucoseReportQuery): {
+  private resolveTimeRange(query: GlucoseReportQuery): {
     where: Prisma.DateTimeFilter;
     from: string | null;
     to: string | null;
   } {
     const where: Prisma.DateTimeFilter = {};
-    let from: string | null = null;
-    let to: string | null = null;
 
-    if (query.startDate !== undefined) {
-      const start = parseLocalDate(query.startDate);
-      if (!start) {
-        throw this.invalidDateError('startDate');
-      }
-      where.gte = start;
-      from = formatLocalDate(start);
+    if (query.startTime !== undefined) {
+      where.gte = query.startTime;
+    }
+    if (query.endTime !== undefined) {
+      where.lte = query.endTime;
     }
 
-    if (query.endDate !== undefined) {
-      const end = parseLocalDate(query.endDate);
-      if (!end) {
-        throw this.invalidDateError('endDate');
-      }
-      where.lt = new Date(end.getFullYear(), end.getMonth(), end.getDate() + 1);
-      to = formatLocalDate(end);
-    }
-
-    if (where.gte && where.lt && where.gte >= where.lt) {
-      const details: FieldError[] = [{ field: 'endDate', message: '结束日期不能早于开始日期' }];
+    if (where.gte && where.lte && where.gte > where.lte) {
+      const details: FieldError[] = [{ field: 'endTime', message: '结束时间不能早于开始时间' }];
       throw new BusinessException(ERROR_CODES.VALIDATION_FAILED, undefined, details);
     }
 
-    return { where, from, to };
-  }
-
-  /** Zod 已校验格式，走到这里说明是 `2026-02-30` 这类不存在的日期 */
-  private invalidDateError(field: 'startDate' | 'endDate'): BusinessException {
-    const details: FieldError[] = [{ field, message: '日期不合法' }];
-    return new BusinessException(ERROR_CODES.VALIDATION_FAILED, undefined, details);
+    return {
+      where,
+      from: formatDateTime(query.startTime),
+      to: formatDateTime(query.endTime),
+    };
   }
 
   /**
@@ -457,6 +444,7 @@ export class GlucoseService {
     pageDates: string[],
     slots: TimeSlotOption[],
     columns: GlucoseReportColumn[],
+    rangeWhere: Prisma.DateTimeFilter,
   ): Promise<{ rows: GlucoseReportRow[]; count: number }> {
     // pageDates 降序：末尾是最早日期，首个是最晚日期
     const earliest = parseLocalDate(pageDates[pageDates.length - 1]);
@@ -465,12 +453,18 @@ export class GlucoseService {
       return { rows: [], count: 0 };
     }
 
+    // R24：秒粒度过滤后，窗口（本页日期跨度）内可能存在范围外记录（如范围从当日
+    // 09:00 起，则 00:00–08:59 的记录仍在窗口内），必须叠加用户范围条件，
+    // 否则范围外记录会落进单元格（裁定 Q14：不展示、不统计）。
+    // 天粒度时代窗口边界与日期边界重合、无需叠加的假设已随契约升级失效。
+    const windowStart = rangeWhere.gte && rangeWhere.gte > earliest ? rangeWhere.gte : earliest;
     const records = await this.prisma.glucoseRecord.findMany({
       where: {
         patientId,
         measuredAt: {
-          gte: earliest,
+          gte: windowStart,
           lt: new Date(latest.getFullYear(), latest.getMonth(), latest.getDate() + 1),
+          ...(rangeWhere.lte ? { lte: rangeWhere.lte } : {}),
         },
       },
       select: {

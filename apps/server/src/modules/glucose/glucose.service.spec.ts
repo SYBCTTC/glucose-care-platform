@@ -766,36 +766,59 @@ describe('GlucoseService.report — 血糖报告', () => {
     const withRange = await service.report(
       deptUser,
       'p-1',
-      query({ startDate: '2026-11-01', endDate: '2026-11-30' }),
+      query({
+        startTime: new Date(2026, 10, 1, 8, 30, 0),
+        endTime: new Date(2026, 10, 30, 20, 0, 0),
+      }),
     );
-    expect(withRange.rangeFrom).toBe('2026-11-01');
-    expect(withRange.rangeTo).toBe('2026-11-30');
+    // R24：回显升级为秒粒度本地时刻（审计白名单字段名不变）
+    expect(withRange.rangeFrom).toBe('2026-11-01 08:30:00');
+    expect(withRange.rangeTo).toBe('2026-11-30 20:00:00');
   });
 
-  it('日期范围按**本地日界**过滤，而非 UTC 零点', async () => {
+  it('R24：startTime/endTime 秒粒度**闭区间**（gte/lte）透传过滤', async () => {
     const { service, prisma } = createReportService([]);
+    const startTime = new Date(2026, 10, 1, 8, 30, 15);
+    const endTime = new Date(2026, 10, 30, 20, 0, 0);
 
-    await service.report(deptUser, 'p-1', query({ startDate: '2026-11-01', endDate: '2026-11-30' }));
+    await service.report(deptUser, 'p-1', query({ startTime, endTime }));
 
     expect(prisma.glucoseRecord.findMany.mock.calls[0][0].where.measuredAt).toEqual({
-      gte: new Date(2026, 10, 1),
-      lt: new Date(2026, 11, 1),
+      gte: startTime,
+      lte: endTime,
     });
   });
 
-  it('不存在的日期（2026-02-30）→ 10001 + 字段级 details', async () => {
-    const { service } = createReportService([]);
+  it('R24：窗口查询叠加范围条件——窗口内、范围外的记录不会落进单元格', async () => {
+    // 范围从当日 09:00 起：窗口（本页日期跨度）起点是当日 00:00，
+    // 若不叠加范围条件，00:00–08:59 的记录会被查回并错放进单元格（裁定 Q14）
+    const { service, prisma } = createReportService([rec(19, 8, 0, 'BREAKFAST_POST')]);
+    const startTime = new Date(2026, 10, 19, 9, 0, 0);
+    const endTime = new Date(2026, 10, 19, 18, 0, 0);
 
-    await expect(
-      service.report(deptUser, 'p-1', query({ startDate: '2026-02-30' })),
-    ).rejects.toMatchObject({ code: ERROR_CODES.VALIDATION_FAILED });
+    await service.report(deptUser, 'p-1', query({ startTime, endTime }));
+
+    const calls = prisma.glucoseRecord.findMany.mock.calls;
+    // 第二次调用 = 窗口记录查询：gte 取范围起点（晚于窗口起点），lte 透传范围终点
+    expect(calls[1][0].where.measuredAt).toEqual({
+      gte: startTime,
+      lt: new Date(2026, 10, 20),
+      lte: endTime,
+    });
   });
 
-  it('结束日期早于开始日期 → 10001', async () => {
+  it('结束时间早于开始时间 → 10001', async () => {
     const { service } = createReportService([]);
 
     await expect(
-      service.report(deptUser, 'p-1', query({ startDate: '2026-11-30', endDate: '2026-11-01' })),
+      service.report(
+        deptUser,
+        'p-1',
+        query({
+          startTime: new Date(2026, 10, 30, 0, 0, 0),
+          endTime: new Date(2026, 10, 1, 0, 0, 0),
+        }),
+      ),
     ).rejects.toMatchObject({ code: ERROR_CODES.VALIDATION_FAILED });
   });
 
@@ -940,18 +963,16 @@ describe('GlucoseService.report — 统计栏（R20）', () => {
     expect(stats.hasLow).toBe(false);
   });
 
-  it('统计与分页无关：page=2 时 groupBy/极值仍用全范围 where（含日期范围条件）', async () => {
+  it('统计与分页无关：page=2 时 groupBy/极值仍用全范围 where（含秒粒度范围条件，R24）', async () => {
     const { service, prisma } = createReportService([]);
+    const startTime = new Date(2026, 10, 1, 8, 0, 0);
+    const endTime = new Date(2026, 10, 30, 20, 0, 0);
 
-    await service.report(
-      deptUser,
-      'p-1',
-      query({ page: 2, startDate: '2026-11-01', endDate: '2026-11-30' }),
-    );
+    await service.report(deptUser, 'p-1', query({ page: 2, startTime, endTime }));
 
     const expectedWhere = {
       patientId: 'p-1',
-      measuredAt: { gte: new Date(2026, 10, 1), lt: new Date(2026, 11, 1) },
+      measuredAt: { gte: startTime, lte: endTime },
     };
     expect(prisma.glucoseRecord.groupBy.mock.calls[0][0].where).toEqual(expectedWhere);
     expect(prisma.glucoseRecord.findFirst.mock.calls[0][0].where).toMatchObject(expectedWhere);

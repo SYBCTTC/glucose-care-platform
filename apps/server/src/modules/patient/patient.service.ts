@@ -11,6 +11,7 @@ import {
   ROLE_CODE,
 } from '@gc/shared';
 import type {
+  AdmissionsResponse,
   CreatePatientInput,
   DiabetesType,
   FieldError,
@@ -177,28 +178,52 @@ export class PatientService {
     }
 
     try {
-      const created = await this.prisma.patient.create({
-        data: {
-          patientNo: input.patientNo,
-          nameCipher: encryptDeterministic(input.name),
-          nameMasked: maskName(input.name),
-          idCardCipher: input.idCard ? encryptDeterministic(input.idCard) : null,
-          idCardMasked: input.idCard ? maskIdCard(input.idCard) : null,
-          phoneCipher: input.phone ? encryptDeterministic(input.phone) : null,
-          phoneMasked: input.phone ? maskPhone(input.phone) : null,
-          gender: input.gender,
-          birthDate: input.birthDate,
-          bedNo: input.bedNo ?? null,
-          diabetesType: input.diabetesType ?? null,
-          hba1c: input.hba1c === undefined ? null : new Prisma.Decimal(input.hba1c.toFixed(1)),
-          departmentId: input.departmentId,
-          doctorId: input.doctorId ?? null,
-          nurseId: input.nurseId ?? null,
-          admissionAt: input.admissionAt,
-          status: input.status,
-          remark: input.remark ?? null,
-        },
-        select: { id: true },
+      // R24 双写（规格 §2.4）：建档同事务创建首次住院记录（seq=1）+ 首条科室停留，
+      // 保证详情页「住院记录/科室记录」下拉有数据。并发建档撞 P2002 时整个事务回滚。
+      const created = await this.prisma.$transaction(async (tx) => {
+        const patient = await tx.patient.create({
+          data: {
+            patientNo: input.patientNo,
+            nameCipher: encryptDeterministic(input.name),
+            nameMasked: maskName(input.name),
+            idCardCipher: input.idCard ? encryptDeterministic(input.idCard) : null,
+            idCardMasked: input.idCard ? maskIdCard(input.idCard) : null,
+            phoneCipher: input.phone ? encryptDeterministic(input.phone) : null,
+            phoneMasked: input.phone ? maskPhone(input.phone) : null,
+            gender: input.gender,
+            birthDate: input.birthDate,
+            bedNo: input.bedNo ?? null,
+            diabetesType: input.diabetesType ?? null,
+            hba1c: input.hba1c === undefined ? null : new Prisma.Decimal(input.hba1c.toFixed(1)),
+            departmentId: input.departmentId,
+            doctorId: input.doctorId ?? null,
+            nurseId: input.nurseId ?? null,
+            admissionAt: input.admissionAt,
+            status: input.status,
+            remark: input.remark ?? null,
+          },
+          select: { id: true },
+        });
+        await tx.admission.create({
+          data: {
+            patientId: patient.id,
+            seq: 1,
+            admittedAt: input.admissionAt,
+            // 建档入参没有出院时间（与 Patient.dischargeAt 现状同口径）；即使建档为出院
+            // 状态也留空，前端初始态判定以 AdmissionsResponse.status 为权威（裁定 Q15）
+            dischargedAt: null,
+            departmentId: input.departmentId,
+            departmentStays: {
+              create: {
+                patientId: patient.id,
+                departmentId: input.departmentId,
+                startedAt: input.admissionAt,
+                endedAt: null,
+              },
+            },
+          },
+        });
+        return patient;
       });
       return { id: created.id };
     } catch (error) {
@@ -484,7 +509,7 @@ export class PatientService {
   async admit(user: AuthenticatedUser, id: string): Promise<PatientAdmitResult> {
     const existing = await this.prisma.patient.findUnique({
       where: { id },
-      select: { status: true, archivedAt: true, departmentId: true },
+      select: { status: true, archivedAt: true, departmentId: true, dischargeAt: true },
     });
     if (!existing || existing.archivedAt) {
       throw new BusinessException(ERROR_CODES.PATIENT_NOT_FOUND);
@@ -498,15 +523,56 @@ export class PatientService {
     const admissionAt = new Date();
     let row: PatientPublicRow;
     try {
-      // where 带 status 条件：并发重复点击时只有一次能命中，避免覆盖已入院记录
-      row = await this.prisma.patient.update({
-        where: { id, status: PATIENT_STATUS.DISCHARGED },
-        data: {
-          status: PATIENT_STATUS.INPATIENT,
-          admissionAt,
-          dischargeAt: null,
-        },
-        select: PATIENT_PUBLIC_SELECT,
+      row = await this.prisma.$transaction(async (tx) => {
+        // where 带 status 条件：并发重复点击时只有一次能命中，避免覆盖已入院记录；
+        // 后到的事务在此抛 P2025 → 整体回滚，不会重复创建 Admission
+        const updated = await tx.patient.update({
+          where: { id, status: PATIENT_STATUS.DISCHARGED },
+          data: {
+            status: PATIENT_STATUS.INPATIENT,
+            admissionAt,
+            dischargeAt: null,
+          },
+          select: PATIENT_PUBLIC_SELECT,
+        });
+
+        // R24 双写（规格 §2.4）。防御性关闭：上一次住院记录/科室停留若仍是「进行中」
+        // （出院功能缺失或历史数据不一致所致），用原出院时间关闭，保证不变量
+        // 「每患者至多一条本次住院」；原出院时间为空时以本次办理时刻近似。
+        const previousDischargedAt = existing.dischargeAt ?? admissionAt;
+        await tx.admission.updateMany({
+          where: { patientId: id, dischargedAt: null },
+          data: { dischargedAt: previousDischargedAt },
+        });
+        await tx.admissionDepartment.updateMany({
+          where: { patientId: id, endedAt: null },
+          data: { endedAt: previousDischargedAt },
+        });
+
+        // 新一次住院 = max(seq)+1；事务内读 max 再写，并发安全由上方 status 条件保证
+        const last = await tx.admission.findFirst({
+          where: { patientId: id },
+          orderBy: { seq: 'desc' },
+          select: { seq: true },
+        });
+        await tx.admission.create({
+          data: {
+            patientId: id,
+            seq: (last?.seq ?? 0) + 1,
+            admittedAt: admissionAt,
+            dischargedAt: null,
+            departmentId: existing.departmentId,
+            departmentStays: {
+              create: {
+                patientId: id,
+                departmentId: existing.departmentId,
+                startedAt: admissionAt,
+                endedAt: null,
+              },
+            },
+          },
+        });
+        return updated;
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
@@ -520,6 +586,68 @@ export class PatientService {
       fromStatus: PATIENT_STATUS.DISCHARGED,
       toStatus: PATIENT_STATUS.INPATIENT,
       item: toListItem(row),
+    };
+  }
+
+  /**
+   * 住院记录树（R24，GET /patients/:id/admissions）——报表查询表单的下拉数据源。
+   * 安全约定：
+   *  1. 与 detail() 同口径：患者存在、未归档，assertInScope（跨科室 → 30002）；
+   *  2. 属敏感查询，controller 挂 @Audit('ADMISSION_QUERY') 逐条留痕；
+   *  3. 出参只有科室名与时间，无患者敏感明文。
+   * 排序（裁定 Q6）：住院记录按 admittedAt 降序（NULLS LAST，本次住院天然最前）；
+   * 每次住院内的科室停留按 startedAt 升序（NULLS FIRST）。
+   */
+  async admissions(user: AuthenticatedUser, id: string): Promise<AdmissionsResponse> {
+    const patient = await this.prisma.patient.findUnique({
+      where: { id },
+      select: { status: true, archivedAt: true, departmentId: true },
+    });
+    if (!patient || patient.archivedAt) {
+      throw new BusinessException(ERROR_CODES.PATIENT_NOT_FOUND);
+    }
+    assertInScope(user, RESOURCE.PATIENT, { departmentId: patient.departmentId });
+
+    const rows = await this.prisma.admission.findMany({
+      where: { patientId: id },
+      select: {
+        id: true,
+        seq: true,
+        admittedAt: true,
+        dischargedAt: true,
+        departmentStays: {
+          select: {
+            id: true,
+            departmentId: true,
+            startedAt: true,
+            endedAt: true,
+            department: { select: { name: true } },
+          },
+          orderBy: { startedAt: { sort: 'asc', nulls: 'first' } },
+        },
+      },
+      orderBy: { admittedAt: { sort: 'desc', nulls: 'last' } },
+    });
+
+    const inpatient = patient.status === PATIENT_STATUS.INPATIENT;
+    return {
+      status: patient.status,
+      admissions: rows.map((row) => ({
+        id: row.id,
+        seq: row.seq,
+        admittedAt: formatDateTime(row.admittedAt),
+        dischargedAt: formatDateTime(row.dischargedAt),
+        // isCurrent 只对住院患者成立：出院患者若存在 dischargedAt 为空的脏数据行，
+        // 不得被前端当成「本次住院」（初始态判定以 status 为权威）
+        isCurrent: inpatient && row.dischargedAt === null,
+        departments: row.departmentStays.map((stay) => ({
+          id: stay.id,
+          departmentId: stay.departmentId,
+          departmentName: stay.department.name,
+          startedAt: formatDateTime(stay.startedAt),
+          endedAt: formatDateTime(stay.endedAt),
+        })),
+      })),
     };
   }
 }
