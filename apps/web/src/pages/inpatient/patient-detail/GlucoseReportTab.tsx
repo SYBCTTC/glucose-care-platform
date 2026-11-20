@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { FullscreenExitOutlined, FullscreenOutlined } from '@ant-design/icons';
-import { Alert, Button, Table, Typography, theme } from 'antd';
+import { Alert, Button, Table, Typography, message, theme } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useOutletContext, useParams } from 'react-router-dom';
 import {
@@ -21,6 +21,16 @@ import type {
 import { useCommonDataStore } from '@/store/common-data';
 import type { DetailChildContext, GlucoseReportDisplay } from './detail-tabs';
 import { useGlucoseReport } from './useGlucoseReport';
+import type { GlucoseReportRange } from './useGlucoseReport';
+import { useAdmissions } from './useAdmissions';
+import {
+  FALLBACK_FORM_STATE,
+  ReportQueryForm,
+  deriveQueryDefaults,
+  isRangeInverted,
+  toReportRange,
+} from './ReportQueryForm';
+import type { ReportQueryFormState } from './ReportQueryForm';
 
 /** 日期列宽提示：容纳 `YYYY-MM-DD` 等宽数字；时段列不定宽，均分剩余空间（2026-11-19 二次调整：不横向滚动） */
 const DATE_COLUMN_WIDTH = 116;
@@ -270,17 +280,71 @@ export default function GlucoseReportTab() {
   const [page, setPage] = useState(1);
   // R23：全屏态（表格撑满视口）。纯视图状态，不持久化、不影响请求与分页
   const [fullscreen, setFullscreen] = useState(false);
-  const { data, loading, error, reload } = useGlucoseReport(id, page, glucoseVersion);
+  // R24：查询表单态（null = 住院记录未就绪）与**已应用**的查询范围分离——
+  // 改表单不触发请求，点「查询」/初始默认态/重置才更新 appliedRange（裁定 Q15/Q16）
+  const admissions = useAdmissions(id);
+  const [queryForm, setQueryForm] = useState<ReportQueryFormState | null>(null);
+  const [appliedRange, setAppliedRange] = useState<GlucoseReportRange>({});
+  const { data, loading, error, reload } = useGlucoseReport(
+    id,
+    page,
+    glucoseVersion,
+    appliedRange,
+    queryForm !== null,
+  );
   // 字典只在这里订阅一次，再传给每个单元格（见 ReportCell 注释）
   const resultTypes = useCommonDataStore(
     (state) => state.dicts[DICT_TYPE.GLUCOSE_RESULT] ?? EMPTY_RESULT_TYPES,
   );
 
-  // 换患者时回到第 1 页并退出全屏：同一路由不同 :id 不会重挂载组件，state 需手动重置
+  // 换患者时回到第 1 页、退出全屏并重置查询表单：同一路由不同 :id 不会重挂载组件，
+  // state 需手动重置。表单置回 null（未就绪）→ 报表请求挂起，等新患者的住院记录到达
   useEffect(() => {
     setPage(1);
     setFullscreen(false);
+    setQueryForm(null);
+    setAppliedRange({});
   }, [id]);
+
+  // R24：住院记录就绪 → 初始化默认表单态并自动按默认条件查询（裁定 Q15）；
+  // 请求失败 → 退化为「全部 + 无限制」可用态（规格 §6，不阻塞报表本体）
+  useEffect(() => {
+    if (queryForm !== null) {
+      return;
+    }
+    if (admissions.data) {
+      const defaults = deriveQueryDefaults(admissions.data);
+      setQueryForm(defaults);
+      setAppliedRange(toReportRange(defaults));
+    } else if (admissions.error) {
+      setQueryForm({ ...FALLBACK_FORM_STATE });
+      setAppliedRange({});
+    }
+  }, [admissions.data, admissions.error, queryForm]);
+
+  // R24：查询——校验开始≤结束（裁定 Q13）后应用范围并回到第 1 页（裁定 Q16）
+  const handleSearch = () => {
+    if (!queryForm) {
+      return;
+    }
+    if (isRangeInverted(queryForm)) {
+      void message.warning('开始时间不能晚于结束时间');
+      return;
+    }
+    setAppliedRange(toReportRange(queryForm));
+    setPage(1);
+  };
+
+  // R24：重置 = 恢复进入页面时的默认态并自动查询（裁定 Q17 + §11-2），不是清空
+  const handleReset = () => {
+    if (!admissions.data) {
+      return;
+    }
+    const defaults = deriveQueryDefaults(admissions.data);
+    setQueryForm(defaults);
+    setAppliedRange(toReportRange(defaults));
+    setPage(1);
+  };
 
   // R23：ESC 退出全屏（通用全屏交互；仅全屏态挂监听，退出即卸载）
   useEffect(() => {
@@ -356,8 +420,9 @@ export default function GlucoseReportTab() {
 
   return (
     <div style={rootStyle}>
-      {/* R20 布局预留：统计栏居左；下一个任务的查询筛选表单挂同一行右侧（左右分布）。
-          R23：全屏切换按钮先行挂右侧（marginLeft auto 保证统计栏未加载时也靠右） */}
+      {/* R20 预留位兑现（R24，裁定 Q18a）：统计栏居左 + 查询表单 + 全屏按钮最右
+          （marginLeft auto）；窄屏接受换行（flexWrap）。全屏态该行随统计栏固定在
+          视口顶部、表单照常可用（R23 的 fixed 覆盖层包住整棵子树，无需额外处理） */}
       <div
         style={{
           display: 'flex',
@@ -369,6 +434,14 @@ export default function GlucoseReportTab() {
         }}
       >
         {data ? <ReportStatsBar stats={data.stats} resultTypes={resultTypes} /> : null}
+        <ReportQueryForm
+          data={admissions.data}
+          loading={admissions.loading}
+          state={queryForm}
+          onChange={setQueryForm}
+          onSearch={handleSearch}
+          onReset={handleReset}
+        />
         <FullscreenToggle fullscreen={fullscreen} onToggle={setFullscreen} />
       </div>
 

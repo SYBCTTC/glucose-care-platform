@@ -1,4 +1,5 @@
 import type {
+  AdmissionsResponse,
   DiabetesType,
   Gender,
   PatientAdmitResult,
@@ -103,6 +104,15 @@ export function updatePatient(
 /** 患者详情（编辑弹窗回填）：属敏感查询，后端会写 PATIENT_VIEW 审计 */
 export function fetchPatientDetail(id: string): Promise<PatientDetail> {
   return http.get<PatientDetail>(`/patients/${id}`);
+}
+
+/**
+ * 住院记录树（R24）：报表查询表单「住院记录/科室记录」下拉的数据源。
+ * 一次性树形下发（裁定 Q4），前端联动纯本地、不发二级请求。
+ * 属敏感查询，后端写 ADMISSION_QUERY 审计并做数据权限校验。
+ */
+export function fetchAdmissions(id: string): Promise<AdmissionsResponse> {
+  return http.get<AdmissionsResponse>(`/patients/${id}/admissions`);
 }
 
 /**

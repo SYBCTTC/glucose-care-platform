@@ -33,13 +33,15 @@ export function createGlucose(
 /**
  * 血糖报告查询参数（前端以字符串/数字传递，后端用共享 schema 校验）。
  *
- * `startDate`/`endDate` 是**本地日期** `YYYY-MM-DD`，本轮前端不传（日期选择器涉及出入院业务，
- * 单开任务），仅在契约里预留。⚠️ 传值时不要经 `dateOnlyStringSchema` 之类的 UTC 转换。
+ * R24（裁定 Q16）：原天粒度 `startDate/endDate` 升级为**秒粒度** `startTime/endTime`
+ * （本地时间 `YYYY-MM-DD HH:mm:ss`，闭区间），由查询表单按住院/科室记录联动推导。
  */
 export interface GlucoseReportParams {
   [key: string]: string | number | undefined;
-  startDate?: string;
-  endDate?: string;
+  /** YYYY-MM-DD HH:mm:ss，本地时间，含该秒；不传则不限起点 */
+  startTime?: string;
+  /** YYYY-MM-DD HH:mm:ss，本地时间，含该秒；不传则不限终点 */
+  endTime?: string;
   page?: number;
   /** 每页**日期数**（不是血糖记录条数），默认 15 */
   pageSize?: number;
