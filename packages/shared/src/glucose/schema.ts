@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { DATE_ONLY_FORMAT, DATE_ONLY_PATTERN, dateTimeStringSchema } from '../date';
-import type { TIME_SLOT_CATEGORY } from '../dict/time-slots';
+import type { TIME_SLOT_CATEGORY, TimeSlotCategory } from '../dict/time-slots';
 import type { PatientListItem } from '../patient/schema';
 
 /**
@@ -215,6 +215,10 @@ export type GlucoseReportColumnType =
 /**
  * 报表列定义，由**服务端下发**。
  * 前端据此画表头，不读 `useCommonDataStore().timeSlots`——保证表头与归组口径同源、不漂移。
+ *
+ * R22（2026-11-19 裁定）：只有**启用**的时段成列（原 `enabled` 字段随之移除）。
+ * 弃用时段的历史记录不再有自己的列，按检测时间合并进启用的普通列并以后缀标注
+ * （见 `GlucoseReportEntry.sourceSlotName`），展示方式与强化时段一致。
  */
 export interface GlucoseReportColumn {
   /** TimeSlot.code，落库契约值 */
@@ -223,11 +227,9 @@ export interface GlucoseReportColumn {
   name: string;
   type: GlucoseReportColumnType;
   sortOrder: number;
-  /** 停用时段**也会下发**：其历史血糖必须有列可落 */
-  enabled: boolean;
 }
 
-/** 单元格内的一条血糖记录（前端渲染为两行：`值(HH:mm)[(强化名)]` / 记录者） */
+/** 单元格内的一条血糖记录（前端渲染为两行：`值[(HH:mm)][(来源时段名)]` / 记录者） */
 export interface GlucoseReportEntry {
   /** mmol/L；`null` 表示非数值型结果（`resultType` 3~9），前端改显示字典标签 */
   valueMmolL: number | null;
@@ -237,8 +239,19 @@ export interface GlucoseReportEntry {
   time: string;
   /** 记录者姓名（`User.name`）；`operatorId` 为空时为 null，前端显示 `-` */
   nurseName: string | null;
-  /** 强化时段名（如「强化-上午」）；非强化记录为 null */
-  intensiveName: string | null;
+  /**
+   * 记录的**原时段类型**（R22）：0 强化 / 1 普通 / 4 特殊。
+   * 前端展示勾选项据此过滤：普通来源受「常规血糖」、强化来源受「强化血糖」控制，
+   * 特殊来源（含弃用的特殊时段）恒展示且时间恒展示（裁定：按原时段类型跟随勾选）。
+   * 归组失败兜底落随机列的记录按特殊对待——宁可多展示，不可丢数据。
+   */
+  sourceType: TimeSlotCategory;
+  /**
+   * 后缀标注的来源时段名（R22，泛化自原 `intensiveName`）：
+   * 强化时段名（如「强化-上午」）或**弃用时段自己的名称**（如「复测」，裁定 Q1）；
+   * 启用的普通/特殊记录落自己的列时为 null。
+   */
+  sourceSlotName: string | null;
 }
 
 /** 一个「日期 × 时段」单元格 */
@@ -286,7 +299,7 @@ export interface GlucoseReportStats {
 }
 
 export interface GlucoseReportResponse {
-  /** 普通 + 特殊时段，按 `sortOrder` 升序 */
+  /** **启用的**普通 + 特殊时段，按 `sortOrder` 升序（R22：弃用时段不成列） */
   columns: GlucoseReportColumn[];
   /** 按日期**降序**（最新在前）；只含有数据的日期，**不补空行** */
   rows: GlucoseReportRow[];

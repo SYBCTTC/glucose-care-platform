@@ -7,7 +7,8 @@
  *  1. `TIME_SLOT_CATEGORY`：type 取值语义（0 强化 / 1 普通 / 4 特殊）；
  *  2. `TIME_SLOTS`：**仅 seed 灌库数据源**（`apps/server/prisma/seed.ts`），运行时一律以库数据为准；
  *  3. `pickTimeSlotByTime`：按检测时间求所属普通时段，入参必须是接口下发的时段。
- *     两个调用场景口径**不同**：录入默认值跳过停用时段；血糖报表归组须传 `{ ignoreEnabled: true }`。
+ *     录入默认值与血糖报表归组（R22 起）口径一致：都只在**启用**的普通时段里匹配——
+ *     弃用时段不成列，其历史记录合并进启用的宿主列（无宿主时兜底随机列）。
  *
  * ⚠️ 本文件**不再提供任何静态兜底**（原 `getFallbackTimeSlots` / `getTimeSlotLabel` 已移除）：
  *  - 时段可用性由服务端查 `TimeSlot` 表运行时校验，静态清单兜底会让"库里已停用/已改名"的时段
@@ -230,11 +231,12 @@ export function timeToMinutes(time: string): number | null {
 /** `pickTimeSlotByTime` 的可选项 */
 export interface PickTimeSlotOptions {
   /**
-   * 是否让**停用**（`enabled=false`）的普通时段也参与匹配，默认 `false`（保持原行为）。
+   * 是否让**停用**（`enabled=false`）的普通时段也参与匹配，默认 `false`。
    *
-   * 录入场景必须用默认值：停用时段不该再被选为默认值。
-   * **报表归组须传 `true`**：时段停用后，其历史血糖仍应落在原本所属的列，
-   * 与 `COMMON-DATA.md`「停用时段历史可展示」口径一致；否则这些记录会归组失败。
+   * 当前所有调用方（录入默认值、报表归组）都用默认值：
+   * R22（2026-11-19 裁定）起弃用时段在报表中**不再有自己的列**，
+   * 其历史记录按检测时间合并进**启用的**宿主列（无宿主时兜底随机列），
+   * 故报表归组不再传 `true`。选项保留给"确需停用时段参与匹配"的未来场景，行为有单测钉住。
    */
   ignoreEnabled?: boolean;
 }
