@@ -56,6 +56,18 @@ export const ERROR_CODES = {
 
   // ---------- 41xxx 血糖 ----------
   /**
+   * 血糖记录不存在、已作废、或不属于该患者（R25 详情/编辑/作废接口，2026-11-20 登记）。
+   * 作废（软删除）后的记录对业务等同于不存在：详情/编辑/作废一律抛本码，前端 toast 后刷新报表。
+   */
+  GLUCOSE_RECORD_NOT_FOUND: 41001,
+  /**
+   * 编辑血糖时检测时间撞上另一条**有效**记录（R25，2026-11-20 登记）。
+   * 唯一性由部分唯一索引 `glucose_record_active_unique`（仅约束 voidedAt IS NULL）兜底；
+   * 服务端先查后写并捕获 P2002 兜底并发。带 details[{field:'measuredAt'}] 挂表单项。
+   * 与添加的幂等 `skipped` 口径不同：编辑撞时间不是重复提交，是用户改错了时间，必须报错。
+   */
+  GLUCOSE_MEASURED_AT_DUPLICATE: 41003,
+  /**
    * 血糖记录已复核锁定，禁止修改。
    *
    * ⚠️ **预留码位，当前无任何代码抛出**（2026-11-17 需求人指定语义后登记）。
@@ -193,7 +205,18 @@ export const ERROR_CODE_META: Record<ErrorCode, ErrorCodeMeta> = {
     action: 'toast-refresh',
   },
 
-  // ---------- 41xxx 血糖（预留，见 ERROR_CODES.GLUCOSE_RECORD_LOCKED 注释） ----------
+  // ---------- 41xxx 血糖 ----------
+  [ERROR_CODES.GLUCOSE_RECORD_NOT_FOUND]: {
+    httpStatus: 404,
+    message: '血糖记录不存在或已作废',
+    action: 'toast-refresh',
+  },
+  [ERROR_CODES.GLUCOSE_MEASURED_AT_DUPLICATE]: {
+    httpStatus: 409,
+    message: '该检测时间已存在血糖记录',
+    action: 'field',
+  },
+  // 41006 仍为预留（见 ERROR_CODES.GLUCOSE_RECORD_LOCKED 注释），当前无代码抛出
   [ERROR_CODES.GLUCOSE_RECORD_LOCKED]: {
     httpStatus: 409,
     message: '该血糖记录已复核锁定，禁止修改',

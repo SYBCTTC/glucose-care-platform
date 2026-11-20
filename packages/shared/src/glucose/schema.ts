@@ -172,6 +172,64 @@ export interface GlucoseCreateResult {
 }
 
 /* -------------------------------------------------------------------------- */
+/* R25 血糖详情 / 编辑 / 作废（2026-11-20 裁定，docs/specs/glucose-report-edit.md） */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 详情/编辑/作废路由参数。
+ * `:id` 是患者（审计 targetId 取它，拦截器只认 `params.id`）；`:recordId` 是血糖记录。
+ */
+export const glucoseRecordParamsSchema = z.object({
+  id: z.string().uuid('患者 ID 不合法'),
+  recordId: z.string().uuid('血糖记录 ID 不合法'),
+});
+
+/**
+ * 单条血糖详情（GET /patients/:id/glucose/:recordId，R25）。
+ * 编辑弹框回填与 review 展示的数据源；已作废/不存在/不属于该患者 → 41001。
+ * 时段名称不在响应里：前端按 `mealContext` code 查动态时段（含停用项回显），禁止服务端下发第二份名称口径。
+ */
+export interface GlucoseRecordDetail {
+  id: string;
+  /** YYYY-MM-DD HH:mm:ss，本地时间（与报表口径一致） */
+  measuredAt: string;
+  mealContext: string | null;
+  /** '0'~'9'，前端取字典 label/color */
+  resultType: string;
+  valueMmolL: number | null;
+  testStrip: number | null;
+  operatorId: string | null;
+  /** 记录者姓名；服务端下发（操作人可能不在本科室 staff 下拉里，同报表 nurseName 口径） */
+  operatorName: string | null;
+  remark: string | null;
+}
+
+/**
+ * 编辑保存结果（PATCH /patients/:id/glucose/:recordId，R25）。
+ * `changedFields` 只含**字段名**（裁定 Q5，同 PATIENT_UPDATE 口径），
+ * 由审计拦截器按既有白名单提取入 detail；remark 等自由文本的值绝不入审计。
+ */
+export interface GlucoseUpdateResult {
+  id: string;
+  changedFields: string[];
+  /** 落库的结果类型（「检测」已被服务端重判为 0/1/2） */
+  resultType: string;
+  valueMmolL: number | null;
+  /** YYYY-MM-DD HH:mm:ss */
+  measuredAt: string;
+}
+
+/**
+ * 作废结果（DELETE /patients/:id/glucose/:recordId，R25 软删除）。
+ * `glucoseRecordId` 供审计拦截器按白名单提取入 detail（先例 wardRecordId）；
+ * 审计对象仍是患者（targetType='PATIENT'、targetId=患者 ID）。
+ */
+export interface GlucoseVoidResult {
+  glucoseRecordId: string;
+  voided: true;
+}
+
+/* -------------------------------------------------------------------------- */
 /* 血糖报告（GET /patients/:id/glucose/report）                                 */
 /* -------------------------------------------------------------------------- */
 
@@ -227,6 +285,8 @@ export interface GlucoseReportColumn {
 
 /** 单元格内的一条血糖记录（前端渲染为两行：`值[(HH:mm)][(来源时段名)]` / 记录者） */
 export interface GlucoseReportEntry {
+  /** `GlucoseRecord.id`（R25）：点击单元格记录弹 review/编辑框时定位是哪条记录 */
+  id: string;
   /** mmol/L；`null` 表示非数值型结果（`resultType` 3~9），前端改显示字典标签 */
   valueMmolL: number | null;
   /** DY-RESULT code '0'~'9'，前端据此取字典 `label` / `color`，不自行比阈值 */
