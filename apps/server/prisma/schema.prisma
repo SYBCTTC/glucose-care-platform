@@ -29,6 +29,10 @@ model Department {
   users    User[]
   patients Patient[]
   devices  Device[]
+  /// 以本科室为入院科室的住院记录（R24）
+  admissions Admission[]
+  /// 科室停留记录（R24 转科轨迹）
+  admissionDepartments AdmissionDepartment[]
 }
 
 enum UserStatus {
@@ -142,12 +146,68 @@ model Patient {
   glucoseRecords     GlucoseRecord[]
   /// 虚拟病区进出记录（含历史）；"当前是否在区" = 有没有 leftAt 为空的行
   virtualWardRecords VirtualWardRecord[]
+  /// 住院记录（R24）：一行 = 一次住院；admissionAt/dischargeAt 上方旧字段保留双写（裁定 Q2）
+  admissions          Admission[]
+  /// 科室停留记录（R24）：跨全部住院的转科轨迹（冗余 patientId，裁定 Q3）
+  admissionDepartments AdmissionDepartment[]
 
   @@index([departmentId, archivedAt])
   @@index([departmentId, status, admissionAt])
   @@index([doctorId])
   @@index([nurseId])
   @@index([nameMasked])
+}
+
+/// 住院记录（R24，2026-11-20 需求人评审通过，见 docs/specs/glucose-report-query.md §2.1）：
+/// 一行 = 一次住院。seq = 第几次住院（患者内唯一，从 1 起）。dischargedAt NULL = 本次住院（在院）。
+/// Patient.admissionAt/dischargeAt/status 旧字段**保留并双写**（裁定 Q2）：列表接口仍读旧字段，
+/// 废弃旧字段属后续独立评审。写入口：建档（seq=1）、办理住院 admit()（seq=max+1）。
+model Admission {
+  id        String  @id @default(uuid()) @db.Uuid
+  patientId String  @db.Uuid
+  /// 第几次住院（下拉 label「第N次」前缀的数据源，裁定 Q5）
+  seq       Int
+  /// 可空：兼容存量老数据（裁定 Q7，同 Patient.admissionAt 可空口径）
+  admittedAt   DateTime? @db.Timestamptz(3)
+  /// NULL = 在院（本次住院）
+  dischargedAt DateTime? @db.Timestamptz(3)
+  /// 入院科室（首科室；完整科室轨迹见 AdmissionDepartment）
+  departmentId String    @db.Uuid
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  patient         Patient               @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  department      Department            @relation(fields: [departmentId], references: [id])
+  departmentStays AdmissionDepartment[]
+
+  @@unique([patientId, seq])
+  @@index([patientId, admittedAt(sort: Desc)])
+}
+
+/// 科室停留（R24 转科轨迹，见 docs/specs/glucose-report-query.md §2.2）：
+/// 一行 = 一次住院中在某个科室的一段连续停留。endedAt NULL = 当前在科。
+/// 「每次住院至多一条进行中」由**部分唯一索引**保证（Prisma 表达不了，
+/// 见 prisma/sql/admission_one_active_department.sql，同 ward_one_active.sql 模式）。
+/// 转科功能模块后续实现（R24 只落表结构）：转科 = 关闭旧行 endedAt + 开新行（同事务）。
+model AdmissionDepartment {
+  id          String @id @default(uuid()) @db.Uuid
+  admissionId String @db.Uuid
+  /// 冗余列（裁定 Q3）：按患者取全部科室记录免 join；删患者随 Cascade
+  patientId    String   @db.Uuid
+  departmentId String   @db.Uuid
+  /// 可空：兼容 admittedAt 为空的存量数据（裁定 Q7）
+  startedAt DateTime?  @db.Timestamptz(3)
+  /// NULL = 当前在科
+  endedAt   DateTime?  @db.Timestamptz(3)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  admission  Admission  @relation(fields: [admissionId], references: [id], onDelete: Cascade)
+  patient    Patient    @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  department Department @relation(fields: [departmentId], references: [id])
+
+  @@index([admissionId, startedAt])
+  @@index([patientId])
 }
 
 /// 患者最近血糖读取模型。后续血糖录入/查询模块可在此基础上扩展。
@@ -302,6 +362,12 @@ enum AuditAction {
   PATIENT_WARD_JOIN
   /// 移出虚拟病区，detail 记 patientId / wardRecordId / leaveReason
   PATIENT_WARD_REMOVE
+  /// 血糖报告查询（GET /patients/:id/glucose/report），detail 记 rangeFrom / rangeTo / count。
+  /// ⚠️ 缺陷补登记（R24 迁移）：该动作 2026-11-19 上线时 @Audit 已在用，但枚举漏登记，
+  /// PG 拒绝非法枚举值 → 审计行实际从未落表（拦截器吞错只打 console.error）。
+  GLUCOSE_REPORT_VIEW
+  /// 住院记录查询（GET /patients/:id/admissions，R24），detail 无患者敏感信息
+  ADMISSION_QUERY
 }
 
 /// 审计日志：只增不改不删，留存 >= 180 天（等保三级要求）
