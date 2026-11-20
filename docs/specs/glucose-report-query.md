@@ -1,0 +1,355 @@
+# 血糖报告表单查询（住院记录 × 科室记录 × 时间范围）
+
+> 按 `docs/FEATURE-SPEC-TEMPLATE.md` 归档。状态：📐 **设计评审稿**（2026-11-20 需求人提出 R24，
+> 同日 18 项裁定 Q1–Q18；裁定 Q1a：**本轮只出表结构与接口设计，不改代码，下轮实施**）。
+>
+> 上游规格：`docs/specs/glucose-report.md`（报表本体，R1–R23）。本规格是其查询维度扩展：
+> 统计栏行（R20 预留位）挂表单，报表数据按「住院记录 → 科室记录 → 时间范围」联动筛选。
+>
+> ⚠️ 本设计含 **Prisma schema 变更（两张新表 + AuditAction 枚举值）**，属人工评审项：
+> schema 草案见 §2，评审通过后方可进入实施轮。
+
+## 0. 元信息
+
+| 项 | 内容 |
+|---|---|
+| 阶段号 | P3-2 血糖查询延伸（`docs/specs/glucose-report.md` 同阶段）；住院记录数据模型属 P4-患者域扩展 |
+| 模块 | 后端 `modules/patient`（或新 `modules/admission`，实施时定）+ `modules/glucose`（report 参数升级）；前端 `pages/inpatient/patient-detail`（表单组件）；共享包 `glucose/schema.ts`（query 升级）+ 新增 admission 契约 |
+| 优先级 | P1 |
+| 依赖 | 患者详情页框架、`GET /patients/:id/glucose/report`（R23 现状）、`scope.util.ts`、`AuditLogInterceptor` |
+| 需求人 | 产品（2026-11-20 提出，18 项裁定 Q1–Q18） |
+
+## 0.1 决策记录（需求人裁定，2026-11-20）
+
+| # | 裁定 |
+|---|---|
+| Q1 | **本轮只出表/接口设计，下轮实施**（不改代码） |
+| Q2 | 新建 `Admission` 表；`Patient.admissionAt/dischargeAt/status` **保留并双写**，列表接口不动，后续再废弃 |
+| Q3 | 科室停留表名 **`AdmissionDepartment`**；**加冗余 `patientId` 列**（按患者查免 join） |
+| Q4 | 新增 `GET /patients/:id/admissions` **一次性树形下发**（住院记录 + 各自科室记录），联动纯本地；走数据权限 + 审计 |
+| Q5 | 住院记录选项**带次数前缀**：`第2次 (2026-01-01 ~ 2026-01-15)`（`YYYY-MM-DD`，两位年为笔误） |
+| Q6 | 住院记录**按入院时间降序**（最近的排最前） |
+| Q7 | 在院患者 `admittedAt` 为空（老数据）：「本次住院」照常可选、区间显示为空 |
+| Q8 | 科室选项 label：`科室名 (YYYY-MM-DD ~ YYYY-MM-DD)`，进行中 `科室名 (YYYY-MM-DD ~ 至今)` |
+| Q9 | 切历史住院记录 → 科室默认选**该次住院第一条**（入院科室） |
+| Q10 | 住院=「全部」时选中某科室记录 → 开始/结束时间**同样联动**该记录起止 |
+| Q11 | 科室下拉**允许清空**：清空 = 不按科室过滤、时间无限制 |
+| Q12 | 时间控件**设上下限**：限所选科室记录 `[startedAt, endedAt ?? 今天]`；无科室记录时按住院记录范围；「全部」+科室清空 → 无限制 |
+| Q13 | 开始/结束时间**允许单独清空**（= 该侧不限）；开始 > 结束 → **阻止查询并校验提示** |
+| Q14 | 范围外血糖**不展示、不统计**：统计栏数字随筛选范围变化，但展示与计算口径不动 |
+| Q15 | **初始加载即按默认条件查询**（在院 = 本次住院 + 当前科室 + 默认时间；出院 = 全部 + 无限制） |
+| Q16 | 报表契约 `startDate/endDate`（天粒度）**直接升级为秒粒度**（破坏性，前后端同轮改齐）；查询后页码重置第 1 页；R22 勾选与 R23 全屏在查询结果上照常叠加 |
+| Q17 | 「重值」= **重置**：恢复进入页面时的默认态（按患者状态重算），**不是清空** |
+| Q18 | 布局方案 a：表单挂统计栏同一行，**接受换行**（flexWrap），全屏按钮保持最右；全屏态该行随统计栏固定视口顶部、表单照常可用 |
+
+## 1. 目标与用户故事
+
+作为 **医生 / 护士**，我要 **按住院次数、科室停留与时间范围筛选血糖报告**，
+以便 **查看患者各个时期（历次住院）以及时间段（科室内）的血糖情况**。
+
+本次范围（做，实施轮）：
+
+- `Admission` + `AdmissionDepartment` 两张新表、部分唯一索引 SQL、存量数据迁移回填（§2）
+- 既有写入口**双写改造**：建档（第一次住院）、办理住院 `admit()`（第 N 次住院）（§2.4）
+- 新接口 `GET /patients/:id/admissions`（§3.1）
+- 报表接口 query 契约升级：天粒度 → 秒粒度 `startTime/endTime`（§3.2，破坏性）
+- 统计栏行表单：住院记录/科室记录下拉 + 开始/结束时间（秒级）+ 查询/重置，联动状态机（§4/§6）
+
+本次不做（明确排除）：
+
+- **转科功能模块**（本轮只落表结构；转科 = 关闭旧 `AdmissionDepartment` + 开新条，后续需求）
+- 统计栏展示与计算口径改动（R20 不动，数字随范围自然变化——Q14）
+- 全屏按钮逻辑改动（R23 不动）
+- `Patient.admissionAt/dischargeAt/status` 旧字段废弃（Q2：保留双写，后续单独评审）
+
+## 2. 数据模型变更（⚠️ 人工评审项）
+
+### 2.1 `Admission`（住院记录：一行 = 一次住院）
+
+```prisma
+/// 住院记录：一行 = 一次住院。seq = 第几次住院（患者内唯一，从 1 起）。
+/// dischargedAt NULL = 本次住院（在院）。R24-Q2：Patient.admissionAt/dischargeAt/status
+/// 保留并双写，列表接口仍读旧字段；旧字段废弃属后续独立评审。
+model Admission {
+  id           String    @id @default(uuid()) @db.Uuid
+  patientId    String    @db.Uuid
+  /// 第几次住院（label 前缀「第N次」的数据源，R24-Q5）
+  seq          Int
+  /// 可空：兼容存量老数据（R24-Q7，同 Patient.admissionAt 可空口径）
+  admittedAt   DateTime? @db.Timestamptz(3)
+  /// NULL = 在院（本次住院）
+  dischargedAt DateTime? @db.Timestamptz(3)
+  /// 入院科室（首科室；科室轨迹见 AdmissionDepartment）
+  departmentId String    @db.Uuid
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  patient         Patient               @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  department      Department            @relation(fields: [departmentId], references: [id])
+  departmentStays AdmissionDepartment[]
+
+  @@unique([patientId, seq])
+  @@index([patientId, admittedAt(sort: Desc)])
+}
+```
+
+### 2.2 `AdmissionDepartment`（科室停留：一行 = 一次住院中在某个科室的一段连续停留）
+
+```prisma
+/// 科室停留（转科轨迹）：endedAt NULL = 当前在科。
+/// 「每次住院至多一条进行中」由部分唯一索引保证（Prisma 表达不了，
+/// 见 prisma/sql/admission_one_active_department.sql，同 ward_one_active.sql 模式）。
+/// 转科功能模块后续实现（R24 只落表结构）：转科 = 关闭旧行 endedAt + 开新行。
+model AdmissionDepartment {
+  id           String    @id @default(uuid()) @db.Uuid
+  admissionId  String    @db.Uuid
+  /// 冗余列（R24-Q3）：按患者取全部科室记录免 join；删患者随 Cascade
+  patientId    String    @db.Uuid
+  departmentId String    @db.Uuid
+  /// 可空：兼容 admittedAt 为空的存量数据（R24-Q7）
+  startedAt    DateTime? @db.Timestamptz(3)
+  /// NULL = 当前在科
+  endedAt      DateTime? @db.Timestamptz(3)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  admission  Admission  @relation(fields: [admissionId], references: [id], onDelete: Cascade)
+  patient    Patient    @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  department Department @relation(fields: [departmentId], references: [id])
+
+  @@index([admissionId, startedAt])
+  @@index([patientId])
+}
+```
+
+部分唯一索引 SQL（`prisma/sql/admission_one_active_department.sql`，迁移后手工执行，同 ward 先例）：
+
+```sql
+CREATE UNIQUE INDEX IF NOT EXISTS "AdmissionDepartment_one_active_per_admission"
+  ON "AdmissionDepartment"("admissionId")
+  WHERE "endedAt" IS NULL;
+```
+
+关系反向引用（schema 改动清单）：`Patient` 加 `admissions Admission[]` +
+`admissionDepartments AdmissionDepartment[]`；`Department` 加对应反向关系；
+`AuditAction` 枚举加 `ADMISSION_QUERY`（§5）。
+
+### 2.3 存量迁移回填（幂等，可重跑）
+
+1. **每个患者**（含已归档）生成一条 `Admission`：`seq=1`、`admittedAt=Patient.admissionAt`、
+   `dischargedAt=Patient.dischargeAt`、`departmentId=Patient.departmentId`；
+   已存在 `Admission` 的患者跳过（幂等键 `patientId`）
+2. 每条 `Admission` 生成一条 `AdmissionDepartment`：`startedAt=admittedAt`、`endedAt=dischargedAt`
+   （在院则 NULL）；已存在停留记录跳过（幂等键 `admissionId`）
+3. 迁移脚本形态与执行方式（`prisma/seed.ts` 之外的一次性脚本 or migrate deploy 钩子）实施轮定，
+   参照 `docs/DB-MIGRATION-NOTES.md` 既有流程；**回填前备份库**
+
+### 2.4 双写改造（实施轮必做，否则新住院患者无下拉数据）
+
+| 写入口 | 现状 | 双写改造 |
+|---|---|---|
+| 建档 `patient.service.ts create()` | 写 `Patient.admissionAt/status` | 同事务创建 `Admission(seq=1)` + 首条 `AdmissionDepartment` |
+| 办理住院 `admit()`（出院→在院，**第 N 次住院的产生点**） | 写 `Patient.status/admissionAt=new Date()/dischargeAt=null` | 同事务创建 `Admission(seq=max+1, admittedAt=now)` + 首条 `AdmissionDepartment(startedAt=now)` |
+| 出院操作 | **当前未发现独立写入口**（`dischargeAt` 只在建档输入与查询排序出现）——实施轮核实现状；若出院功能落地：写 `Patient.dischargeAt` 同时关闭 `Admission.dischargedAt` + 进行中 `AdmissionDepartment.endedAt` | 同左 |
+| 转科 | 未实现 | 本轮不做；实现时关闭旧停留 + 开新停留（同事务） |
+
+## 3. 接口契约
+
+### 3.1 新增 `GET /patients/:id/admissions`（下拉数据源，一次性树形下发）
+
+| 项 | 内容 |
+|---|---|
+| 权限点 | `PERMISSION.PATIENT_VIEW`（同详情页） |
+| 数据范围 | `RESOURCE.PATIENT`：`assertInScope`（越权 → 30002/40001，口径同报表接口） |
+| 审计 | `@Audit('ADMISSION_QUERY', { targetType: 'PATIENT' })`——患者数据查询逐条留痕；DENIED 按 3xxxx 号段落审计 |
+| 缓存 | 前端 TanStack Query 按患者 id 缓存；换患者重新请求 |
+
+响应（shared 新增类型，前后端共用）：
+
+```ts
+/** 科室停留记录（转科轨迹的一段） */
+interface AdmissionDepartmentOption {
+  id: string;
+  departmentId: string;
+  /** 科室名由库下发（同 TimeSlot.name 口径：前端禁止硬编码、禁止按名称匹配） */
+  departmentName: string;
+  /** YYYY-MM-DD HH:mm:ss 本地时间；可空（R24-Q7 老数据） */
+  startedAt: string | null;
+  /** null = 当前在科 */
+  endedAt: string | null;
+}
+
+/** 一次住院记录 */
+interface AdmissionOption {
+  id: string;
+  /** 第几次住院（label 前缀「第N次」） */
+  seq: number;
+  admittedAt: string | null;
+  /** null = 在院（本次住院） */
+  dischargedAt: string | null;
+  /** dischargedAt === null；前端「本次住院」选项的判定依据 */
+  isCurrent: boolean;
+  /** 该次住院的科室停留，按 startedAt 升序（NULLS FIRST） */
+  departments: AdmissionDepartmentOption[];
+}
+
+interface AdmissionsResponse {
+  /** 按 admittedAt 降序（R24-Q6），NULLS LAST；在院的那条天然排最前 */
+  admissions: AdmissionOption[];
+}
+```
+
+### 3.2 报表接口 query 升级（破坏性，R24-Q16，前后端同轮改齐）
+
+`glucoseReportQuerySchema`：`startDate/endDate`（`YYYY-MM-DD` 天粒度）→
+**`startTime/endTime`（`YYYY-MM-DD HH:mm:ss` 秒粒度，本地时间）**：
+
+```ts
+export const glucoseReportQuerySchema = z.object({
+  /** YYYY-MM-DD HH:mm:ss 本地时间，含该秒；不传则不限起点（服务端 parseLocalDateTime 解析，同 R 系报表本地日界口径） */
+  startTime: z.string().trim().regex(DATETIME_PATTERN).optional(),
+  /** 同上；不传则不限终点 */
+  endTime: z.string().trim().regex(DATETIME_PATTERN).optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(GLUCOSE_REPORT_PAGE_SIZE),
+});
+```
+
+- **不加 `admissionId/admissionDepartmentId` 参数**：血糖记录没有住院归属字段，
+  住院/科室选择最终都投影为 `measuredAt` 的时间范围——服务端只按时间过滤，
+  下拉选择是纯前端 UI 状态（联动推导时间默认值与上下限）。契约保持最小
+- 过滤语义（Q14）：`measuredAt ∈ [startTime, endTime]`（闭区间，秒级）；
+  **行分组、统计栏（总计/合格/最高/最低）、分页 total 全部基于过滤后的记录**——
+  某天只有部分记录在范围内时，该行显示且只显示范围内记录
+- `startTime > endTime` → 10001 + `details[{field:'startTime'}]`（服务端兜底，前端已拦截）
+- 既有调用方（`useGlucoseReport`）同轮改参数名；`GLUCOSE_REPORT_PAGE_SIZE`、响应结构不变
+
+## 4. 业务规则与校验（前端联动状态机）
+
+### 4.1 初始态（进入血糖报告子 Tab / 换患者，Q15：初始加载即按默认条件查询）
+
+| 患者状态 | 住院记录 | 科室记录 | 开始时间 | 结束时间 |
+|---|---|---|---|---|
+| 在院（存在 `isCurrent` 记录） | 「本次住院」 | 该次住院**进行中**的停留（`endedAt=null`） | 该停留 `startedAt` | 空（在科中） |
+| 出院 | 「全部」 | 空（清空） | 空 | 空 |
+| 无任何住院记录（防御，迁移后不应出现） | 「全部」 | 空 | 空 | 空 |
+
+### 4.2 住院记录下拉
+
+- 选项构成：
+  - **在院患者**（第 N 次住院）：`本次住院`（= `isCurrent` 那条，label 固定文案）
+    \+ N-1 条历史 `第N次 (YYYY-MM-DD ~ YYYY-MM-DD)` + `全部`
+  - **出院患者**（共 N 次）：N 条 `第N次 (…)` + `全部`（无「本次住院」项）
+  - 日期为空（Q7）：省略区间部分，只显示 `第N次`
+- 排序：接口已按 `admittedAt` 降序下发，前端保持原序渲染；「全部」恒为末项
+- 切换联动：
+  - 选「本次住院」/某历史住院 → 科室选项 = 该住院 `departments`；科室默认选中：
+    本次住院 → 进行中那条；历史住院 → **第一条**（入院科室，Q9）；时间 = 所选科室记录起止（Q12 上下限同步）
+  - 选「全部」→ 科室**选中值清空**；科室选项 = 所有住院的 `departments` 平铺
+    （每段停留一条、各带区间，跨住院同科室出现多条属正常）；时间清空、无上下限
+
+### 4.3 科室记录下拉
+
+- label（Q8）：`科室名 (YYYY-MM-DD ~ YYYY-MM-DD)`；进行中 `科室名 (YYYY-MM-DD ~ 至今)`；
+  `startedAt` 为空则 `科室名 (~ 至今)` / `科室名`（省略空部分）
+- `allowClear`（Q11）：清空 = 不按科室过滤；**时间上下限解除**，时间值回退为
+  所选住院记录的 `[admittedAt, dischargedAt]`（「全部」时清空）——此为设计补充，见 §11-1
+- 选中某条（含「全部」场景，Q10）→ 开始时间 = `startedAt`、结束时间 = `endedAt`（null → 空）；
+  上下限 = `[startedAt, endedAt ?? 今天]`
+- 用户手改时间后再切住院/科室 → **默认值覆盖**用户输入（需求规则 4 原文口径）
+
+### 4.4 时间控件
+
+- `DatePicker showTime`，format `YYYY-MM-DD HH:mm:ss`；秒粒度
+- 上下限（Q12）：`disabledDate/disabledTime` 按当前生效范围（科室记录 > 住院记录 > 无限制）计算；
+  上限「今天」= 本地当日 23:59:59
+- 允许单独清空 = 该侧不限（Q13）
+- `开始 > 结束` → 表单校验错误、**阻止查询**（Q13）；服务端 10001 兜底
+
+### 4.5 查询 / 重置
+
+- **查询**：按当前表单推导 `startTime/endTime`（秒级闭区间）请求报表；页码重置第 1 页（Q16）；
+  R22 展示勾选（纯前端过滤）与 R23 全屏在查询结果上照常叠加
+- **重置**（Q17）：恢复 §4.1 初始态（按患者状态重算默认值）并**自动按默认条件查询**
+  （与初始加载一致）——自动查询为设计补充，见 §11-2
+- 换患者：表单状态、查询结果全部重置（同 `page/fullscreen/reportDisplay` 既有模式）
+
+## 5. 权限与数据安全
+
+| 项 | 内容 |
+|---|---|
+| 功能权限 | `@RequirePermissions(PERMISSION.PATIENT_VIEW)`（admissions 接口）；报表接口权限不变 |
+| 数据范围 | `@RequireDataScope(RESOURCE.PATIENT)` + `assertInScope`；NONE 档（设备管理员）→ 30006；跨科室 → 30002，DENIED 落审计 |
+| 脱敏 | 下发内容仅科室名与时间，无患者敏感明文；不新增脱敏/加密字段 |
+| 审计 | 新 `AuditAction.ADMISSION_QUERY`（schema 枚举，随迁移评审）；`targetType: 'PATIENT'`、`targetId` 取 URL `:id`；报表接口新参数不改审计口径（既有逐条留痕） |
+| 留痕 | `AdmissionDepartment` 不含操作人列（转科功能实现时再加 `transferredById` 等留痕字段，属转科规格范围） |
+
+## 6. 前端交互
+
+- **位置**（Q18a）：统计栏行（R20 行）——统计（左）+ 表单 + 全屏按钮（最右，`marginLeft:auto` 保持）；
+  该行已有 `flexWrap`，窄屏接受换行；全屏态（R23）该行随统计栏固定视口顶部、表单照常可用
+- **控件**：`Select`（住院记录）、`Select allowClear`（科室记录）、`DatePicker showTime` ×2、
+  `Button type="primary"`（查询）、`Button`（重置）；图标如需仅 `@ant-design/icons`
+- **打印**：表单控件与按钮加 `gc-no-print`（交互控件对纸质输出无意义，同 `FullscreenToggle` 口径）
+- **状态归属**：表单状态与联动推导在报表子页内（新组件 `ReportQueryForm` + 纯函数
+  `deriveQueryDefaults/deriveTimeBounds/buildAdmissionLabel/buildDepartmentLabel`，
+  导出供单测——同 `filterReportRows` 模式）；`admissions` 数据走 TanStack Query
+- **加载/异常**：admissions 请求中 → 两个 Select `loading`；请求失败 → 全局拦截器 toast，
+  表单退化为「全部 + 无限制」可用态（不阻塞报表本体）；字段级错误（10001 details）映射表单项
+- **可访问性**：大字号档、暗色模式、键盘可达（antd 默认能力，不自造）
+
+## 7. 错误码与前端行为（无新增错误码）
+
+| 场景 | 错误码 | HTTP | 前端行为 |
+|---|---|---|---|
+| `startTime/endTime` 格式非法 / start > end | 10001 | 422 | 字段级（details 映射表单项） |
+| 患者不存在 / 已归档 | 40001 | 404 | toast（同详情页既有口径） |
+| 跨科室访问 admissions | 30002 | 403 | toast + 审计 DENIED |
+| NONE 档角色 | 30006 | 403 | toast + 审计 DENIED |
+
+## 8. 测试要求（实施轮）
+
+- [ ] **server 单测**：admissions 接口（树形组装、降序、`isCurrent`、科室升序、越权 30002/30006、审计动作）；
+      report `startTime/endTime`（秒级闭区间边界、单侧缺省、start>end → 10001、
+      统计与分页 total 随过滤范围、行内只含范围内记录）
+- [ ] **server 单测（双写）**：建档 → `Admission(seq=1)` + 首条停留；`admit()` → `seq=max+1` 新住院 +
+      首条停留、上一次住院的停留已全部关闭；并发办理住院幂等（where 带状态条件既有模式）
+- [ ] **shared 单测**：query schema 秒粒度格式校验、可选性
+- [ ] **web 单测**：`deriveQueryDefaults`（在院/出院/无记录三态）、`deriveTimeBounds`
+      （科室 > 住院 > 无限制三层回退）、`buildAdmissionLabel/buildDepartmentLabel`（Q5/Q8 格式、空日期省略）、
+      重置回默认态
+- [ ] **迁移回填演练**：dev 库跑回填 → 抽查在院/出院/老数据（`admissionAt` 空）三类患者
+- [ ] **手工 e2e**：`dr.wang` 查林*（在院）默认「本次住院」态；办理住院造第二次住院 → 下拉出现
+      `第1次 (…)`；dev 库直插转科停留 → 科室下拉多条、时间联动；开始>结束被拦；重置回默认；
+      全屏态表单可用；打印预览无表单
+
+## 9. 非功能要求
+
+| 项 | 要求 |
+|---|---|
+| 性能 | 单患者住院次数 < 100，admissions 树形一次下发无分页；索引见 §2.1/§2.2 |
+| 内网 | 不引用公网资源；图标仅 `@ant-design/icons` |
+| 等保 | 住院记录查询逐条审计；迁移前备份库 |
+| 兼容 | 明暗模式、大字号档、打印（表单 `gc-no-print`） |
+
+## 10. 验收标准（实施轮勾选）
+
+- [ ] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` 全绿
+- [ ] schema 变更经人工评审；迁移 + 回填 + 部分唯一索引 SQL 落库；双写生效
+- [ ] admissions 接口契约、排序、审计符合 §3.1/§5；越权被拒且落 DENIED
+- [ ] 报表秒粒度过滤、统计/分页随范围（Q14/Q16）；初始加载按默认条件（Q15）
+- [ ] 联动状态机符合 §4（Q5–Q13 逐条）；重置回默认态（Q17）
+- [ ] 布局符合 Q18a；全屏态表单可用；打印隐藏表单
+- [ ] 文档回写：`glucose-report.md` R24 行、`ROADMAP.md`、`DB-MIGRATION-NOTES.md`（迁移记录）
+
+## 11. 待确认项（设计补充细节，实施前如无异议按此执行）
+
+1. **科室清空后的时间值**（Q11 未细化）：回退为所选住院记录的 `[admittedAt, dischargedAt]`
+   （在院则结束为空）；「全部」时清空、无限制
+2. **重置是否自动查询**（Q17 未细化）：重置 = 回默认态 + 自动按默认条件查询（与初始加载一致）
+3. **出院写入口现状**：当前代码未发现独立的出院操作（`dischargeAt` 仅建档输入与查询排序出现），
+   实施轮先核实；若出院功能后续落地，须按 §2.4 双写
+4. **演示数据**（实施轮裁定）：是否为林* 造「第二次住院 + 转科停留」演示数据供 e2e 验收
+   （办理住院走既有接口，转科停留只能 dev 库直插——转科功能未实现）
+5. **`AdmissionDepartment` 操作人留痕列**：本轮不加（转科功能实现时随转科规格补
+   `transferredById` 等），避免为未实现功能预建字段（error-codes 规则同款教训）
