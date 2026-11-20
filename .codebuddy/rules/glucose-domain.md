@@ -51,7 +51,10 @@ globs:
 - `createGlucoseSchema` 只校验格式（trim 后 1~32，与 `TimeSlot.code VarChar(32)` 对齐）
 - `GlucoseService.assertTimeSlotUsable` 经 `TimeSlotService.findByCode` 校验该 code **存在且 `enabled`**，
   否则 `10001` + `details[{field:'mealContext'}]`，**不写库**
-- 停用时段：**历史可展示、新录入拒绝**（`GET /time-slots` 仍下发停用项，供历史血糖回显名称）
+- 停用时段：**历史可展示、新录入拒绝**（`GET /time-slots` 仍下发停用项，供历史血糖回显名称）。
+  血糖报告中的展示形式（R22，2026-11-19 裁定）：弃用时段**不再成列**，历史记录按检测时间合并进启用的普通列
+  并带弃用时段名后缀（`GlucoseReportEntry.sourceSlotName` + `sourceType` 保留原类型），无启用宿主时兜底随机列；
+  详见 `docs/specs/glucose-report.md` R22
 - `@gc/shared` 的 `TIME_SLOTS` 已降级为**仅 seed 数据源**，`getFallbackTimeSlots` / `getTimeSlotLabel` 已删除；
   **禁止**在运行时用它做校验或展示兜底（会与库数据漂移）
 - 因此库里新增/停用时段**无需改代码、无需发版**
