@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { PatientDetail } from '@gc/shared';
 import { ApiError } from '@/api/client';
 import { fetchPatientDetail } from '@/api/patient';
@@ -17,28 +17,49 @@ const IDLE: PatientDetailState = { data: null, loading: false, error: null, forb
 /**
  * 拉取患者详情（GET /patients/:id）。
  * 后端每次访问都会写一条 PATIENT_VIEW 审计（"访问即留痕"，决策 A3）。
- * 与列表页 hook 同风格（手动 useState/useEffect，非 TanStack Query）；id 变化时重查，
- * 卸载/切 id 时用 cancelled 标志丢弃过期响应，避免竞态与卸载后 setState。
+ * 与列表页 hook 同风格（手动 useState/useEffect，非 TanStack Query）；id 变化时重查。
+ *
+ * **StrictMode 守卫**（2026-11-20）：React 18 开发模式下 StrictMode 会 mount → cleanup →
+ * remount 使 effect 跑两次，两次请求都真的发出、服务端各写一条 PATIENT_VIEW，审计表因此
+ * 出现成对重复行（生产构建不双调用，不受影响）。用 `requestedIdRef` 记录已为哪个 id 发过
+ * 请求、第二次执行直接跳过——同 `usePatientQuery.ts` 的 `initializedRef` 口径。
+ *
+ * ⚠️ 竞态/卸载保护随之从闭包 `cancelled` 改为 `activeIdRef` 比对，且**必须在判守卫之前复位**：
+ * cleanup 会把 `activeIdRef` 置 null，remount 时若不复位，在飞请求返回时会被当成过期响应丢弃，
+ * 而守卫又拦掉了重发 → 页面恒 loading（本改动最容易踩的坑）。
+ * 换患者（id 变）与刷新页面（组件重建、两个 ref 归零）仍正常请求，重试路径与改动前一致；
+ * 若将来需要「同 id 强制重取」（如编辑患者后就地刷新详情），必须另加 version 信号进依赖，
+ * 否则会被 `requestedIdRef` 挡住。
  */
 export function usePatientDetail(id: string | undefined): PatientDetailState {
   const [state, setState] = useState<PatientDetailState>({ ...IDLE, loading: Boolean(id) });
+  /** 已为哪个 id 发过请求：StrictMode 第二次执行据此跳过，避免重复请求与重复审计 */
+  const requestedIdRef = useRef<string | null>(null);
+  /** 当前应采纳响应的 id：cleanup 置 null（卸载即失效），换 id 时被新值覆盖（丢弃过期响应） */
+  const activeIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!id) {
       setState({ ...IDLE, error: '缺少患者 ID' });
       return;
     }
-    let cancelled = false;
+    // 先复位再判守卫：StrictMode 的 cleanup 刚把它置 null，此处必须恢复，
+    // 否则第一次请求的响应会被当成过期数据丢弃
+    activeIdRef.current = id;
+    if (requestedIdRef.current === id) {
+      return;
+    }
+    requestedIdRef.current = id;
     setState((prev) => ({ ...prev, loading: true, error: null, forbidden: false }));
 
     const load = async (): Promise<void> => {
       try {
         const data = await fetchPatientDetail(id);
-        if (!cancelled) {
+        if (activeIdRef.current === id) {
           setState({ data, loading: false, error: null, forbidden: false });
         }
       } catch (error) {
-        if (cancelled) {
+        if (activeIdRef.current !== id) {
           return;
         }
         const forbidden = error instanceof ApiError && error.status === 403;
@@ -50,7 +71,7 @@ export function usePatientDetail(id: string | undefined): PatientDetailState {
     void load();
 
     return () => {
-      cancelled = true;
+      activeIdRef.current = null;
     };
   }, [id]);
 
