@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { DATE_ONLY_FORMAT, DATE_ONLY_PATTERN, dateTimeStringSchema } from '../date';
+import { dateTimeStringSchema } from '../date';
 import type { TIME_SLOT_CATEGORY, TimeSlotCategory } from '../dict/time-slots';
 import type { PatientListItem } from '../patient/schema';
 
@@ -185,23 +185,19 @@ export const GLUCOSE_REPORT_PAGE_SIZE = 15;
 /**
  * 血糖报告查询入参。
  *
- * ⚠️ `startDate`/`endDate` 刻意**不用** `dateOnlyStringSchema`：后者转 **UTC 零点**（服务 `@db.Date` 列），
- * 而报表要按**本地日历日**过滤 `measuredAt`（`timestamptz`）。故此处保持字符串原样，
- * 由服务端用 `parseLocalDate` 解析为本地零点，否则日界会整体偏移 8 小时。
+ * R24（2026-11-20 裁定 Q16）：原天粒度 `startDate`/`endDate` **升级为秒粒度**
+ * `startTime`/`endTime`（破坏性契约变更，前后端同轮改齐）——表单查询按
+ * 住院记录/科室记录联动出的时间范围过滤，范围边界是精确到秒的业务时刻。
+ *
+ * 复用 `dateTimeStringSchema`（YYYY-MM-DD HH:mm:ss → Date，按**本地时区**解析，
+ * 与录入侧 `measuredAt` 同口径）；过滤为**闭区间** `measuredAt ∈ [startTime, endTime]`。
+ * 行分组、统计栏、分页 total 全部基于过滤后的记录（裁定 Q14）。
  */
 export const glucoseReportQuerySchema = z.object({
-  /** YYYY-MM-DD，本地日期，含当日；不传则不限起点 */
-  startDate: z
-    .string()
-    .trim()
-    .regex(DATE_ONLY_PATTERN, `日期格式应为 ${DATE_ONLY_FORMAT}`)
-    .optional(),
-  /** YYYY-MM-DD，本地日期，含当日；不传则不限终点 */
-  endDate: z
-    .string()
-    .trim()
-    .regex(DATE_ONLY_PATTERN, `日期格式应为 ${DATE_ONLY_FORMAT}`)
-    .optional(),
+  /** YYYY-MM-DD HH:mm:ss，本地时间，含该秒；不传则不限起点 */
+  startTime: dateTimeStringSchema.optional(),
+  /** YYYY-MM-DD HH:mm:ss，本地时间，含该秒；不传则不限终点 */
+  endTime: dateTimeStringSchema.optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(GLUCOSE_REPORT_PAGE_SIZE),
 });
@@ -308,7 +304,7 @@ export interface GlucoseReportResponse {
   page: number;
   pageSize: number;
   /**
-   * 实际生效的查询区间（本地日期 YYYY-MM-DD）；未传时为 null。
+   * 实际生效的查询区间（R24 起为本地时刻 YYYY-MM-DD HH:mm:ss，秒粒度）；未传时为 null。
    * 回显这三个字段是为了让 `AuditLogInterceptor` 按既有 `AUDIT_DETAIL_ALLOW_LIST`
    * 自动把查询区间与条数落进审计 detail，**无需改白名单**。
    */

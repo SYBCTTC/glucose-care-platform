@@ -254,3 +254,54 @@ export interface PatientAdmitResult {
   toStatus: PatientStatus;
   item: PatientListItem;
 }
+
+/* -------------------------------------------------------------------------- */
+/* 住院记录（R24，GET /patients/:id/admissions）                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 科室停留记录（转科轨迹的一段，R24）。
+ *
+ * 数据源是 `AdmissionDepartment` 表；转科功能后续实现，当前每次住院只有入院时
+ * 自动创建的首条记录。时间均为**本地** `YYYY-MM-DD HH:mm:ss` 字符串。
+ */
+export interface AdmissionDepartmentOption {
+  id: string;
+  departmentId: string;
+  /** 科室名由库下发（同 TimeSlot.name 口径：前端禁止硬编码、禁止按名称匹配） */
+  departmentName: string;
+  /** 可空：兼容存量老数据（裁定 Q7，同 Admission.admittedAt 可空口径） */
+  startedAt: string | null;
+  /** null = 当前在科（进行中） */
+  endedAt: string | null;
+}
+
+/** 一次住院记录（R24） */
+export interface AdmissionOption {
+  id: string;
+  /** 第几次住院，从 1 起（下拉 label「第N次」前缀的数据源，裁定 Q5） */
+  seq: number;
+  /** YYYY-MM-DD HH:mm:ss；可空（裁定 Q7） */
+  admittedAt: string | null;
+  /** YYYY-MM-DD HH:mm:ss；null = 在院（本次住院） */
+  dischargedAt: string | null;
+  /** `dischargedAt === null`；前端「本次住院」选项的判定依据 */
+  isCurrent: boolean;
+  /** 该次住院的科室停留，按 startedAt 升序（NULLS FIRST） */
+  departments: AdmissionDepartmentOption[];
+}
+
+/**
+ * 住院记录树形响应（裁定 Q4：一次性下发，前端联动纯本地、不发二级请求）。
+ * `admissions` 按 admittedAt **降序**（裁定 Q6，最近的排最前，NULLS LAST）；
+ * 在院的那条（isCurrent）天然排最前。
+ */
+export interface AdmissionsResponse {
+  /**
+   * 患者当前状态：**初始态判定的权威依据**（裁定 Q15：在院 → 默认「本次住院」，
+   * 出院 → 默认「全部」）。不依赖 isCurrent 推断状态——出院患者若存在
+   * dischargedAt 为空的脏数据行，isCurrent 恒为 false，但状态仍须准确。
+   */
+  status: PatientStatus;
+  admissions: AdmissionOption[];
+}
