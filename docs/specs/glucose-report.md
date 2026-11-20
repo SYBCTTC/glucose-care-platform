@@ -46,6 +46,7 @@
 | R19 | **（2026-11-19 三次调整）值行加 6px 视觉间距**：`值` 与 `(时间)` 之间**恒有**间距；有强化时段时 `(时间)` 与 `(强化名)` 之间同样加间距。用 **inline margin** 实现（非空格字符，R3「紧邻无空格」的文本口径不变；inline margin 不破坏 R18 居中）。6px 为需求人指定值，非 token 档位，立常量 `VALUE_GAP_PX` 注明出处 |
 | R20 | **（2026-11-19 四次调整）「单位：mmol/L」标注删除（D5 被推翻），原位替换为统计栏**：`总计：N 次 ←20px→ \| ←20px→ 合格次数：M 次 ←20px→ 最高血糖：X ←20px→ 最低血糖：Y`，左对齐；20px 为需求人指定值（常量 `STATS_GAP_PX`）。口径：①总计 = `DictItem.counted=true` 码集的记录数（**数据驱动**，当前种子 0~4；5~9 不计入；需求人更正裁定：3/4 计入总计）；②合格 = `'1'` 正常条数；③最高：存在 `'4'`(High) → 展示字典 label，否则数值最大值 `toFixed(1)` + ` mmol/L`；最低对称（`'3'`/Low）；④极值颜色取**该记录自身 resultType** 的字典色，High/Low 文案色取 `'4'`/`'3'` 字典色；⑤统计由**服务端按查询范围全量计算**、随报表响应 `stats` 字段下发（不新增接口/权限/审计），**与分页无关**，后续新增筛选条件（时间/住院记录/科室，本轮不做）自动跟随；⑥无数据时统计栏照常展示 `总计：0 次`、极值 `-`（裁定 3a）；⑦**布局预留**：统计栏居左，下一个任务的查询筛选表单挂同一行右侧（左右分布，本轮不实现） |
 | R21 | **（2026-11-19 五次调整）滚动边界下移：子 Tabs 与统计栏固定，表格占据剩余空间、仅 body 内滚**：①详情页滚动容器（`PatientDetailTabs` 内容区）拆两层——子 Tabs 移出滚动区固定，内容区 `flex:1 + overflow:auto` 为唯一滚动容器；②血糖报告根节点 `height:100%` flex 列：统计栏/错误条 `flexShrink:0` 固定，表格 `flex:1`（最小高度 `REPORT_TABLE_MIN_HEIGHT=200` 防极矮屏塌缩，此时根节点 `overflow:auto` 兜底滚动）；③表格挂 `scroll.y='100%'` 触发 antd 拆分固定表头与滚动 body，实际高度由 `global.css` 的 `.gc-report-table` flex 链决定（antd 无百分比撑满 API，需求人接受 CSS 穿透其内部 DOM，作用域限定本表格）；④**裁定 1**：行数不足一屏时表格边框盒仍撑满剩余空间（body `flex:1`）；⑤**裁定 2**：分页条固定在表格区底部不随内容滚动；⑥**裁定 3**：打印裁剪本轮不考虑（现状即按定高卡片裁剪，非本次引入）；⑦其余 4 个内容页滚动行为不变（仍在内容区内滚），全应用其他页面零影响 |
+| R22 | **（2026-11-19 六次调整）展示项勾选 + 弃用时段合并展示**：①子 Tabs 同一水平线紧跟四个 Checkbox——**常规血糖 / 强化血糖 / 检测时间 / 操作人**，仅「血糖报告」子 Tab 渲染（切主 Tab 或其他子 Tab 即隐藏），默认全勾选；②常规与强化**至少保留一项**：取消其中一项时若另一项已未勾选 → 阻止 + `message.warning('常规血糖与强化血糖至少需勾选一项')`（裁定 Q7），双向都拦；③勾选变化**纯前端实时过滤**已下发数据，不重新请求（裁定 Q5：统计栏与分页 `total` 不受影响）——常规/强化控制**记录显隐不控列显隐**（裁定 Q3），检测时间控制格内 `(HH:mm)`、操作人控制第 2 行；④**特殊时段来源记录恒展示且时间恒展示**（规则 6），记录者仍受「操作人」控制；⑤**弃用时段不再成列**（推翻 R5 的「停用时段仍下发列」口径，裁定 Q2）：其历史记录按检测时间合并进**启用的**普通列，展示方式与强化一致——`值(时间)(弃用时段名)`，后缀是**弃用时段自己的名称**（裁定 Q1）；entry 契约随之变更：`intensiveName` 泛化为 `sourceSlotName`、新增 `sourceType`（原时段类型 0/1/4），弃用记录按**原时段类型**跟随勾选（裁定 Q4），归组失败兜底记录按特殊对待（恒展示）；⑥强化归组宿主只认**启用**普通时段（R5 的 `ignoreEnabled:true` 不再使用）；⑦记录全被过滤的日期行**保留为空行**（裁定 Q6：`total` 由服务端按日期算，前端抽行会页内不一致）；⑧勾选状态详情页会话内记忆，换患者/重进详情页重置全勾选（裁定 Q8），不持久化；⑨演示数据（裁定 Q9）：林*（`de6f6beb`）经 API 新增随机 ×3（含 1 条 High 无值型）+ 复测 ×2，随后 dev 库弃用 `RETEST`——复测记录即合并进早餐后/晚餐后列带 `(复测)` 后缀 |
 
 > ⚠️ **R3 与原始需求的差异**（需求人 2026-11-19 主动变更，按新口径实施）：
 > 原需求 4a 为「强化时段名紧跟血糖值」，现改为「**紧跟检测时间之后**」；括号由中文全角「（）」改为**英文半角** `()`。
@@ -165,8 +166,7 @@ interface GlucoseReportColumn {
   /** 1 普通 / 4 特殊（columns 里不会出现 0 强化） */
   type: 1 | 4;
   sortOrder: number;
-  /** 停用时段仍下发：历史数据必须有列可落（§4-5） */
-  enabled: boolean;
+  // R22：原 enabled 字段已删除——只有启用的时段成列，弃用时段记录合并进启用列（§4-4/5）
 }
 
 interface GlucoseReportRow {
@@ -192,8 +192,13 @@ interface GlucoseReportEntry {
   time: string;
   /** operator.name；operatorId 为空则 null（前端显示 `-`，D7） */
   nurseName: string | null;
-  /** 强化时段名（如「强化-上午」）；非强化记录为 null */
-  intensiveName: string | null;
+  /**
+   * 原时段类型（R22）：0 强化 / 1 普通 / 4 特殊。前端展示勾选据此过滤（裁定 Q3/Q4）；
+   * 特殊来源恒展示且时间恒展示（规则 6）；归组失败兜底记录按特殊对待
+   */
+  sourceType: 0 | 1 | 4;
+  /** 后缀来源时段名（R22，泛化自原 intensiveName）：强化时段名或弃用时段名（裁定 Q1）；启用时段落自己列时为 null */
+  sourceSlotName: string | null;
 }
 ```
 
@@ -207,6 +212,7 @@ interface GlucoseReportEntry {
 | 新增 `parseLocalDate(value: string): Date \| null` → `YYYY-MM-DD` 解析为**本地零点** | `src/date.ts` | **新增导出**（服务 R6 预留的 `startDate`/`endDate`，见下） |
 | 新增 `GlucoseReport*` 响应类型 + `glucoseReportQuerySchema` | `src/glucose/schema.ts` | **新增导出** |
 | `src/index.ts` 补 re-export | `src/index.ts` | 漏了会导致前端 `undefined`（`shared-package.md` 硬规则 4） |
+| （R22）`GlucoseReportColumn` 删 `enabled`；`GlucoseReportEntry.intensiveName` → `sourceSlotName` + 新增 `sourceType` | `src/glucose/schema.ts` | 改既有导出**类型**（破坏性；前后端同轮改齐，纯类型变更不影响运行时导出） |
 
 > ⚠️ **含新增导出 → 必须走 `shared-package.md` 三步**：`pnpm --filter @gc/shared build` → `pnpm sync:shared` → 清 `apps/web/node_modules/.vite`。
 > `gc-dev` 自 commit `e90c6d9` 起已具备「共享包副本 vs `.vite/deps/_metadata.json`」过期检测，跑 `node .codebuddy/skills/gc-dev/scripts/dev-up.mjs` 会自动清缓存，无需手工 `Remove-Item`。
@@ -232,18 +238,19 @@ interface GlucoseReportEntry {
 2. **患者不存在/已归档** → `40001`（与 `GET /patients/:id` 一致）。
 3. **日期分组按本地时区**：服务端用 `Date` 的**本地 getter** 取 `YYYY-MM-DD`（即 `formatLocalDate`），
    **不得**用 `formatDateOnly`（UTC）、**不得**依赖数据库时区设置。生产须确保 `TZ=Asia/Shanghai`（`date.ts:7` 既有约定）。
-4. **列归组规则**：
+4. **列归组规则**（R22 修订，宿主匹配只在**启用**普通时段里做）：
 
-   | 记录的 `mealContext` | 落列 | `intensiveName` |
-   |---|---|---|
-   | 普通时段（`type=1`） | 该 `code` 列 | `null` |
-   | 特殊时段（`type=4`，`RANDOM`/`RETEST`） | 该 `code` 列，**不做时间归组** | `null` |
-   | 强化时段（`type=0`） | `pickTimeSlotByTime(slots, HH:mm, { ignoreEnabled: true })` 命中的普通时段列（R5） | 该强化时段的 `name` |
-   | 强化且归组无命中（区间空洞） | `RANDOM` 列（R5 兜底） | **保留**强化时段名 |
-   | `null` 或 code 在 `TimeSlot` 表中不存在（历史脏数据） | `RANDOM` 列 | `null`（**不静默丢弃记录**，R13） |
+   | 记录的 `mealContext` | 落列 | `sourceType` | `sourceSlotName` |
+   |---|---|---|---|
+   | 启用的普通时段（`type=1`） | 该 `code` 列 | `1` | `null` |
+   | 启用的特殊时段（`type=4`，`RANDOM`/`RETEST`） | 该 `code` 列，**不做时间归组** | `4` | `null` |
+   | 强化时段（`type=0`，无论启用/弃用） | `pickTimeSlotByTime(slots, HH:mm)` 命中的**启用**普通时段列 | `0` | 该强化时段的 `name` |
+   | **弃用的普通/特殊时段**（R22，裁定 Q1/Q2） | 按检测时间归入**启用**普通列（展示方式与强化一致）；弃用普通时段的原区间无启用宿主 → `RANDOM` 兜底 | **原时段类型**（裁定 Q4，前端据此跟随勾选） | **弃用时段自己的 `name`**（如「复测」） |
+   | 归组无命中（区间空洞） | `RANDOM` 列（兜底） | 原类型（强化保留 `0`） | **保留**来源时段名 |
+   | `null` 或 code 在 `TimeSlot` 表中不存在（历史脏数据） | `RANDOM` 列 | `4`（按特殊对待，恒展示） | `null`（**不静默丢弃记录**，R13） |
 
-5. **`columns` 含停用时段**：表头由服务端查 `TimeSlot`（`type in (1,4)`）**全量**生成，含 `enabled=false`，按 `sortOrder` 升序。
-   理由：`COMMON-DATA.md:102`「停用时段历史可展示」——若表头剔除停用项，其历史数据将无列可落。
+5. **`columns` 只含启用时段**（R22，推翻原「含停用项」口径）：表头由服务端查 `TimeSlot`（`enabled=true` 且 `type in (1,4)`）生成，按 `sortOrder` 升序。
+   弃用时段的历史数据不再需要自己的列——按规则 4 合并进启用列并带后缀，`COMMON-DATA.md`「停用时段历史可展示」口径仍满足（展示形式变化）。
 6. **分页单位是日期**（R7）：先取该患者（范围内）的 **distinct 本地日期**集合 → 降序 → 切出本页 15 个日期 →
    再查这 15 天内的**全部记录**组装矩阵。**禁止用 Prisma `take`/`skip` 直接切记录**（那会切成 15 条血糖）。
 7. **不补空行**（R7）：无血糖数据的日期不出现在 `rows` 里。
@@ -368,17 +375,25 @@ export function useDetailTabNavigate() {
 - **表头**：日期列 + `columns`（8 普通 + 2 特殊 = 10 列）= **11 列**；表头文字取 `column.name`
   （库里维护，**禁止硬编码、禁止按名称匹配** —— `time-slots.ts:21` code 才是契约）。
 - **日期列**：`YYYY-MM-DD`（R11，**不附星期**），`gc-num` 等宽数字，居中、**不固定**（R17）。
-- **单元格**（R3/R4）：`entries` 纵向堆叠，每条**两行**，组间用 `token.lineWidth` 分隔线：
-  - **第 1 行** `{值或标签}({HH:mm})`，强化再追加 `({强化时段名})`：
+- **展示项勾选**（R22）：子 Tabs 同一水平线紧跟四个 Checkbox（常规血糖/强化血糖/检测时间/操作人），
+  仅「血糖报告」子 Tab 渲染；默认全勾选；常规与强化至少保留一项（取消到两项都空时阻止并
+  `message.warning`，裁定 Q7）。状态在 `PatientDetailTabs` 持有、经 Outlet context（`DetailChildContext.reportDisplay`）
+  下发，换患者重置（裁定 Q8）。过滤是**纯前端**的（裁定 Q5）：常规/强化 → `filterReportRows` 按
+  `entry.sourceType` 滤记录（不滤列，裁定 Q3；弃用记录按原类型跟随，裁定 Q4；特殊恒展示）；
+  检测时间/操作人 → `ReportCell` 控制格内 `(HH:mm)` 与第 2 行的渲染（特殊来源时间恒展示，规则 6）。
+  记录全被过滤的日期行保留为空行（裁定 Q6）。
+- **单元格**（R3/R4，R22 修订后缀口径）：`entries` 纵向堆叠，每条**两行**，组间用 `token.lineWidth` 分隔线：
+  - **第 1 行** `{值或标签}[(HH:mm)][({sourceSlotName})]`——后缀为强化时段名或**弃用时段名**（R22）：
     - `valueMmolL !== null` → `value.toFixed(1)`，颜色取 `DY-RESULT` 字典 `color`
     - `valueMmolL === null` → 字典 `label`（如 `Low` / `High` / `拒检`），颜色取字典 `color`；字典查不到则回退 `resultType` 原文
       （与 `LastGlucose.tsx:44` 的 `item?.label ?? resultType` 同口径）
-    - 括号一律**英文半角**、**紧邻无空格**：`6.8(08:30)`、`6.8(08:30)(强化-上午)`、`Low(08:30)`；
-      视觉上按 R19 加 **6px margin**（`值` 与 `(时间)` 之间恒有；有强化时 `(时间)` 与 `(强化名)` 之间同样有），文本口径不变
-    - 时间与强化名用正文色 `var(--gc-color-text)`，**不着色**（D4）
+    - 括号一律**英文半角**、**紧邻无空格**：`6.8(08:30)`、`6.8(08:30)(强化-上午)`、`5.5(09:05)(复测)`、`Low(08:30)`；
+      视觉上按 R19 加 **6px margin**（`值` 与 `(时间)` 之间恒有；有后缀时 `(时间)` 与 `(名称)` 之间同样有），文本口径不变
+    - `(HH:mm)` 受「检测时间」勾选控制，但 `sourceType=4`（特殊来源，含弃用特殊与兜底）**恒展示**（规则 6）
+    - 时间与后缀名用正文色 `var(--gc-color-text)`，**不着色**（D4）
     - 判定「是否数值型」**以 `valueMmolL === null` 为准**，不在前端复制 `VALUE_RESULT_CODES` 码集
       （避免与 `LastGlucose.tsx:6` 形成第二份实现，`shared-package.md` 硬规则 3）
-  - **第 2 行** `nurseName`，为 `null` 显示 `-`（D7）
+  - **第 2 行** `nurseName`，为 `null` 显示 `-`（D7）；整行受「操作人」勾选控制（对所有来源生效，规则 6「其他几个继续受控」）
 - **统计栏**（R20，替代原「单位：mmol/L」标注，D5 已推翻）：表格上方左对齐展示
   `总计：N 次 | 合格次数：M 次 最高血糖：X 最低血糖：Y`（段落间 20px，`|` 仅在前两段之间）；
   数据取响应 `stats`（服务端全量统计，翻页不变）；High/Low 的 label 与色、极值着色全部取 `DY-RESULT` 字典；
@@ -419,11 +434,14 @@ export function useDetailTabNavigate() {
 
 ## 8. 测试要求
 
-- [x] **单测（server）`glucose.service.spec.ts`**（27 用例，下列各点全覆盖；含 R20 统计栏 6 例）：
-  - 强化归组：`INTENSIVE_AM` + 检测时间 `09:00` → 落 `BREAKFAST_POST` 列，`intensiveName='强化-上午'`
-  - 归组**忽略 `enabled`**：普通时段停用后，强化记录仍归入该列（R5）
-  - 区间空洞 → 落 `RANDOM` 列且**保留** `intensiveName`
-  - `mealContext` 为 `null` / 未知 code → 落 `RANDOM` 列，**不丢记录**
+- [x] **单测（server）`glucose.service.spec.ts`**（report 32 用例，下列各点全覆盖；含 R20 统计栏 6 例、R22 归组 6 例）：
+  - 强化归组：`INTENSIVE_AM` + 检测时间 `09:00` → 落 `BREAKFAST_POST` 列，`sourceSlotName='强化-上午'`、`sourceType=0`
+  - 强化宿主只认**启用**普通时段：宿主停用 → 落 `RANDOM` 兜底且保留后缀（R22，替代 R5 的忽略 `enabled` 口径）
+  - 区间空洞 → 落 `RANDOM` 列且**保留** `sourceSlotName`
+  - **弃用时段不再成列**（R22）：弃用特殊时段（`RETEST`）记录按检测时间合并进启用列（`09:05` → 早餐后），
+    后缀 = 弃用时段自己的名称、`sourceType` 保留原类型（4）；弃用普通时段（`BEDTIME`）记录原区间无启用宿主 → `RANDOM` 兜底 + 后缀 + `sourceType=1`
+  - 启用的普通/特殊记录落自己列：`sourceType` 为原类型、无后缀
+  - `mealContext` 为 `null` / 未知 code → 落 `RANDOM` 列，**不丢记录**，`sourceType` 按特殊对待（恒展示）
   - 特殊时段（`RANDOM`/`RETEST`）直接落列，**不做**时间归组
   - **分页按日期**：18 个有数据日期 → `total=18`、第 1 页 15 行、第 2 页 3 行
   - **不补空行**：中间缺测的日期不出现在 `rows`
@@ -436,13 +454,20 @@ export function useDetailTabNavigate() {
     合格 = `'1'` 条数；`hasHigh`/`hasLow` 存在性；极值取记录本身（值 + 自身 `resultType`）、只查数值型且有值记录；
     无数值记录 → 极值 null；**统计与分页无关**（page=2 时 where 仍为全范围）
 - [x] **单测（shared）`time-slots.spec.ts`**：`pickTimeSlotByTime` 的 `ignoreEnabled`
-      （不传/`false` 保持原行为跳过停用项、`true` 时命中停用时段）—— 回归保护既有调用方
+      （不传/`false` 保持原行为跳过停用项、`true` 时命中停用时段）—— 选项行为仍被钉住；
+      R22 起报表归组**不再传 `true`**（宿主只认启用时段），当前无生产调用方使用 `true`
 - [x] **单测（shared）`date.spec.ts`**：`formatLocalDate` / `formatLocalTime`，并断言与 `formatDateOnly`（UTC）在跨日场景下**结果不同**
-- [x] **单测（web）`GlucoseReportTab`**（23 用例）：两行结构、强化后缀、`valueMmolL=null` 显示字典标签、
+- [x] **单测（web）`GlucoseReportTab`**（33 用例）：两行结构、来源时段名后缀、`valueMmolL=null` 显示字典标签、
       同日同时段多条堆叠、`nurseName=null` 显示 `-`、半角括号无空格；空格子渲染为空（R18）；
       值行 6px 间距两种形态（R19）；**统计栏 `ReportStatsBar`（R20，8 例）**：总计/合格文案、20px 间距 ×4、
       极值 `toFixed(1)`+` mmol/L` 按自身 resultType 着色、`hasHigh`/`hasLow` 展示字典 label 及色、
-      无数值且无 High/Low → `-`、字典未加载回退 code 原文
+      无数值且无 High/Low → `-`、字典未加载回退 code 原文；
+      **R22 展示勾选（10 例）**：`ReportCell` 取消「检测时间」常规记录隐藏 `(HH:mm)` 而特殊来源恒展示、
+      取消「操作人」第 2 行隐藏（含特殊来源）、弃用特殊记录后缀显示弃用时段名；
+      `filterReportRows` 全勾选返回原引用、取消常规/强化各自只滤对应来源（特殊恒保留）、
+      弃用记录按原类型跟随（Q4）、整行滤空保留空行（Q6）、时间/操作人勾选不触发行级过滤
+- [x] **单测（web）`PatientDetail.spec.tsx`**（R22 补 3 例）：血糖报告子 Tab 渲染四个勾选且默认全勾选；
+      其他血糖子 Tab / 主 Tab 非血糖数据 → 不渲染勾选（规则 2）
 - [x] **单测（web）`routes.spec.tsx`**：菜单结构仍绿（5 条子路由 + `*` 兜底均不进菜单）；可辨识联合改造后类型不破
 - [x] **单测（web）`detail-tabs.spec.ts`**（13 用例）：`resolveDetailTab` 纯函数 —— 5 条子路径各自派生出正确的
       `{ main, glucose }`；裸详情路径 / 未知子路径 → 回落默认 `glucose`+`report`（覆盖风险 5、6）
@@ -471,6 +496,14 @@ export function useDetailTabNavigate() {
   - 表格**无横向滚动条**：11 列全部在页面内可见，格内内容居中（R17/R18）
   - **纵向滚动边界（R21）**：滚动只发生在表格 body 内；子 Tabs、统计栏、表头、分页固定不动；
     行数不足一屏时表格边框盒仍撑满剩余空间；切到血糖记录/趋势图/基本信息/出入院记录，滚动行为与改造前一致
+  - **展示项勾选（R22）**：勾选框仅「血糖报告」子 Tab 出现（切其他子 Tab/主 Tab 即消失）；默认全勾选；
+    取消「检测时间」→ 常规/强化记录的 `(HH:mm)` 消失、特殊来源记录时间仍展示；取消「操作人」→ 所有记录第 2 行消失；
+    取消「常规血糖」→ 只隐藏常规来源记录（列仍在，强化/合并记录保留）；再取消「强化血糖」→ 被阻止并提示
+    「常规血糖与强化血糖至少需勾选一项」（反方向同理）；统计栏与分页 total 不随勾选变化（Q5）；
+    整行被滤空的日期保留为空行（Q6）；换患者/重进详情页勾选重置为全勾选（Q8）
+  - **弃用时段合并展示（R22，演示数据见裁定 Q9）**：表头无「复测」列；林* 的 `2026-11-15 09:05` /
+    `2026-11-14 19:31` 复测记录分别在「早餐后」「晚餐后」列展示为 `5.5(09:05)(复测)` / `11.1(19:31)(复测)`；
+    随机 ×3 落「随机」列（其中 1 条 High 显示字典标签、无数值）；复测记录已不再出现在录入表单的时段选项中
   - **统计栏（R20）**：翻页时四个统计值**不变**（与分页无关）；有 High/Low 记录的患者最高/最低显示字典标签及色；
     无数据患者显示 `总计：0 次` 与 `-`；原「单位：mmol/L」标注已消失
   - `device.admin`（`NONE` 档）访问 → 403 占位页

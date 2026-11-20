@@ -99,7 +99,7 @@
 **已知约束：**
 
 - 时段可用性由**服务端查库**判定（2026-11-17 起）：`createGlucoseSchema` 只校验格式（trim 后 1~32，与 `TimeSlot.code VarChar(32)` 对齐），`GlucoseService.assertTimeSlotUsable` 经 `TimeSlotService.findByCode` 校验该 code **存在且 `enabled`**，否则 10001 + `details[{field:'mealContext'}]`。**库里新增时段无需改代码、无需发版。**
-- 停用时段：**历史可展示、新录入拒绝**（`GET /time-slots` 仍下发停用项，供历史血糖回显名称）。
+- 停用时段：**历史可展示、新录入拒绝**（`GET /time-slots` 仍下发停用项，供历史血糖回显名称）。血糖报告中的展示形式（R22，2026-11-19 裁定）：弃用时段**不再有自己的列**，历史记录按检测时间合并进启用的普通列并带弃用时段名后缀（无启用宿主时兜底随机列），见 `docs/specs/glucose-report.md` R22。
 - `@gc/shared` 已**无静态兜底**：`/time-slots` 接口失败时 `useCommonDataStore().timeSlots` 为空，录入弹窗的时段下拉显示「时段数据未加载，请刷新页面重试」；`getTimeSlotName(code)` 取不到名称时返回 code 本身（不用静态名称掩盖库数据缺失）。
 - 公共数据一次性加载（`loaded` 幂等），改时段名/区间后需重新登录或刷新页面才生效。
 
@@ -112,7 +112,7 @@
 
 - "添加血糖表单的**结果选项**用 `DY-RESULT`（`dictItems(DICT_TYPE.GLUCOSE_RESULT)`，RadioGroup 只渲染 `checkable=true` 的项，并在最前面加一个不在字典里的「检测」占位项），**操作人**用 `DY-OPERATOR`（默认带出 `CURRENT_USER`，若当前账号不在其中则前端临时补一条，不写回 DY-OPERATOR）。"
 - "患者血糖展示按 `DY-TIMESLOT` 的时段作为表头（普通时段 + 特殊时段，强化按检测时间落点归入普通时段），**按服务端返回的 `resultType` 着色**（`'0'` 偏低 / `'2'` 偏高标红），不要在前端拿阈值自己比——阈值在 `SystemConfig` 里、前端取不到；录入弹窗的「检测时段」取 `useCommonDataStore().timeSlots`，并按检测时间自动选中。"
-  → ✅ **血糖报告已按此口径落地**（2026-11-19，`docs/specs/glucose-report.md`）：表头 = 普通 + 特殊时段（**含停用项**，其历史数据必须有列可落）；强化归组用 `pickTimeSlotByTime(slots, time, { ignoreEnabled: true })`，无命中或 `mealContext` 脏数据落 `RANDOM` 列；着色取 `DY-RESULT` 字典 `color`，只作用于数值/标签。
+  → ✅ **血糖报告已按此口径落地**（2026-11-19，`docs/specs/glucose-report.md`；同日 R22 修订）：表头 = **启用的**普通 + 特殊时段（弃用时段不成列，其历史记录按检测时间合并进启用列并带弃用时段名后缀）；强化归组用 `pickTimeSlotByTime(slots, time)` 只在启用普通时段里找宿主，无命中或 `mealContext` 脏数据落 `RANDOM` 列；着色取 `DY-RESULT` 字典 `color`，只作用于数值/标签。
 - "设备列表的状态列用 `D-DEVSTATUS` 映射中文；设备选择用 `DY-DEVICE`（`useCommonDataStore().devices`）。"
 - "建档表单的性别用 `D-GENDER`（可选值取 `GENDER_SELECTABLE`），糖尿病类型用 `D-DIABETES`，责任医生用 `DY-DOCTOR`（`staffByRole('DOCTOR')`），责任护士用 `DY-OPERATOR`，科室用 `DY-DEPT`。"
 - "糖化血红蛋白：范围常量 `HBA1C_MIN/HBA1C_MAX/HBA1C_UNIT`（`patient/schema.ts`），0~100、最多 1 位小数、单位 `%`，禁止在页面写死范围和单位。"
