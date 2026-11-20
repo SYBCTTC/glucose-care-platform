@@ -124,7 +124,14 @@ describe('PatientBasicInfo — 基本信息区渲染', () => {
 function renderTabs(pathname: string): string {
   return renderToStaticMarkup(
     <MemoryRouter initialEntries={[pathname]}>
-      <PatientDetailTabs outletContext={{ glucoseVersion: 0 }} />
+      <PatientDetailTabs
+        outletContext={{
+          glucoseVersion: 0,
+          // R25：context 契约新增两项（本测试只渲染 Tabs 壳，给稳定空值即可）
+          onGlucoseChanged: () => {},
+          patient: { id: 'p1', nameMasked: '林*', status: 'INPATIENT' },
+        }}
+      />
     </MemoryRouter>,
   );
 }

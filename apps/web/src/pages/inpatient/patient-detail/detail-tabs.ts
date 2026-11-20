@@ -60,9 +60,17 @@ export interface DetailTabState {
  * `glucoseVersion`：详情页壳里的「添加血糖」成功后自增，血糖报告据此重新拉取。
  * 录入弹窗挂在壳上、报表数据在子路由里，两者不同层，故走 Outlet context 打通；
  * 没有它，添加血糖后报表会停在旧数据上。
+ *
+ * R25 新增两项：报表子路由内也挂了血糖弹框（空白格添加 / 点击记录 review-编辑-作废），
+ * 成功后同样要让报表重拉——`onGlucoseChanged` 与壳上弹框共用同一版本号源；
+ * `patient` 摘要供子路由内弹框使用（标题显示脱敏姓名、添加入口按住院中门控）。
  */
 export interface DetailOutletContext {
   glucoseVersion: number;
+  /** R25：血糖添加/编辑/作废成功后的回调（壳层实现 = glucoseVersion + 1） */
+  onGlucoseChanged: () => void;
+  /** R25：患者摘要（壳层只在 data 已加载分支渲染 Outlet，故恒非空） */
+  patient: { id: string; nameMasked: string; status: string };
 }
 
 /**

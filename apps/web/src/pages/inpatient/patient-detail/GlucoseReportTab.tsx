@@ -1,14 +1,18 @@
-import { useEffect, useMemo, useState } from 'react';
-import type { CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { FullscreenExitOutlined, FullscreenOutlined } from '@ant-design/icons';
 import { Alert, Button, Table, Typography, message, theme } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useOutletContext, useParams } from 'react-router-dom';
+import dayjs from 'dayjs';
+import type { Dayjs } from 'dayjs';
 import {
   DICT_TYPE,
   GLUCOSE_REPORT_PAGE_SIZE,
   GLUCOSE_RESULT_CODE_HIGH,
   GLUCOSE_RESULT_CODE_LOW,
+  PATIENT_STATUS,
+  PERMISSION,
   TIME_SLOT_CATEGORY,
 } from '@gc/shared';
 import type {
@@ -18,8 +22,11 @@ import type {
   GlucoseReportRow,
   GlucoseReportStats,
 } from '@gc/shared';
+import { useAuthStore } from '@/store/auth';
 import { useCommonDataStore } from '@/store/common-data';
+import GlucoseCreateModal from '../patients/GlucoseCreateModal';
 import type { DetailChildContext, GlucoseReportDisplay } from './detail-tabs';
+import GlucoseReviewModal from './GlucoseReviewModal';
 import { useGlucoseReport } from './useGlucoseReport';
 import type { GlucoseReportRange } from './useGlucoseReport';
 import { useAdmissions } from './useAdmissions';
@@ -52,6 +59,58 @@ const REPORT_TABLE_MIN_HEIGHT = 200;
 const EMPTY_RESULT_TYPES: DictItemOption[] = [];
 
 /**
+ * R25：空白格可点击填充块的最小高度（px）。
+ * 与两条记录（两行文本 + 行距）的高度大体一致，避免「可点/不可点」两种状态行高跳动。
+ * 非 token 档位（视觉对齐值），立常量注明出处。
+ */
+const EMPTY_CELL_MIN_HEIGHT = 44;
+
+/**
+ * R25：可点击块的公共交互壳（entry 块 / 空白格共用）。
+ * hover 反馈 + 键盘可达（Enter/Space，ui-design-tokens 规则 5）；
+ * 独立小组件让 hover state 只重渲染自身，不波及整表；
+ * hover 背景是内联状态，打印媒体不会触发，无需 gc-no-print。
+ */
+function ClickableCellArea({
+  onClick,
+  ariaLabel,
+  minHeight,
+  children,
+}: {
+  onClick: () => void;
+  ariaLabel?: string;
+  minHeight?: number;
+  children?: ReactNode;
+}) {
+  const [hover, setHover] = useState(false);
+  const { token } = theme.useToken();
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      aria-label={ariaLabel}
+      onClick={onClick}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onClick();
+        }
+      }}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        cursor: 'pointer',
+        borderRadius: token.borderRadiusSM,
+        background: hover ? token.colorFillTertiary : undefined,
+        minHeight,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+/**
  * 血糖报告单元格。
  *
  * 每条记录**两行**（R3，需求人变更后的口径）：
@@ -80,18 +139,34 @@ export function ReportCell({
   cell,
   resultTypes,
   display,
+  onEntryClick,
+  onEmptyClick,
 }: {
   cell: GlucoseReportCell | undefined;
   /** DY-RESULT 字典项，用于取标签与色值 */
   resultTypes: DictItemOption[];
   /** R22 展示项勾选（常规/强化的记录显隐由 filterReportRows 在行级处理，这里只管时间/操作人） */
   display: GlucoseReportDisplay;
+  /**
+   * R25：点击 entry 块（两行整体）→ review 弹框；不传 = 非交互（静态渲染/打印）。
+   * 有 `patient:view` 即可点开只读 review（裁定 Q9），编辑/删除按钮在弹框内按权限显隐。
+   */
+  onEntryClick?: (entryId: string) => void;
+  /**
+   * R25：点击空白格 → 添加弹框（预填该行日期 + 该列时段）；不传 = 不可点。
+   * 裁定 Q14/Q16：以**可见** entries 为准——被展示勾选隐藏后视觉为空的格子同样按空白格处理；
+   * 可点性由父层按 `glucose:create` + 住院中门控（前端显隐只是体验，服务端才是边界）。
+   */
+  onEmptyClick?: () => void;
 }) {
   const { token } = theme.useToken();
 
   // 2026-11-19 二次调整：无数据的格子渲染为空，不放 `-` 占位
+  // R25：有添加入口时空白格渲染为可点击填充块
   if (!cell?.entries.length) {
-    return null;
+    return onEmptyClick ? (
+      <ClickableCellArea onClick={onEmptyClick} ariaLabel="添加血糖" minHeight={EMPTY_CELL_MIN_HEIGHT} />
+    ) : null;
   }
 
   const separatorStyle = {
@@ -111,8 +186,9 @@ export function ReportCell({
         // 规则 6：特殊时段来源（含弃用的特殊时段、归组失败兜底）时间恒展示，不受「检测时间」勾选控制
         const showTime = display.time || entry.sourceType === TIME_SLOT_CATEGORY.SPECIAL;
 
-        return (
-          <div key={`${entry.time}-${index}`} style={index > 0 ? separatorStyle : undefined}>
+        // R25：两行内容整体作为点击目标（第 1 行 值+时间+来源时段名 / 第 2 行 记录者）
+        const content = (
+          <>
             {/* gc-num 提供等宽数字；其默认右对齐被 inline center 覆盖（2026-11-19 二次调整：格内居中）。
                 不设 nowrap：列宽均分页面时允许括号段换行，保证表格不横向滚动。
                 间距（2026-11-19 三次调整，需求人指定 6px）：`值` 与 `(时间)` 之间恒有间距；
@@ -128,6 +204,16 @@ export function ReportCell({
             {display.operator ? (
               <div style={{ color: token.colorTextSecondary }}>{entry.nurseName ?? '-'}</div>
             ) : null}
+          </>
+        );
+
+        return (
+          <div key={entry.id} style={index > 0 ? separatorStyle : undefined}>
+            {onEntryClick ? (
+              <ClickableCellArea onClick={() => onEntryClick(entry.id)}>{content}</ClickableCellArea>
+            ) : (
+              content
+            )}
           </div>
         );
       })}
@@ -170,6 +256,25 @@ export function filterReportRows(
       }),
     })),
   }));
+}
+
+/**
+ * R25（裁定 Q15）：空白格点击添加的预填值。
+ *
+ * `measuredAt` = **该行日期 + 当前时刻的时分秒**（历史日期照此拼接，需求人明确裁定）；
+ * `mealContext` = 该列时段 code。预填时段在添加弹框里视为「已手动选择」，
+ * 不被按检测时间自动推荐覆盖（裁定 Q16 口径），用户仍可改。
+ * 导出仅为单测（同 ReportCell 的理由）。
+ */
+export function buildAddPrefill(
+  date: string,
+  mealContext: string,
+  now: Dayjs,
+): { measuredAt: Dayjs; mealContext: string } {
+  return {
+    measuredAt: dayjs(`${date} ${now.format('HH:mm:ss')}`, 'YYYY-MM-DD HH:mm:ss'),
+    mealContext,
+  };
 }
 
 /**
@@ -275,7 +380,8 @@ export function ReportStatsBar({
  */
 export default function GlucoseReportTab() {
   const { id } = useParams<{ id: string }>();
-  const { glucoseVersion, reportDisplay } = useOutletContext<DetailChildContext>();
+  const { glucoseVersion, reportDisplay, onGlucoseChanged, patient } =
+    useOutletContext<DetailChildContext>();
   const { token } = theme.useToken();
   const [page, setPage] = useState(1);
   // R23：全屏态（表格撑满视口）。纯视图状态，不持久化、不影响请求与分页
@@ -296,6 +402,23 @@ export default function GlucoseReportTab() {
   const resultTypes = useCommonDataStore(
     (state) => state.dicts[DICT_TYPE.GLUCOSE_RESULT] ?? EMPTY_RESULT_TYPES,
   );
+
+  // R25：表格内两个弹框的状态——点击 entry 块 → review/编辑；点击空白格 → 添加（预填）
+  const [reviewRecordId, setReviewRecordId] = useState<string | null>(null);
+  const [addPrefill, setAddPrefill] = useState<{ measuredAt: Dayjs; mealContext: string } | null>(
+    null,
+  );
+  const hasPermission = useAuthStore((state) => state.hasPermission);
+  // 空白格添加入口与壳上「添加血糖」按钮同口径：住院中 + glucose:create（裁定 Q14；
+  // 前端显隐只是体验，服务端才是边界）。entry 点击不设权限门槛：有 patient:view 即可只读 review（裁定 Q9）
+  const canAdd =
+    patient.status === PATIENT_STATUS.INPATIENT && hasPermission(PERMISSION.GLUCOSE_CREATE);
+  const handleEntryClick = useCallback((entryId: string) => {
+    setReviewRecordId(entryId);
+  }, []);
+  const handleEmptyClick = useCallback((date: string, slotCode: string) => {
+    setAddPrefill(buildAddPrefill(date, slotCode, dayjs()));
+  }, []);
 
   // 换患者时回到第 1 页、退出全屏并重置查询表单：同一路由不同 :id 不会重挂载组件，
   // state 需手动重置。表单置回 null（未就绪）→ 报表请求挂起，等新患者的住院记录到达
@@ -387,12 +510,15 @@ export default function GlucoseReportTab() {
           cell={row.cells.find((cell) => cell.slotCode === column.code)}
           resultTypes={resultTypes}
           display={reportDisplay}
+          // R25：entry 块 → review 弹框；空白格 → 添加弹框（预填该行日期 + 该列时段）
+          onEntryClick={handleEntryClick}
+          onEmptyClick={canAdd ? () => handleEmptyClick(row.date, column.code) : undefined}
         />
       ),
     }));
 
     return [dateColumn, ...slotColumns];
-  }, [data?.columns, resultTypes, reportDisplay]);
+  }, [data?.columns, resultTypes, reportDisplay, handleEntryClick, handleEmptyClick, canAdd]);
 
   // R21（2026-11-19 裁定）：根节点撑满内容区高度，统计栏固定、表格占据剩余空间、
   // 只在表格 body 内滚动。overflow auto 仅作极矮视口兜底（表格区压到最小高度后
@@ -482,6 +608,23 @@ export default function GlucoseReportTab() {
           showSizeChanger: false,
           showTotal: (total) => `共 ${total} 天`,
         }}
+      />
+
+      {/* R25：报表子路由内挂载的弹框（壳上那个服务列表/详情入口，这两个服务表格单元格入口）。
+          成功统一走 onGlucoseChanged（壳层 glucoseVersion+1 → 本报表自动重拉），
+          R24 查询条件 / R22 勾选 / R23 全屏态均不受影响 */}
+      <GlucoseCreateModal
+        patient={patient}
+        open={addPrefill !== null}
+        prefill={addPrefill}
+        onClose={() => setAddPrefill(null)}
+        onSuccess={onGlucoseChanged}
+      />
+      <GlucoseReviewModal
+        patient={patient}
+        recordId={reviewRecordId}
+        onClose={() => setReviewRecordId(null)}
+        onChanged={onGlucoseChanged}
       />
     </div>
   );

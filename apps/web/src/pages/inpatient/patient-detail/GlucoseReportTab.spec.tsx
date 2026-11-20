@@ -21,7 +21,9 @@ import type {
   GlucoseReportStats,
 } from '@gc/shared';
 import { DEFAULT_GLUCOSE_REPORT_DISPLAY, type GlucoseReportDisplay } from './detail-tabs';
+import dayjs from 'dayjs';
 import {
+  buildAddPrefill,
   filterReportRows,
   FullscreenToggle,
   ReportCell,
@@ -40,6 +42,7 @@ const RESULT_TYPES = [
 
 function entry(overrides: Partial<GlucoseReportEntry> = {}): GlucoseReportEntry {
   return {
+    id: 'g-1',
     valueMmolL: 6.8,
     resultType: '1',
     time: '08:30',
@@ -406,5 +409,24 @@ describe('ReportStatsBar — 报表统计栏（R20）', () => {
 
     expect(text).toContain('最高血糖：4');
     expect(text).toContain('最低血糖：3');
+  });
+});
+
+describe('buildAddPrefill — 空白单元格添加预填（R25 裁定 Q15）', () => {
+  it('拼接「该行日期 + 当前时刻的时分秒」，时段取该列 code', () => {
+    const now = dayjs('2026-11-20 14:35:09');
+    const prefill = buildAddPrefill('2026-11-18', 'LUNCH_POST', now);
+
+    // 历史日期也照此拼接：日期来自行、时分秒来自 now（裁定 Q15）
+    expect(prefill.measuredAt.format('YYYY-MM-DD HH:mm:ss')).toBe('2026-11-18 14:35:09');
+    expect(prefill.mealContext).toBe('LUNCH_POST');
+  });
+
+  it('行日期为当天时同样拼接当前时分秒', () => {
+    const now = dayjs('2026-11-20 07:00:00');
+    const prefill = buildAddPrefill('2026-11-20', 'FASTING', now);
+
+    expect(prefill.measuredAt.format('YYYY-MM-DD HH:mm:ss')).toBe('2026-11-20 07:00:00');
+    expect(prefill.mealContext).toBe('FASTING');
   });
 });

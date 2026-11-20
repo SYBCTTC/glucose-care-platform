@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Button, Card, Result, Spin, theme } from 'antd';
 import { ArrowLeftOutlined } from '@ant-design/icons';
 import { PATIENT_STATUS, PERMISSION } from '@gc/shared';
@@ -40,6 +40,12 @@ export default function PatientDetailPage() {
   // 决策 D5：仅住院患者 + GLUCOSE_CREATE 权限展示"添加血糖"
   const canAddGlucose =
     data?.status === PATIENT_STATUS.INPATIENT && hasPermission(PERMISSION.GLUCOSE_CREATE);
+
+  // R25：血糖变更（壳上添加 / 子路由内添加·编辑·作废）统一走这一个回调 → 版本号 +1 → 报表重拉。
+  // 患者摘要区不含血糖字段，故本页其余部分无需刷新；成功提示由各弹框内部给出（决策 D5 口径不变）。
+  const handleGlucoseChanged = useCallback(() => {
+    setGlucoseVersion((version) => version + 1);
+  }, []);
 
   return (
     <Card
@@ -95,7 +101,14 @@ export default function PatientDetailPage() {
             />
           </div>
           {/* Tabs 区占满剩余空间；子路由内容经其内部的 <Outlet/> 渲染 */}
-          <PatientDetailTabs outletContext={{ glucoseVersion }} />
+          <PatientDetailTabs
+            outletContext={{
+              glucoseVersion,
+              onGlucoseChanged: handleGlucoseChanged,
+              // R25：子路由内血糖弹框所需的患者摘要（此分支 data 恒非空）
+              patient: { id: data.id, nameMasked: data.nameMasked, status: data.status },
+            }}
+          />
         </>
       )}
 
@@ -103,12 +116,7 @@ export default function PatientDetailPage() {
         patient={data}
         open={glucoseOpen && data !== null}
         onClose={() => setGlucoseOpen(false)}
-        onSuccess={() => {
-          // 血糖报告已是真实数据：录入成功后必须让它重取，否则表格停在旧数据上。
-          // 患者摘要区不含血糖字段，故本页其余部分无需刷新。
-          // 成功提示由 GlucoseCreateModal 内部给出（决策 D5）。
-          setGlucoseVersion((version) => version + 1);
-        }}
+        onSuccess={handleGlucoseChanged}
       />
     </Card>
   );
