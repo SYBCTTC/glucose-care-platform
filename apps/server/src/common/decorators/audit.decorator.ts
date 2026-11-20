@@ -76,4 +76,10 @@ export const AUDIT_DETAIL_ALLOW_LIST = [
   'wardRecordId',
   /** 虚拟病区移出方式，枚举码 MANUAL / DISCHARGE / ARCHIVE，不含患者信息 */
   'leaveReason',
+  /**
+   * 血糖记录 ID（UUID，不含患者身份信息）：作废血糖（GLUCOSE_VOID，R25）留痕。
+   * 审计对象仍是患者（targetType='PATIENT'、targetId=患者 ID），
+   * 但一个患者有多条血糖记录，只靠 targetId + action 无法定位作废的是哪一条（同 wardRecordId 先例）。
+   */
+  'glucoseRecordId',
 ] as const;
