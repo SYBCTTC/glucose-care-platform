@@ -21,6 +21,7 @@ import type {
   CreateGlucoseInput,
   FieldError,
   GlucoseCreateResult,
+  GlucoseRecordDetail,
   GlucoseReportCell,
   GlucoseReportColumn,
   GlucoseReportColumnType,
@@ -29,6 +30,8 @@ import type {
   GlucoseReportResponse,
   GlucoseReportRow,
   GlucoseReportStats,
+  GlucoseUpdateResult,
+  GlucoseVoidResult,
   TimeSlotCategory,
   TimeSlotOption,
 } from '@gc/shared';
@@ -105,17 +108,7 @@ export class GlucoseService {
     patientId: string,
     input: CreateGlucoseInput,
   ): Promise<GlucoseCreateResult> {
-    const patient = await this.prisma.patient.findUnique({
-      where: { id: patientId },
-      select: { departmentId: true, status: true, archivedAt: true },
-    });
-    if (!patient || patient.archivedAt) {
-      throw new BusinessException(ERROR_CODES.PATIENT_NOT_FOUND);
-    }
-    assertInScope(user, RESOURCE.PATIENT, { departmentId: patient.departmentId });
-    if (patient.status !== PATIENT_STATUS.INPATIENT) {
-      throw new BusinessException(ERROR_CODES.PATIENT_INVALID_STATE);
-    }
+    await this.assertPatientWritable(user, patientId);
 
     await this.assertOperatorExists(input.operatorId);
     await this.assertTimeSlotUsable(user, input.mealContext);
@@ -158,6 +151,205 @@ export class GlucoseService {
   }
 
   /**
+   * R25：单条血糖详情（GET /patients/:id/glucose/:recordId）——review/编辑弹框回填的数据源。
+   *
+   * 口径（docs/specs/glucose-report-edit.md）：
+   *  - **不单独审计**（裁定 Q4）：报表查询已按患者逐条留痕，点击编辑再留一条属重复噪音；
+   *    权限与数据范围照常校验（读操作走 assertPatientReadable，不要求住院中）；
+   *  - 记录不存在 / **已作废** / 不属于该患者 → 41001（作废对业务等同于不存在）；
+   *  - `operatorName` 由服务端下发（操作人可能不在本科室 staff 下拉里，同报表 nurseName 口径）；
+   *    时段名称不下发，前端按 code 查动态时段（含停用项回显），避免第二份名称口径。
+   */
+  async detail(
+    user: AuthenticatedUser,
+    patientId: string,
+    recordId: string,
+  ): Promise<GlucoseRecordDetail> {
+    await this.assertPatientReadable(user, patientId);
+
+    const record = await this.prisma.glucoseRecord.findFirst({
+      where: { id: recordId, patientId, voidedAt: null },
+      select: {
+        id: true,
+        measuredAt: true,
+        mealContext: true,
+        resultType: true,
+        valueMmolL: true,
+        testStrip: true,
+        operatorId: true,
+        remark: true,
+        operator: { select: { name: true } },
+      },
+    });
+    if (!record) {
+      throw new BusinessException(ERROR_CODES.GLUCOSE_RECORD_NOT_FOUND);
+    }
+
+    return {
+      id: record.id,
+      measuredAt: formatDateTime(record.measuredAt) ?? '',
+      mealContext: record.mealContext,
+      resultType: record.resultType,
+      valueMmolL: record.valueMmolL === null ? null : Number(record.valueMmolL),
+      testStrip: record.testStrip,
+      operatorId: record.operatorId,
+      operatorName: record.operator?.name ?? null,
+      remark: record.remark,
+    };
+  }
+
+  /**
+   * R25：编辑血糖（PATCH /patients/:id/glucose/:recordId）。
+   *
+   * 校验口径与 create 一致（患者住院中、记录者在职、阈值重判 0/1/2、非检测类型清空值/试纸、
+   * 血糖范围由 Zod 拒绝），差异点（裁定 Q12/Q6/Q5）：
+   *  - **时段可用性豁免**：`mealContext` 与原值相同则跳过校验——否则弃用时段的历史记录
+   *    永远无法编辑；改为其他 code 时照常校验存在且启用（10001 字段级）；
+   *  - 检测时间撞上另一条**有效**记录 → 41003（字段级挂 measuredAt）。与添加的幂等
+   *    `skipped` 口径不同：编辑撞时间不是重复提交，是用户改错了时间，必须报错；
+   *  - 并发兜底：`updateMany where voidedAt null`，受影响 0 行 → 10008（已被他人作废）；
+   *  - 审计 GLUCOSE_UPDATE 的 detail 记 `changedFields` **字段名数组**（既有白名单字段），
+   *    remark 等自由文本的值绝不入审计；无实际变更 → 空数组，照常成功返回。
+   */
+  async update(
+    user: AuthenticatedUser,
+    patientId: string,
+    recordId: string,
+    input: CreateGlucoseInput,
+  ): Promise<GlucoseUpdateResult> {
+    await this.assertPatientWritable(user, patientId);
+
+    const existing = await this.prisma.glucoseRecord.findFirst({
+      where: { id: recordId, patientId, voidedAt: null },
+      select: {
+        measuredAt: true,
+        mealContext: true,
+        resultType: true,
+        valueMmolL: true,
+        testStrip: true,
+        operatorId: true,
+        remark: true,
+      },
+    });
+    if (!existing) {
+      throw new BusinessException(ERROR_CODES.GLUCOSE_RECORD_NOT_FOUND);
+    }
+
+    await this.assertOperatorExists(input.operatorId);
+    // 裁定 Q12：时段未改 → 豁免可用性校验（历史记录可能挂在已弃用时段上）；改了 → 照常校验
+    if (input.mealContext !== existing.mealContext) {
+      await this.assertTimeSlotUsable(user, input.mealContext);
+    }
+
+    const isDetect = input.resultType === GLUCOSE_ENTRY_DETECT;
+    const valueMmolL = isDetect ? (input.valueMmolL as number) : null;
+    // 与 create 同口径：0/1/2 一律服务端按 SystemConfig 阈值重判，配置缺失/非法 → 10000 拒绝写入
+    const resultType = isDetect
+      ? resolveResultType(valueMmolL as number, await this.systemConfig.getGlucoseAlertThreshold())
+      : input.resultType;
+    const testStrip = isDetect ? (input.testStrip ?? null) : null;
+    const remark = input.remark?.trim() ? input.remark.trim() : null;
+    const measuredAt = input.measuredAt;
+
+    // 检测时间有变更时先查后写（并发窗口由下方 P2002 捕获兜底）
+    if (measuredAt.getTime() !== existing.measuredAt.getTime()) {
+      const clash = await this.prisma.glucoseRecord.findFirst({
+        where: { patientId, measuredAt, voidedAt: null, id: { not: recordId } },
+        select: { id: true },
+      });
+      if (clash) {
+        throw this.measuredAtDuplicateError();
+      }
+    }
+
+    let updated: Prisma.BatchPayload;
+    try {
+      updated = await this.prisma.glucoseRecord.updateMany({
+        // voidedAt null 兼作乐观锁：读后被他人作废 → 受影响 0 行 → 10008
+        where: { id: recordId, patientId, voidedAt: null },
+        data: {
+          resultType,
+          valueMmolL: valueMmolL === null ? null : new Prisma.Decimal(valueMmolL.toFixed(1)),
+          mealContext: input.mealContext,
+          measuredAt,
+          operatorId: input.operatorId,
+          testStrip,
+          remark,
+        },
+      });
+    } catch (error) {
+      if (isUniqueConstraintViolation(error)) {
+        // 部分唯一索引 glucose_record_active_unique 命中：先查后写的并发窗口内他人已占用该时间
+        throw this.measuredAtDuplicateError();
+      }
+      throw error;
+    }
+    if (updated.count === 0) {
+      throw new BusinessException(ERROR_CODES.CONCURRENT_CONFLICT);
+    }
+
+    const existingValue = existing.valueMmolL === null ? null : Number(existing.valueMmolL);
+    const changedFields = [
+      ...(measuredAt.getTime() !== existing.measuredAt.getTime() ? ['measuredAt'] : []),
+      ...(input.mealContext !== existing.mealContext ? ['mealContext'] : []),
+      ...(valueMmolL !== existingValue ? ['valueMmolL'] : []),
+      ...(resultType !== existing.resultType ? ['resultType'] : []),
+      ...(testStrip !== existing.testStrip ? ['testStrip'] : []),
+      ...(input.operatorId !== existing.operatorId ? ['operatorId'] : []),
+      ...(remark !== existing.remark ? ['remark'] : []),
+    ];
+
+    return {
+      id: recordId,
+      changedFields,
+      resultType,
+      valueMmolL,
+      measuredAt: formatDateTime(measuredAt) ?? '',
+    };
+  }
+
+  /**
+   * R25：作废血糖（DELETE /patients/:id/glucose/:recordId，软删除，裁定 Q1a）。
+   *
+   * 医疗记录不得物理删除（等保三级 / AGENTS.md §5.2）：只置 `voidedAt`/`voidedById`，
+   * 全部读路径（报表/统计/最新血糖/幂等回读）排除；审计 GLUCOSE_VOID 的 detail
+   * 记 `glucoseRecordId`（白名单新增，先例 wardRecordId），审计对象仍是患者。
+   * 记录不存在 → 41001；已被作废（含并发）→ 10008，**不返回成功**，避免误导操作者。
+   */
+  async voidRecord(
+    user: AuthenticatedUser,
+    patientId: string,
+    recordId: string,
+  ): Promise<GlucoseVoidResult> {
+    await this.assertPatientWritable(user, patientId);
+
+    const result = await this.prisma.glucoseRecord.updateMany({
+      where: { id: recordId, patientId, voidedAt: null },
+      data: { voidedAt: new Date(), voidedById: user.userId },
+    });
+    if (result.count === 0) {
+      const exists = await this.prisma.glucoseRecord.findFirst({
+        where: { id: recordId, patientId },
+        select: { id: true },
+      });
+      if (!exists) {
+        throw new BusinessException(ERROR_CODES.GLUCOSE_RECORD_NOT_FOUND);
+      }
+      // 记录存在但已被作废：并发或重复操作
+      throw new BusinessException(ERROR_CODES.CONCURRENT_CONFLICT);
+    }
+    return { glucoseRecordId: recordId, voided: true };
+  }
+
+  /** 41003 字段级错误（details 挂 measuredAt，前端表单就地提示） */
+  private measuredAtDuplicateError(): BusinessException {
+    const details: FieldError[] = [
+      { field: 'measuredAt', message: '该检测时间已存在血糖记录' },
+    ];
+    return new BusinessException(ERROR_CODES.GLUCOSE_MEASURED_AT_DUPLICATE, undefined, details);
+  }
+
+  /**
    * 血糖报告：日期 × 时段矩阵（只读）。
    *
    * 口径（详见 docs/specs/glucose-report.md）：
@@ -185,8 +377,9 @@ export class GlucoseService {
     const columns = this.buildReportColumns(slots);
 
     // 只取 measuredAt 一列做本地日期去重；长期住院患者量级增大后再考虑 $queryRaw + date_trunc
+    // R25：已作废记录不参与日期分组（voidedAt null = 有效）
     const stamps = await this.prisma.glucoseRecord.findMany({
-      where: { patientId, measuredAt: range.where },
+      where: { patientId, measuredAt: range.where, voidedAt: null },
       select: { measuredAt: true },
       orderBy: { measuredAt: 'desc' },
     });
@@ -246,7 +439,8 @@ export class GlucoseService {
       }),
       this.prisma.glucoseRecord.groupBy({
         by: ['resultType'],
-        where: { patientId, measuredAt },
+        // R25：已作废记录不计入统计
+        where: { patientId, measuredAt, voidedAt: null },
         _count: { _all: true },
       }),
       // 极值取**记录本身**（而非 aggregate）：还要带回 resultType 供前端按字典色着色
@@ -279,13 +473,14 @@ export class GlucoseService {
     };
   }
 
-  /** 数值型极值查询条件：只数 0/1/2 且有值的记录（3~9 无 valueMmolL，天然不参与极值） */
+  /** 数值型极值查询条件：只数 0/1/2 且有值的记录（3~9 无 valueMmolL，天然不参与极值）；R25 排除已作废 */
   private numericRecordWhere(patientId: string, measuredAt: Prisma.DateTimeFilter) {
     return {
       patientId,
       measuredAt,
       resultType: { in: [...GLUCOSE_VALUE_RESULT_CODES] },
       valueMmolL: { not: null },
+      voidedAt: null,
     };
   }
 
@@ -373,6 +568,26 @@ export class GlucoseService {
       throw new BusinessException(ERROR_CODES.PATIENT_NOT_FOUND);
     }
     assertInScope(user, RESOURCE.PATIENT, { departmentId: patient.departmentId });
+  }
+
+  /**
+   * 写操作前的患者校验（create/update/voidRecord 共用，R25 抽取）：
+   * 存在且未归档（40001）→ 数据范围（30002/30006）→ **住院中**（40004）。
+   * 编辑/作废与添加同口径要求住院中（2026-11-20 评审确认项 1：口径一致、边界简单；
+   * 「出院后更正历史记录」不在本需求内，如需放开须单独裁定）。
+   */
+  private async assertPatientWritable(user: AuthenticatedUser, patientId: string): Promise<void> {
+    const patient = await this.prisma.patient.findUnique({
+      where: { id: patientId },
+      select: { departmentId: true, status: true, archivedAt: true },
+    });
+    if (!patient || patient.archivedAt) {
+      throw new BusinessException(ERROR_CODES.PATIENT_NOT_FOUND);
+    }
+    assertInScope(user, RESOURCE.PATIENT, { departmentId: patient.departmentId });
+    if (patient.status !== PATIENT_STATUS.INPATIENT) {
+      throw new BusinessException(ERROR_CODES.PATIENT_INVALID_STATE);
+    }
   }
 
   /**
@@ -471,8 +686,12 @@ export class GlucoseService {
           lt: new Date(latest.getFullYear(), latest.getMonth(), latest.getDate() + 1),
           ...(rangeWhere.lte ? { lte: rangeWhere.lte } : {}),
         },
+        // R25：已作废记录不进单元格
+        voidedAt: null,
       },
       select: {
+        // R25：entry 携带记录 id，前端点击单元格记录时定位编辑对象
+        id: true,
         resultType: true,
         valueMmolL: true,
         mealContext: true,
@@ -520,6 +739,7 @@ export class GlucoseService {
       }
 
       const entry: GlucoseReportEntry = {
+        id: record.id,
         valueMmolL: record.valueMmolL === null ? null : Number(record.valueMmolL),
         resultType: record.resultType,
         time: formatLocalTime(record.measuredAt) ?? '',

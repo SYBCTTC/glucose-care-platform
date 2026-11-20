@@ -87,6 +87,8 @@ function createService() {
       // 报表统计栏（R20）：默认空统计，统计用例各自覆盖
       groupBy: vi.fn().mockResolvedValue([]),
       findFirst: vi.fn().mockResolvedValue(null),
+      // R25：编辑/作废走 updateMany（voidedAt null 兼作乐观锁）
+      updateMany: vi.fn(),
     },
     // 统计「总计」的 counted 码集来源；默认与 seed 一致（0~4 计入，5~9 不计入）
     dictItem: {
@@ -409,14 +411,18 @@ const noneUser = {
   roles: ['DEVICE_ADMIN'],
 } as unknown as AuthenticatedUser;
 
-/** 报表明细行，与 service 的 `select` 同形 */
+/** 报表明细行，与 service 的 `select` 同形（R25 起含记录 id） */
 type ReportRow = {
+  id: string;
   resultType: string;
   valueMmolL: Prisma.Decimal | null;
   mealContext: string | null;
   measuredAt: Date;
   operator: { name: string } | null;
 };
+
+/** 夹具记录 id 发号器：保证同一测试文件内 id 唯一且可预期 */
+let recSeq = 0;
 
 /**
  * 造一条 2026-11-`day` 本地 `hour:minute` 的记录。
@@ -429,7 +435,9 @@ function rec(
   mealContext: string | null,
   overrides: Partial<ReportRow> = {},
 ): ReportRow {
+  recSeq += 1;
   return {
+    id: `g-rec-${recSeq}`,
     resultType: '1',
     valueMmolL: new Prisma.Decimal('6.8'),
     mealContext,
@@ -974,8 +982,344 @@ describe('GlucoseService.report — 统计栏（R20）', () => {
     const expectedWhere = {
       patientId: 'p-1',
       measuredAt: { gte: startTime, lte: endTime },
+      // R25：统计只数有效记录
+      voidedAt: null,
     };
     expect(prisma.glucoseRecord.groupBy.mock.calls[0][0].where).toEqual(expectedWhere);
     expect(prisma.glucoseRecord.findFirst.mock.calls[0][0].where).toMatchObject(expectedWhere);
+  });
+});
+
+/* ------------------- R25 详情 / 编辑 / 作废（2026-11-20 裁定） ------------------- */
+
+/** R25 用例公共：患者存在、未归档、住院中（写操作入口校验放行） */
+function mockInpatient(prisma: ReturnType<typeof createService>['prisma']) {
+  prisma.patient.findUnique.mockResolvedValue({
+    departmentId: 'd-endo',
+    status: 'INPATIENT',
+    archivedAt: null,
+  });
+}
+
+/** 编辑/作废共用的库内既有记录夹具（与 update() 的 select 同形，字段值与 createInput() 默认一致） */
+function existingRecord(overrides: Record<string, unknown> = {}) {
+  return {
+    measuredAt,
+    mealContext: 'FASTING',
+    resultType: '1',
+    valueMmolL: new Prisma.Decimal('8.9'),
+    testStrip: 2,
+    operatorId: 'u-nurse',
+    remark: '餐前测量',
+    ...overrides,
+  };
+}
+
+describe('GlucoseService.detail — R25 单条详情', () => {
+  it('正常回显：measuredAt 秒粒度字符串、operatorName 服务端下发', async () => {
+    const { service, prisma } = createService();
+    mockInpatient(prisma);
+    prisma.glucoseRecord.findFirst.mockResolvedValueOnce({
+      id: 'g-1',
+      measuredAt,
+      mealContext: 'FASTING',
+      resultType: '1',
+      valueMmolL: new Prisma.Decimal('6.1'),
+      testStrip: 2,
+      operatorId: 'u-op',
+      remark: ' 复测备注 ',
+      operator: { name: '李护士' },
+    });
+
+    const result = await service.detail(deptUser, 'p-1', 'g-1');
+
+    expect(result).toEqual({
+      id: 'g-1',
+      measuredAt: formatDateTime(measuredAt) ?? '',
+      mealContext: 'FASTING',
+      resultType: '1',
+      valueMmolL: 6.1,
+      testStrip: 2,
+      operatorId: 'u-op',
+      operatorName: '李护士',
+      remark: ' 复测备注 ',
+    });
+    // 只查有效记录：已作废的对业务等同于不存在
+    expect(prisma.glucoseRecord.findFirst.mock.calls[0][0].where).toMatchObject({
+      id: 'g-1',
+      patientId: 'p-1',
+      voidedAt: null,
+    });
+  });
+
+  it('记录不存在 / 已作废 / 不属于该患者 → 41001', async () => {
+    const { service, prisma } = createService();
+    mockInpatient(prisma);
+    prisma.glucoseRecord.findFirst.mockResolvedValueOnce(null);
+
+    await expect(service.detail(deptUser, 'p-1', 'g-x')).rejects.toMatchObject({
+      code: ERROR_CODES.GLUCOSE_RECORD_NOT_FOUND,
+    });
+  });
+
+  it('跨科室患者 → 30002，且不查血糖记录', async () => {
+    const { service, prisma } = createService();
+    prisma.patient.findUnique.mockResolvedValue({
+      departmentId: 'd-cardio',
+      archivedAt: null,
+    });
+
+    await expect(service.detail(deptUser, 'p-1', 'g-1')).rejects.toMatchObject({
+      code: ERROR_CODES.CROSS_DEPARTMENT_DENIED,
+    });
+    expect(prisma.glucoseRecord.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('读操作不要求住院中：出院患者历史记录同样可查（select 不含 status）', async () => {
+    const { service, prisma } = createService();
+    prisma.patient.findUnique.mockResolvedValue({ departmentId: 'd-endo', archivedAt: null });
+    prisma.glucoseRecord.findFirst.mockResolvedValueOnce({
+      id: 'g-1',
+      measuredAt,
+      mealContext: null,
+      resultType: '3',
+      valueMmolL: null,
+      testStrip: null,
+      operatorId: null,
+      remark: null,
+      operator: null,
+    });
+
+    const result = await service.detail(deptUser, 'p-1', 'g-1');
+
+    expect(result.operatorName).toBeNull();
+    expect(prisma.patient.findUnique.mock.calls[0][0].select).toEqual({
+      departmentId: true,
+      archivedAt: true,
+    });
+  });
+});
+
+describe('GlucoseService.update — R25 编辑血糖', () => {
+  /** 编辑成功路径的公共 mock：患者住院中、记录者在职、阈值 3.9/16.7、既有记录、更新命中 1 行 */
+  function setupUpdate(existing = existingRecord()) {
+    const ctx = createService();
+    mockInpatient(ctx.prisma);
+    ctx.prisma.glucoseRecord.findFirst.mockResolvedValueOnce(existing);
+    ctx.prisma.glucoseRecord.updateMany.mockResolvedValue({ count: 1 });
+    return ctx;
+  }
+
+  it('改血糖值 → 服务端按阈值重判 resultType，changedFields 记字段名', async () => {
+    const { service, prisma } = setupUpdate();
+
+    const result = await service.update(deptUser, 'p-1', 'g-1', createInput({ valueMmolL: 18.9 }));
+
+    // 8.9('1') → 18.9 超过 high=16.7 → '2'
+    expect(result.resultType).toBe('2');
+    expect(result.valueMmolL).toBe(18.9);
+    expect(result.changedFields).toEqual(['valueMmolL', 'resultType']);
+    // 乐观锁：where 带 voidedAt null（读后被作废 → 0 行 → 10008）
+    expect(prisma.glucoseRecord.updateMany.mock.calls[0][0].where).toEqual({
+      id: 'g-1',
+      patientId: 'p-1',
+      voidedAt: null,
+    });
+  });
+
+  it('无实际变更 → changedFields 为空数组，照常成功', async () => {
+    const { service } = setupUpdate();
+
+    const result = await service.update(deptUser, 'p-1', 'g-1', createInput());
+
+    expect(result.changedFields).toEqual([]);
+  });
+
+  it('改成非检测类型（3~9）→ 值与试纸强制清空，不读阈值配置', async () => {
+    const { service, prisma, systemConfig } = setupUpdate();
+
+    const result = await service.update(
+      deptUser,
+      'p-1',
+      'g-1',
+      createInput({ resultType: '5', valueMmolL: null, testStrip: null }),
+    );
+
+    expect(result.resultType).toBe('5');
+    expect(result.valueMmolL).toBeNull();
+    expect(prisma.glucoseRecord.updateMany.mock.calls[0][0].data).toMatchObject({
+      valueMmolL: null,
+      testStrip: null,
+    });
+    expect(systemConfig.getGlucoseAlertThreshold).not.toHaveBeenCalled();
+  });
+
+  it('时段未改 → 豁免可用性校验（弃用时段的历史记录仍可编辑，裁定 Q12）', async () => {
+    const { service, timeSlots } = setupUpdate(
+      existingRecord({ mealContext: 'OLD_SLOT_DISABLED' }),
+    );
+
+    await service.update(
+      deptUser,
+      'p-1',
+      'g-1',
+      createInput({ mealContext: 'OLD_SLOT_DISABLED', valueMmolL: 7.2 }),
+    );
+
+    expect(timeSlots.findByCode).not.toHaveBeenCalled();
+  });
+
+  it('时段改为停用项 → 10001 字段级 mealContext，不落库', async () => {
+    const { service, prisma, timeSlots } = setupUpdate();
+    timeSlots.findByCode.mockResolvedValue({ code: 'BEDTIME', enabled: false });
+
+    const error = await service
+      .update(deptUser, 'p-1', 'g-1', createInput({ mealContext: 'BEDTIME' }))
+      .catch((e: unknown) => e);
+
+    expect(error).toMatchObject({ code: ERROR_CODES.VALIDATION_FAILED });
+    expect((error as BusinessException).getResponse()).toMatchObject({
+      details: [{ field: 'mealContext', message: '检测时段已停用' }],
+    });
+    expect(prisma.glucoseRecord.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('检测时间撞上另一条有效记录 → 41003 字段级 measuredAt（裁定 Q6）', async () => {
+    const { service, prisma } = setupUpdate();
+    // setupUpdate 已排入既有记录，这里再排同时间另一条有效记录（第二次 findFirst）
+    prisma.glucoseRecord.findFirst.mockResolvedValueOnce({ id: 'g-other' });
+
+    const moved = new Date(measuredAt.getTime() + 3_600_000);
+    const error = await service
+      .update(deptUser, 'p-1', 'g-1', createInput({ measuredAt: moved }))
+      .catch((e: unknown) => e);
+
+    expect(error).toMatchObject({ code: ERROR_CODES.GLUCOSE_MEASURED_AT_DUPLICATE });
+    expect((error as BusinessException).getResponse()).toMatchObject({
+      details: [{ field: 'measuredAt' }],
+    });
+    expect(prisma.glucoseRecord.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('先查后写的并发窗口撞部分唯一索引（P2002）→ 同样 41003', async () => {
+    const { service, prisma } = setupUpdate();
+    prisma.glucoseRecord.findFirst.mockResolvedValueOnce(null); // 先查未撞
+    prisma.glucoseRecord.updateMany.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+        code: 'P2002',
+        clientVersion: '5.22.0',
+      }),
+    );
+
+    const moved = new Date(measuredAt.getTime() + 3_600_000);
+    await expect(
+      service.update(deptUser, 'p-1', 'g-1', createInput({ measuredAt: moved })),
+    ).rejects.toMatchObject({ code: ERROR_CODES.GLUCOSE_MEASURED_AT_DUPLICATE });
+  });
+
+  it('保存时记录已被他人作废（updateMany 0 行）→ 10008', async () => {
+    const { service, prisma } = setupUpdate();
+    prisma.glucoseRecord.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(service.update(deptUser, 'p-1', 'g-1', createInput())).rejects.toMatchObject({
+      code: ERROR_CODES.CONCURRENT_CONFLICT,
+    });
+  });
+
+  it('记录不存在或已作废 → 41001', async () => {
+    const { service, prisma } = createService();
+    mockInpatient(prisma);
+    prisma.glucoseRecord.findFirst.mockResolvedValueOnce(null);
+
+    await expect(service.update(deptUser, 'p-1', 'g-x', createInput())).rejects.toMatchObject({
+      code: ERROR_CODES.GLUCOSE_RECORD_NOT_FOUND,
+    });
+  });
+
+  it('患者非住院 → 40004（与 create 同口径，评审确认项 1）', async () => {
+    const { service, prisma } = createService();
+    prisma.patient.findUnique.mockResolvedValue({
+      departmentId: 'd-endo',
+      status: 'DISCHARGED',
+      archivedAt: null,
+    });
+
+    await expect(service.update(deptUser, 'p-1', 'g-1', createInput())).rejects.toMatchObject({
+      code: ERROR_CODES.PATIENT_INVALID_STATE,
+    });
+    expect(prisma.glucoseRecord.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('记录者不存在或已停用 → 10001 字段级 operatorId', async () => {
+    // update 顺序：患者校验 → 既有记录 → 记录者校验，setupUpdate 放行前两步
+    const { service, prisma } = setupUpdate();
+    prisma.user.findFirst.mockResolvedValue(null);
+
+    const error = await service.update(deptUser, 'p-1', 'g-1', createInput()).catch((e: unknown) => e);
+
+    expect(error).toMatchObject({ code: ERROR_CODES.VALIDATION_FAILED });
+    expect((error as BusinessException).getResponse()).toMatchObject({
+      details: [{ field: 'operatorId' }],
+    });
+  });
+});
+
+describe('GlucoseService.voidRecord — R25 作废血糖（软删除）', () => {
+  it('正常作废：置 voidedAt/voidedById，返回 glucoseRecordId 供审计 detail', async () => {
+    const { service, prisma } = createService();
+    mockInpatient(prisma);
+    prisma.glucoseRecord.updateMany.mockResolvedValue({ count: 1 });
+
+    const result = await service.voidRecord(deptUser, 'p-1', 'g-1');
+
+    expect(result).toEqual({ glucoseRecordId: 'g-1', voided: true });
+    const call = prisma.glucoseRecord.updateMany.mock.calls[0][0];
+    expect(call.where).toEqual({ id: 'g-1', patientId: 'p-1', voidedAt: null });
+    expect(call.data.voidedById).toBe('u-nurse');
+    expect(call.data.voidedAt).toBeInstanceOf(Date);
+  });
+
+  it('记录不存在 → 41001', async () => {
+    const { service, prisma } = createService();
+    mockInpatient(prisma);
+    prisma.glucoseRecord.updateMany.mockResolvedValue({ count: 0 });
+    prisma.glucoseRecord.findFirst.mockResolvedValueOnce(null);
+
+    await expect(service.voidRecord(deptUser, 'p-1', 'g-x')).rejects.toMatchObject({
+      code: ERROR_CODES.GLUCOSE_RECORD_NOT_FOUND,
+    });
+  });
+
+  it('已被作废（重复/并发）→ 10008，不返回成功', async () => {
+    const { service, prisma } = createService();
+    mockInpatient(prisma);
+    prisma.glucoseRecord.updateMany.mockResolvedValue({ count: 0 });
+    prisma.glucoseRecord.findFirst.mockResolvedValueOnce({ id: 'g-1' });
+
+    await expect(service.voidRecord(deptUser, 'p-1', 'g-1')).rejects.toMatchObject({
+      code: ERROR_CODES.CONCURRENT_CONFLICT,
+    });
+  });
+
+  it('患者非住院 → 40004；跨科室 → 30002（与 create 同口径）', async () => {
+    const { service, prisma } = createService();
+    prisma.patient.findUnique.mockResolvedValue({
+      departmentId: 'd-endo',
+      status: 'DISCHARGED',
+      archivedAt: null,
+    });
+    await expect(service.voidRecord(deptUser, 'p-1', 'g-1')).rejects.toMatchObject({
+      code: ERROR_CODES.PATIENT_INVALID_STATE,
+    });
+
+    prisma.patient.findUnique.mockResolvedValue({
+      departmentId: 'd-cardio',
+      status: 'INPATIENT',
+      archivedAt: null,
+    });
+    await expect(service.voidRecord(deptUser, 'p-1', 'g-1')).rejects.toMatchObject({
+      code: ERROR_CODES.CROSS_DEPARTMENT_DENIED,
+    });
+    expect(prisma.glucoseRecord.updateMany).not.toHaveBeenCalled();
   });
 });

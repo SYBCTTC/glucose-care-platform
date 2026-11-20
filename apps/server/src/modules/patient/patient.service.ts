@@ -78,6 +78,8 @@ export const PATIENT_PUBLIC_SELECT = Prisma.validator<Prisma.PatientSelect>()({
   dischargeAt: true,
   archivedAt: true,
   glucoseRecords: {
+    // R25：最新血糖只认有效记录，已作废的不展示
+    where: { voidedAt: null },
     orderBy: { measuredAt: 'desc' },
     take: 1,
     select: { resultType: true, valueMmolL: true, mealContext: true, measuredAt: true },
