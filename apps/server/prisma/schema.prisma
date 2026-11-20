@@ -68,6 +68,8 @@ model User {
   nursePatients     Patient[]              @relation("PatientNurse")
   /// 手工录入的血糖记录（作为记录者）
   glucoseRecords    GlucoseRecord[]        @relation("GlucoseOperator")
+  /// R25：由本人作废的血糖记录（作为作废操作人）
+  voidedGlucoseRecords GlucoseRecord[]     @relation("GlucoseVoidedBy")
   /// 虚拟病区：由本人加入的进出记录
   wardJoinedRecords VirtualWardRecord[]    @relation("WardJoinedBy")
   /// 虚拟病区：由本人移出的进出记录
@@ -228,14 +230,23 @@ model GlucoseRecord {
   /// 备注，最长 500 字
   remark      String?  @db.VarChar(500)
   createdAt   DateTime @default(now())
+  /// R25 作废（软删除）时间：NULL = 有效；非空 = 已作废。
+  /// 医疗记录不得物理删除（等保三级），作废后报表/统计/最新血糖等全部读路径一律排除
+  voidedAt   DateTime? @db.Timestamptz(3)
+  /// 作废操作人（医疗留痕）；未作废为 NULL。外键 Restrict 同 operator 口径：删用户不得抹掉留痕
+  voidedById String?   @db.Uuid
 
   patient  Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
   /// 记录者是医疗留痕，删用户不得抹掉录入人，因此显式 Restrict（与实库一致）。
   /// 对照 AuditLog.operatorId 干脆不建外键，同样是防止留痕随用户删除而失真。
   operator User?   @relation("GlucoseOperator", fields: [operatorId], references: [id], onDelete: Restrict)
+  voidedBy User?   @relation("GlucoseVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
 
-  /// 唯一约束兜底：同一患者同一检测时间只允许一条记录；重复提交由服务端按幂等返回 skipped=true
-  @@unique([patientId, measuredAt])
+  /// R25（2026-11-20 裁定）：原 `@@unique([patientId, measuredAt])` 已改为**部分唯一索引**
+  /// `glucose_record_active_unique`（仅约束 `voidedAt IS NULL` 的有效记录）——
+  /// 否则作废记录仍占用时间戳，同一检测时间无法补录新记录。
+  /// Prisma 不支持部分索引，见 prisma/sql/glucose_record_active_unique.sql（migrate 后手工执行，幂等）。
+  /// 幂等 skipped 回读随之从 findUnique 改为 findFirst（唯一键已不存在）。
   @@index([patientId, measuredAt(sort: Desc)])
   @@index([operatorId])
 }
@@ -368,6 +379,10 @@ enum AuditAction {
   GLUCOSE_REPORT_VIEW
   /// 住院记录查询（GET /patients/:id/admissions，R24），detail 无患者敏感信息
   ADMISSION_QUERY
+  /// 编辑血糖（PATCH /patients/:id/glucose/:recordId，R25），detail 记 changedFields 字段名
+  GLUCOSE_UPDATE
+  /// 作废血糖（DELETE /patients/:id/glucose/:recordId，R25 软删除），detail 记 glucoseRecordId
+  GLUCOSE_VOID
 }
 
 /// 审计日志：只增不改不删，留存 >= 180 天（等保三级要求）

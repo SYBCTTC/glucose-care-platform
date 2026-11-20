@@ -308,14 +308,19 @@ export class GlucoseService {
       if (!isUniqueConstraintViolation(error)) {
         throw error;
       }
-      const existing = await this.prisma.glucoseRecord.findUnique({
+      // R25：全量唯一约束已改为部分唯一索引（仅约束 voidedAt IS NULL 的有效记录），
+      // `patientId_measuredAt` 复合唯一键不复存在，回读改 findFirst 且只认有效记录——
+      // 部分索引下命中 P2002 必然存在有效重复行，幂等语义不变
+      const existing = await this.prisma.glucoseRecord.findFirst({
         where: {
-          patientId_measuredAt: { patientId: data.patientId, measuredAt: data.measuredAt },
+          patientId: data.patientId,
+          measuredAt: data.measuredAt,
+          voidedAt: null,
         },
         select: GLUCOSE_RECORD_SUMMARY_SELECT,
       });
       if (!existing) {
-        // 唯一约束命中却回读不到：并发删除等异常情况，保留原始错误便于排查
+        // 唯一约束命中却回读不到有效记录：并发作废等异常情况，保留原始错误便于排查
         throw error;
       }
       return { record: existing, skipped: true };

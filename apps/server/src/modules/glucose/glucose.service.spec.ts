@@ -337,7 +337,7 @@ describe('GlucoseService.create — 添加血糖', () => {
     const result = await service.create(deptUser, 'p-1', createInput());
 
     expect(result.skipped).toBe(false);
-    expect(prisma.glucoseRecord.findUnique).not.toHaveBeenCalled();
+    expect(prisma.glucoseRecord.findFirst).not.toHaveBeenCalled();
   });
 
   it('同患者同检测时间重复提交：命中唯一约束后幂等跳过，返回已有记录且不抛错', async () => {
@@ -348,7 +348,7 @@ describe('GlucoseService.create — 添加血糖', () => {
         meta: { target: ['patientId', 'measuredAt'] },
       }),
     );
-    prisma.glucoseRecord.findUnique.mockResolvedValueOnce({
+    prisma.glucoseRecord.findFirst.mockResolvedValueOnce({
       id: 'g-existing',
       resultType: '1',
       valueMmolL: new Prisma.Decimal('6.1'),
@@ -362,19 +362,20 @@ describe('GlucoseService.create — 添加血糖', () => {
     // 返回的是已有记录的值，而不是本次提交值
     expect(result.valueMmolL).toBe(6.1);
     expect(result.item.id).toBe('p-1');
-    expect(prisma.glucoseRecord.findUnique).toHaveBeenCalledWith({
-      where: { patientId_measuredAt: { patientId: 'p-1', measuredAt } },
+    // R25：全量唯一约束改为部分唯一索引（仅有效记录），回读从 findUnique 改 findFirst
+    expect(prisma.glucoseRecord.findFirst).toHaveBeenCalledWith({
+      where: { patientId: 'p-1', measuredAt, voidedAt: null },
       select: { id: true, resultType: true, valueMmolL: true, measuredAt: true },
     });
   });
 
-  it('唯一约束命中但回读不到记录时保留原始错误，不掩盖故障', async () => {
+  it('唯一约束命中但回读不到有效记录时保留原始错误，不掩盖故障', async () => {
     const conflict = new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
       code: 'P2002',
       clientVersion: '5.22.0',
     });
     prisma.glucoseRecord.create.mockRejectedValueOnce(conflict);
-    prisma.glucoseRecord.findUnique.mockResolvedValueOnce(null);
+    prisma.glucoseRecord.findFirst.mockResolvedValueOnce(null);
 
     await expect(service.create(deptUser, 'p-1', createInput())).rejects.toBe(conflict);
   });
@@ -383,7 +384,7 @@ describe('GlucoseService.create — 添加血糖', () => {
     prisma.glucoseRecord.create.mockRejectedValueOnce(new Error('connection reset'));
 
     await expect(service.create(deptUser, 'p-1', createInput())).rejects.toThrow('connection reset');
-    expect(prisma.glucoseRecord.findUnique).not.toHaveBeenCalled();
+    expect(prisma.glucoseRecord.findFirst).not.toHaveBeenCalled();
   });
 });
 
