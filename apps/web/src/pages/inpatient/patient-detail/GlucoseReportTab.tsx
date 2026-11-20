@@ -7,6 +7,7 @@ import {
   GLUCOSE_REPORT_PAGE_SIZE,
   GLUCOSE_RESULT_CODE_HIGH,
   GLUCOSE_RESULT_CODE_LOW,
+  TIME_SLOT_CATEGORY,
 } from '@gc/shared';
 import type {
   DictItemOption,
@@ -16,7 +17,7 @@ import type {
   GlucoseReportStats,
 } from '@gc/shared';
 import { useCommonDataStore } from '@/store/common-data';
-import type { DetailOutletContext } from './detail-tabs';
+import type { DetailChildContext, GlucoseReportDisplay } from './detail-tabs';
 import { useGlucoseReport } from './useGlucoseReport';
 
 /** 日期列宽提示：容纳 `YYYY-MM-DD` 等宽数字；时段列不定宽，均分剩余空间（2026-11-19 二次调整：不横向滚动） */
@@ -42,15 +43,20 @@ const EMPTY_RESULT_TYPES: DictItemOption[] = [];
  * 血糖报告单元格。
  *
  * 每条记录**两行**（R3，需求人变更后的口径）：
- *  - 第 1 行 `{值或标签}({HH:mm})`，强化时段再追加 `({强化时段名})`；
+ *  - 第 1 行 `{值或标签}[(HH:mm)][(来源时段名)]`——后缀为强化时段名或弃用时段名（R22）；
  *  - 第 2 行 记录者姓名。
  * 同日同时段多条 → 纵向堆叠，组间加分隔线（R4）。
  *
+ * R22 展示项勾选（`display`，2026-11-19 裁定）：
+ *  - `time=false` → 隐藏 `(HH:mm)`；但**特殊时段来源的记录时间恒展示**（规则 6，
+ *    含弃用的特殊时段——按原时段类型跟随，裁定 Q4）；
+ *  - `operator=false` → 隐藏第 2 行记录者（对含特殊时段在内的所有记录生效）。
+ *
  * 括号一律**英文半角、紧邻无空格**；着色只作用于「值/标签」部分，
- * 时间与强化名用正文色（D4）——整行染色会让时间也带上告警色，读起来像异常值。
+ * 时间与后缀名用正文色（D4）——整行染色会让时间也带上告警色，读起来像异常值。
  */
 /**
- * 导出仅为单测（`GlucoseReportTab.spec.tsx`）：单元格的渲染口径是 R3/R4 的验收主体，
+ * 导出仅为单测（`GlucoseReportTab.spec.tsx`）：单元格的渲染口径是 R3/R4/R22 的验收主体，
  * 而外层组件依赖 Outlet context 与网络请求，在 node 测试环境里跑不起来。
  *
  * `resultTypes` 由父组件读一次 store 后传下来，而不是在这里各自订阅：
@@ -61,10 +67,13 @@ const EMPTY_RESULT_TYPES: DictItemOption[] = [];
 export function ReportCell({
   cell,
   resultTypes,
+  display,
 }: {
   cell: GlucoseReportCell | undefined;
   /** DY-RESULT 字典项，用于取标签与色值 */
   resultTypes: DictItemOption[];
+  /** R22 展示项勾选（常规/强化的记录显隐由 filterReportRows 在行级处理，这里只管时间/操作人） */
+  display: GlucoseReportDisplay;
 }) {
   const { token } = theme.useToken();
 
@@ -87,27 +96,68 @@ export function ReportCell({
         // （否则与 LastGlucose.tsx 形成第二份实现，两处口径迟早漂移）
         const text =
           entry.valueMmolL === null ? (dict?.label ?? entry.resultType) : entry.valueMmolL.toFixed(1);
+        // 规则 6：特殊时段来源（含弃用的特殊时段、归组失败兜底）时间恒展示，不受「检测时间」勾选控制
+        const showTime = display.time || entry.sourceType === TIME_SLOT_CATEGORY.SPECIAL;
 
         return (
           <div key={`${entry.time}-${index}`} style={index > 0 ? separatorStyle : undefined}>
             {/* gc-num 提供等宽数字；其默认右对齐被 inline center 覆盖（2026-11-19 二次调整：格内居中）。
                 不设 nowrap：列宽均分页面时允许括号段换行，保证表格不横向滚动。
                 间距（2026-11-19 三次调整，需求人指定 6px）：`值` 与 `(时间)` 之间恒有间距；
-                有强化时段时 `(时间)` 与 `(强化名)` 之间同样加间距。
+                有来源时段名时 `(时间)` 与 `(名称)` 之间同样加间距。
                 用 margin 而非空格字符：文本口径仍是「紧邻无空格」（R3），且 inline margin 不破坏居中 */}
             <div className="gc-num" style={{ textAlign: 'center' }}>
               <span style={{ color: dict?.color ?? undefined }}>{text}</span>
-              <span style={{ marginLeft: VALUE_GAP_PX }}>({entry.time})</span>
-              {entry.intensiveName ? (
-                <span style={{ marginLeft: VALUE_GAP_PX }}>({entry.intensiveName})</span>
+              {showTime ? <span style={{ marginLeft: VALUE_GAP_PX }}>({entry.time})</span> : null}
+              {entry.sourceSlotName ? (
+                <span style={{ marginLeft: VALUE_GAP_PX }}>({entry.sourceSlotName})</span>
               ) : null}
             </div>
-            <div style={{ color: token.colorTextSecondary }}>{entry.nurseName ?? '-'}</div>
+            {display.operator ? (
+              <div style={{ color: token.colorTextSecondary }}>{entry.nurseName ?? '-'}</div>
+            ) : null}
           </div>
         );
       })}
     </div>
   );
+}
+
+/**
+ * R22：按展示项勾选过滤单元格记录（规则 4：勾选变化实时生效）。
+ *
+ * **纯前端过滤，不重新请求接口**（裁定 Q5：统计栏与分页 total 不受影响）：
+ *  - 常规/强化来源的记录受各自勾选控制（裁定 Q3：控记录显隐、不控列显隐——
+ *    取消「常规血糖」后普通列仍在，强化/合并记录还要落在这些列里）；
+ *  - 弃用时段来源的记录按**原时段类型**跟随勾选（裁定 Q4）；
+ *  - 特殊时段来源（含归组失败兜底）恒展示（规则 6）；
+ *  - 记录全被过滤的日期行**保留为空行**（裁定 Q6：分页 total 由服务端按日期数计算，
+ *    前端抽行会造成页内行数与总数不一致）。
+ *
+ * 常规+强化都勾选时返回原引用，避免无谓拷贝。导出仅为单测。
+ */
+export function filterReportRows(
+  rows: GlucoseReportRow[],
+  display: GlucoseReportDisplay,
+): GlucoseReportRow[] {
+  if (display.normal && display.intensive) {
+    return rows;
+  }
+  return rows.map((row) => ({
+    ...row,
+    cells: row.cells.map((cell) => ({
+      ...cell,
+      entries: cell.entries.filter((entry) => {
+        if (entry.sourceType === TIME_SLOT_CATEGORY.INTENSIVE) {
+          return display.intensive;
+        }
+        if (entry.sourceType === TIME_SLOT_CATEGORY.NORMAL) {
+          return display.normal;
+        }
+        return true;
+      }),
+    })),
+  }));
 }
 
 /**
@@ -179,11 +229,12 @@ export function ReportStatsBar({
  *
  * 表头由**服务端下发的 `columns`** 生成，不读 `useCommonDataStore().timeSlots`：
  * 归组在服务端做，表头也必须与之同源，否则会出现"记录归到了某列、但前端没画这一列"的数据丢失。
- * `columns` 含停用时段，因为停用前的历史血糖必须有列可落。
+ * R22：`columns` 只含**启用的**时段；弃用时段的历史血糖由服务端按检测时间合并进启用列，
+ * 记录带 `sourceSlotName` 后缀与 `sourceType` 原类型，前端据展示勾选过滤（filterReportRows）。
  */
 export default function GlucoseReportTab() {
   const { id } = useParams<{ id: string }>();
-  const { glucoseVersion } = useOutletContext<DetailOutletContext>();
+  const { glucoseVersion, reportDisplay } = useOutletContext<DetailChildContext>();
   const { token } = theme.useToken();
   const [page, setPage] = useState(1);
   const { data, loading, error, reload } = useGlucoseReport(id, page, glucoseVersion);
@@ -196,6 +247,12 @@ export default function GlucoseReportTab() {
   useEffect(() => {
     setPage(1);
   }, [id]);
+
+  // R22 规则 4：勾选变化实时过滤已下发数据，不重新请求（裁定 Q5）
+  const rows = useMemo(
+    () => filterReportRows(data?.rows ?? [], reportDisplay),
+    [data?.rows, reportDisplay],
+  );
 
   const columns = useMemo<ColumnsType<GlucoseReportRow>>(() => {
     const dateColumn: ColumnsType<GlucoseReportRow>[number] = {
@@ -217,12 +274,13 @@ export default function GlucoseReportTab() {
         <ReportCell
           cell={row.cells.find((cell) => cell.slotCode === column.code)}
           resultTypes={resultTypes}
+          display={reportDisplay}
         />
       ),
     }));
 
     return [dateColumn, ...slotColumns];
-  }, [data?.columns, resultTypes]);
+  }, [data?.columns, resultTypes, reportDisplay]);
 
   return (
     // R21（2026-11-19 裁定）：根节点撑满内容区高度，统计栏固定、表格占据剩余空间、
@@ -271,7 +329,7 @@ export default function GlucoseReportTab() {
         size="small"
         bordered
         columns={columns}
-        dataSource={data?.rows ?? []}
+        dataSource={rows}
         loading={loading}
         // R21：flex 链与 body 内滚由 global.css 的 .gc-report-table 承接（antd 无百分比
         // 撑满 API，scroll.y 传 '100%' 只为触发表头/body 拆分，实际高度由 flex 决定）

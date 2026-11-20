@@ -173,6 +173,27 @@ describe('PatientDetailTabs — 双层 Tab 由 URL 驱动（R10）', () => {
     const html = renderTabs(`${BASE}/glucose/record`);
     expect(html).not.toContain('建设中');
   });
+
+  it('血糖报告子 Tab：渲染四个展示项勾选且默认全勾选（R22 规则 1/2）', () => {
+    const html = renderTabs(`${BASE}/glucose/report`);
+
+    expect(html).toContain('常规血糖');
+    expect(html).toContain('强化血糖');
+    expect(html).toContain('检测时间');
+    expect(html).toContain('操作人');
+    // 默认全勾选（规则 3 的"至少一项"约束天然满足）
+    expect(html.split('ant-checkbox-checked').length - 1).toBe(4);
+  });
+
+  it('其他血糖子 Tab：不渲染展示项勾选（R22 规则 2）', () => {
+    expect(renderTabs(`${BASE}/glucose/record`)).not.toContain('常规血糖');
+    expect(renderTabs(`${BASE}/glucose/trend`)).not.toContain('常规血糖');
+  });
+
+  it('主 Tab 非血糖数据：同样不渲染展示项勾选（R22 规则 2）', () => {
+    expect(renderTabs(`${BASE}/basic`)).not.toContain('常规血糖');
+    expect(renderTabs(`${BASE}/admission`)).not.toContain('常规血糖');
+  });
 });
 
 describe('DetailPlaceholder — 未实现内容页占位', () => {

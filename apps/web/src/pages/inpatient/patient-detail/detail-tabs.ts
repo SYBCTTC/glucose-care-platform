@@ -65,6 +65,38 @@ export interface DetailOutletContext {
   glucoseVersion: number;
 }
 
+/**
+ * R22：血糖报告**展示项勾选**（子 Tabs 行尾随的四个 Checkbox，2026-11-19 需求人裁定）。
+ *
+ * 纯前端视图过滤：不重新请求接口，统计栏与分页 total 不受影响（裁定 Q5）。
+ * 状态由 `PatientDetailTabs` 持有——勾选框 UI 在子 Tabs 行、报表内容在子路由层，
+ * 经 Outlet context（`DetailChildContext`）打通；详情页会话内记忆，
+ * 换患者/重新进入详情页重置为全勾选（裁定 Q8），不做持久化。
+ */
+export interface GlucoseReportDisplay {
+  /** 常规血糖：普通时段来源记录的显隐（裁定 Q3：控记录不控列；弃用记录按原类型跟随，裁定 Q4） */
+  normal: boolean;
+  /** 强化血糖：强化时段来源记录（带强化后缀）的显隐 */
+  intensive: boolean;
+  /** 检测时间：格内 `(HH:mm)` 的显隐；特殊时段来源记录的时间恒展示（规则 6） */
+  time: boolean;
+  /** 操作人：第二行记录者的显隐（对含特殊时段在内的所有记录生效，规则 6「其他几个继续受控」） */
+  operator: boolean;
+}
+
+/** 展示项勾选默认值：全勾选（规则 3「常规/强化至少一项」天然满足） */
+export const DEFAULT_GLUCOSE_REPORT_DISPLAY: GlucoseReportDisplay = {
+  normal: true,
+  intensive: true,
+  time: true,
+  operator: true,
+};
+
+/** `PatientDetailTabs` 合并后传给内容页的 context：父级 context + R22 展示勾选 */
+export interface DetailChildContext extends DetailOutletContext {
+  reportDisplay: GlucoseReportDisplay;
+}
+
 /** 详情页内 Tab 跳转的目标与选项（`useDetailTabNavigate` 的纯逻辑部分） */
 export interface DetailTabNavigation {
   to: string;
