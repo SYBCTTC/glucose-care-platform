@@ -509,7 +509,24 @@ describe('GlucoseService.report — 血糖报告', () => {
     ).toBe(true);
   });
 
-  it('表头含停用时段：其历史血糖必须有列可落', async () => {
+  it('弃用特殊时段不再成列：历史记录按检测时间合并进启用列，带弃用时段名后缀（R22）', async () => {
+    const slots = reportSlots.map((slot) =>
+      slot.code === 'RETEST' ? { ...slot, enabled: false } : slot,
+    );
+    // 09:05 落在启用的 BREAKFAST_POST [08:00, 11:00)
+    const { service } = createReportService([rec(19, 9, 5, 'RETEST')], slots);
+
+    const result = await service.report(deptUser, 'p-1', query());
+
+    expect(result.columns.some((column) => column.code === 'RETEST')).toBe(false);
+    const entries = cellOf(result, '2026-11-19', 'BREAKFAST_POST');
+    expect(entries).toHaveLength(1);
+    // 裁定 Q1：后缀是**弃用时段自己的名称**；裁定 Q4：sourceType 保留原类型（特殊）
+    expect(entries[0].sourceSlotName).toBe('复测');
+    expect(entries[0].sourceType).toBe(TIME_SLOT_CATEGORY.SPECIAL);
+  });
+
+  it('弃用普通时段：原区间无启用宿主 → 兜底随机列，保留后缀与原类型（R22）', async () => {
     const slots = reportSlots.map((slot) =>
       slot.code === 'BEDTIME' ? { ...slot, enabled: false } : slot,
     );
@@ -517,8 +534,27 @@ describe('GlucoseService.report — 血糖报告', () => {
 
     const result = await service.report(deptUser, 'p-1', query());
 
-    expect(result.columns.find((column) => column.code === 'BEDTIME')?.enabled).toBe(false);
-    expect(cellOf(result, '2026-11-19', 'BEDTIME')).toHaveLength(1);
+    expect(result.columns.some((column) => column.code === 'BEDTIME')).toBe(false);
+    const entries = cellOf(result, '2026-11-19', TIME_SLOT_CODE_RANDOM);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].sourceSlotName).toBe('睡前');
+    expect(entries[0].sourceType).toBe(TIME_SLOT_CATEGORY.NORMAL);
+  });
+
+  it('启用的普通/特殊记录落自己的列：sourceType 为原类型、无后缀（R22）', async () => {
+    const { service } = createReportService([
+      rec(19, 9, 0, 'BREAKFAST_POST'),
+      rec(19, 9, 30, TIME_SLOT_CODE_RANDOM),
+    ]);
+
+    const result = await service.report(deptUser, 'p-1', query());
+
+    const normal = cellOf(result, '2026-11-19', 'BREAKFAST_POST')[0];
+    expect(normal.sourceType).toBe(TIME_SLOT_CATEGORY.NORMAL);
+    expect(normal.sourceSlotName).toBeNull();
+    const special = cellOf(result, '2026-11-19', TIME_SLOT_CODE_RANDOM)[0];
+    expect(special.sourceType).toBe(TIME_SLOT_CATEGORY.SPECIAL);
+    expect(special.sourceSlotName).toBeNull();
   });
 
   it('强化时段按检测时间归入普通时段列，并带上强化时段名', async () => {
@@ -529,12 +565,13 @@ describe('GlucoseService.report — 血糖报告', () => {
     // 09:00 落在 BREAKFAST_POST 的 [08:00, 11:00)
     const entries = cellOf(result, '2026-11-19', 'BREAKFAST_POST');
     expect(entries).toHaveLength(1);
-    expect(entries[0].intensiveName).toBe('强化-上午');
+    expect(entries[0].sourceSlotName).toBe('强化-上午');
+    expect(entries[0].sourceType).toBe(TIME_SLOT_CATEGORY.INTENSIVE);
     expect(entries[0].time).toBe('09:00');
     expect(result.columns.some((column) => column.code === 'INTENSIVE_AM')).toBe(false);
   });
 
-  it('强化归组忽略 enabled：普通时段停用后仍归入该列（R5）', async () => {
+  it('强化宿主只认启用的普通时段：宿主停用后落兜底随机列（R22，替代原 R5 忽略 enabled 口径）', async () => {
     const slots = reportSlots.map((slot) =>
       slot.code === 'BREAKFAST_POST' ? { ...slot, enabled: false } : slot,
     );
@@ -542,7 +579,10 @@ describe('GlucoseService.report — 血糖报告', () => {
 
     const result = await service.report(deptUser, 'p-1', query());
 
-    expect(cellOf(result, '2026-11-19', 'BREAKFAST_POST')[0]?.intensiveName).toBe('强化-上午');
+    expect(result.columns.some((column) => column.code === 'BREAKFAST_POST')).toBe(false);
+    const entries = cellOf(result, '2026-11-19', TIME_SLOT_CODE_RANDOM);
+    expect(entries[0]?.sourceSlotName).toBe('强化-上午');
+    expect(entries[0]?.sourceType).toBe(TIME_SLOT_CATEGORY.INTENSIVE);
   });
 
   it('强化归组遇区间空洞 → 落随机列且保留强化后缀', async () => {
@@ -553,7 +593,7 @@ describe('GlucoseService.report — 血糖报告', () => {
 
     const entries = cellOf(result, '2026-11-19', TIME_SLOT_CODE_RANDOM);
     expect(entries).toHaveLength(1);
-    expect(entries[0].intensiveName).toBe('强化-上午');
+    expect(entries[0].sourceSlotName).toBe('强化-上午');
   });
 
   it('特殊时段直接落自己的列，不做时间归组', async () => {
@@ -578,7 +618,10 @@ describe('GlucoseService.report — 血糖报告', () => {
 
     const result = await service.report(deptUser, 'p-1', query());
 
-    expect(cellOf(result, '2026-11-19', TIME_SLOT_CODE_RANDOM)).toHaveLength(2);
+    const entries = cellOf(result, '2026-11-19', TIME_SLOT_CODE_RANDOM);
+    expect(entries).toHaveLength(2);
+    // R22：来源不明的兜底记录按特殊对待（前端恒展示，宁可多展示不可丢数据）
+    expect(entries.every((entry) => entry.sourceType === TIME_SLOT_CATEGORY.SPECIAL)).toBe(true);
     expect(result.count).toBe(2);
   });
 

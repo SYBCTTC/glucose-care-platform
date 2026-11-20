@@ -29,6 +29,7 @@ import type {
   GlucoseReportResponse,
   GlucoseReportRow,
   GlucoseReportStats,
+  TimeSlotCategory,
   TimeSlotOption,
 } from '@gc/shared';
 import { Prisma } from '@prisma/client';
@@ -161,8 +162,8 @@ export class GlucoseService {
    *
    * 口径（详见 docs/specs/glucose-report.md）：
    *  1. 患者存在、未归档、在数据范围内；**不要求住院中**——出院患者的历史血糖同样要能查；
-   *  2. 表头 = 普通(type=1) + 特殊(type=4) 时段，**含停用项**；强化(type=0) 不单独成列，
-   *     按检测时间落点归入普通时段列并以后缀标注；
+   *  2. 表头 = **启用的**普通(type=1) + 特殊(type=4) 时段（R22：弃用时段不成列）；
+   *     强化(type=0) 与弃用时段的记录按检测时间落点归入启用的普通时段列并以后缀标注；
    *  3. 「日期」一律是 `measuredAt` 的**本地日历日**，不是 UTC 日（否则北京时间 00:00–08:00
    *     的记录会被归到前一天）；
    *  4. **分页单位是日期而非记录条数**：先取范围内全部 measuredAt 换算本地日期去重、降序、
@@ -418,14 +419,17 @@ export class GlucoseService {
   }
 
   /**
-   * 表头列 = 普通(type=1) + 特殊(type=4)，按 sortOrder、code 升序；强化(type=0) **不单独成列**。
-   * **含停用项**：停用时段的历史血糖必须有列可落（COMMON-DATA.md「停用时段历史可展示」）。
+   * 表头列 = **启用的**普通(type=1) + 特殊(type=4)，按 sortOrder、code 升序；强化(type=0) **不单独成列**。
+   * R22（2026-11-19 裁定，替代原「含停用项」口径）：弃用时段不成列，
+   * 其历史血糖按检测时间合并进启用的宿主列并带弃用时段名后缀——历史仍可展示，只是不再占列。
    */
   private buildReportColumns(slots: TimeSlotOption[]): GlucoseReportColumn[] {
     return slots
       .filter(
         (slot) =>
-          slot.type === TIME_SLOT_CATEGORY.NORMAL || slot.type === TIME_SLOT_CATEGORY.SPECIAL,
+          // R22：只有**启用的**普通/特殊时段成列；弃用时段的历史记录合并进启用列（见 resolveColumn）
+          slot.enabled &&
+          (slot.type === TIME_SLOT_CATEGORY.NORMAL || slot.type === TIME_SLOT_CATEGORY.SPECIAL),
       )
       // list() 已按 sortOrder、code 排序，这里再排一次是不依赖上游顺序的防御
       .sort((left, right) => left.sortOrder - right.sortOrder || left.code.localeCompare(right.code))
@@ -435,7 +439,6 @@ export class GlucoseService {
           name: slot.name,
           type: slot.type as GlucoseReportColumnType,
           sortOrder: slot.sortOrder,
-          enabled: slot.enabled,
         }),
       );
   }
@@ -522,7 +525,8 @@ export class GlucoseService {
         resultType: record.resultType,
         time: formatLocalTime(record.measuredAt) ?? '',
         nurseName: record.operator?.name ?? null,
-        intensiveName: resolved.intensiveName,
+        sourceType: resolved.sourceType,
+        sourceSlotName: resolved.sourceSlotName,
       };
       row.cells[index].entries.push(entry);
       count += 1;
@@ -532,13 +536,17 @@ export class GlucoseService {
   }
 
   /**
-   * 决定一条记录落在哪一列。
+   * 决定一条记录落在哪一列，并给出前端过滤/渲染所需的来源信息（R22）。
    *
-   *  - 普通 / 特殊时段：直接落自己的列（特殊时段**不做**时间归组）；
-   *  - 强化时段：按检测时间的本地 HH:mm 归入普通时段列，并带上强化时段名作后缀；
-   *    归组时**忽略 `enabled`**（R5）——停用时段的历史血糖仍应落回原本所属的列；
-   *  - 归组失败（区间空洞）/ `mealContext` 为空 / code 在库里不存在 → 兜底列，
-   *    **不静默丢弃记录**（R13）。强化记录即使兜底也保留后缀。
+   *  - 启用的普通 / 特殊时段：直接落自己的列（特殊时段**不做**时间归组），无后缀；
+   *  - 强化时段（无论启用/弃用）：不单独成列，按检测时间的本地 HH:mm 归入**启用的**
+   *    普通时段列，带强化时段名作后缀；
+   *  - **弃用的普通/特殊时段**（R22，替代原「停用时段仍成列」口径）：列已不存在，
+   *    记录按检测时间合并进启用的普通列并带**弃用时段自己的名称**作后缀（裁定 Q1），
+   *    展示方式与强化一致；`sourceType` 保留原时段类型，供前端按勾选过滤（裁定 Q4）；
+   *  - 归组失败（区间空洞，如弃用普通时段的原区间已无启用宿主）/ `mealContext` 为空 /
+   *    code 在库里不存在 → 兜底列，**不静默丢弃记录**（R13）。合并记录即使兜底也保留后缀；
+   *    来源不明的兜底记录 `sourceType` 按特殊对待（恒展示，宁可多展示不可丢数据）。
    */
   private resolveColumn(
     mealContext: string | null,
@@ -546,18 +554,26 @@ export class GlucoseService {
     slots: TimeSlotOption[],
     slotByCode: Map<string, TimeSlotOption>,
     fallbackCode: string | null,
-  ): { code: string; intensiveName: string | null } {
+  ): { code: string; sourceType: TimeSlotCategory; sourceSlotName: string | null } {
     const slot = mealContext ? slotByCode.get(mealContext) : undefined;
     if (!slot) {
-      return { code: fallbackCode ?? '', intensiveName: null };
+      return {
+        code: fallbackCode ?? '',
+        sourceType: TIME_SLOT_CATEGORY.SPECIAL,
+        sourceSlotName: null,
+      };
     }
-    if (slot.type !== TIME_SLOT_CATEGORY.INTENSIVE) {
-      return { code: slot.code, intensiveName: null };
+    if (slot.type !== TIME_SLOT_CATEGORY.INTENSIVE && slot.enabled) {
+      return { code: slot.code, sourceType: slot.type, sourceSlotName: null };
     }
-    const host = pickTimeSlotByTime(slots, formatLocalTime(measuredAt) ?? '', {
-      ignoreEnabled: true,
-    });
-    return { code: host?.code ?? fallbackCode ?? '', intensiveName: slot.name };
+    // 强化（含弃用强化）与弃用的普通/特殊时段：合并进启用的宿主列 + 来源时段名后缀。
+    // 宿主只在**启用**普通时段里找（默认行为）——弃用时段没有列，不能作宿主
+    const host = pickTimeSlotByTime(slots, formatLocalTime(measuredAt) ?? '');
+    return {
+      code: host?.code ?? fallbackCode ?? '',
+      sourceType: slot.type,
+      sourceSlotName: slot.name,
+    };
   }
 
   /**
