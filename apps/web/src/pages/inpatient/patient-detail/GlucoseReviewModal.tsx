@@ -106,7 +106,10 @@ export default function GlucoseReviewModal({
   onChangedRef.current = onChanged;
 
   const patientId = patient?.id;
-  const open = patientId !== undefined && recordId !== null;
+  // 用 Boolean 同时挡 null/undefined/空串：recordId 运行时可能为 undefined
+  // （如后端报表响应缺 entry.id），原 `!== null` 会把 undefined 误判为可打开，
+  // 导致弹窗打开但 effect 因 `!recordId` 提前 return 不发请求、内容区恒 Spin。
+  const open = Boolean(patientId) && Boolean(recordId);
 
   useEffect(() => {
     if (!patientId || !recordId) {
