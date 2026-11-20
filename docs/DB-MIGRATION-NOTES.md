@@ -6,9 +6,21 @@
 ## 1. 当前状态
 
 - 迁移已全部应用：`prisma migrate status` 返回 `Database schema is up to date!`。
-- 迁移历史共 **13** 个目录，最新为 `20261117000000_drop_residual_glucose_enums`。
+- 迁移历史共 **15** 个目录，最新为 `20261120000000_add_admission_records`。
 - **漂移已清零**（2026-11-17，提交 `3813f93`）：`prisma migrate diff --from-schema-datasource prisma/schema.prisma --to-schema-datamodel prisma/schema.prisma --script` 输出 `-- This is an empty migration.`。
 - 因此 `pnpm db:migrate`（`migrate dev`）不再会提示重置；但**新增迁移仍一律手写 SQL + `pnpm db:deploy`**（见 §3）。
+
+**2026-11-20 执行记录（R24，`20261120000000_add_admission_records`）**：
+
+- 新表 `Admission`（住院记录）+ `AdmissionDepartment`（科室停留/转科轨迹），规格见
+  `docs/specs/glucose-report-query.md` §2（需求人评审通过后实施）。
+- `AuditAction` 末尾追加两值（顺序敏感，见 §2.3）：`GLUCOSE_REPORT_VIEW`（**缺陷补登记**：
+  2026-11-19 报表上线时 `@Audit` 已在用但枚举漏登记，PG 拒绝非法值 → 报表审计行从未落表，
+  拦截器吞错只打 console.error；补登记后已实测恢复落库）+ `ADMISSION_QUERY`（新接口动作）。
+- 迁移内含**存量回填**（幂等 `WHERE NOT EXISTS`）：1000 患者 → 各 1 条 seq=1 住院记录 + 1 条首科室停留；
+  实测 700 在院患者的停留 `endedAt` 均为 NULL（当前在科），与 `Patient.status` 一致。
+- **部分唯一索引**（Prisma 表达不了）：`prisma/sql/admission_one_active_department.sql` 已于 deploy 后
+  手工执行（`prisma db execute`），保证「每次住院至多一条进行中停留」，同 `ward_one_active.sql` 约定。
 
 ## 2. 漂移核对记录（2026-11-17 已全部处置，保留作教训）
 

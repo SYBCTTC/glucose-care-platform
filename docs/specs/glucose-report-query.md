@@ -1,7 +1,8 @@
 # 血糖报告表单查询（住院记录 × 科室记录 × 时间范围）
 
-> 按 `docs/FEATURE-SPEC-TEMPLATE.md` 归档。状态：📐 **设计评审稿**（2026-11-20 需求人提出 R24，
-> 同日 18 项裁定 Q1–Q18；裁定 Q1a：**本轮只出表结构与接口设计，不改代码，下轮实施**）。
+> 按 `docs/FEATURE-SPEC-TEMPLATE.md` 归档。状态：✅ **已实施**（2026-11-20 需求人提出 R24，
+> 同日 18 项裁定 Q1–Q18；裁定 Q1a 先出设计稿，需求人评审通过后同日实施落地，
+> 实施记录见 §12）。
 >
 > 上游规格：`docs/specs/glucose-report.md`（报表本体，R1–R23）。本规格是其查询维度扩展：
 > 统计栏行（R20 预留位）挂表单，报表数据按「住院记录 → 科室记录 → 时间范围」联动筛选。
@@ -293,7 +294,8 @@ export const glucoseReportQuerySchema = z.object({
 - **打印**：表单控件与按钮加 `gc-no-print`（交互控件对纸质输出无意义，同 `FullscreenToggle` 口径）
 - **状态归属**：表单状态与联动推导在报表子页内（新组件 `ReportQueryForm` + 纯函数
   `deriveQueryDefaults/deriveTimeBounds/buildAdmissionLabel/buildDepartmentLabel`，
-  导出供单测——同 `filterReportRows` 模式）；`admissions` 数据走 TanStack Query
+  导出供单测——同 `filterReportRows` 模式）；`admissions` 数据走**手写 hook**
+  `useAdmissions`（实施修正：全仓零 TanStack Query 使用，与 `useGlucoseReport` 同风格，见 §12-2）
 - **加载/异常**：admissions 请求中 → 两个 Select `loading`；请求失败 → 全局拦截器 toast，
   表单退化为「全部 + 无限制」可用态（不阻塞报表本体）；字段级错误（10001 details）映射表单项
 - **可访问性**：大字号档、暗色模式、键盘可达（antd 默认能力，不自造）
@@ -309,19 +311,25 @@ export const glucoseReportQuerySchema = z.object({
 
 ## 8. 测试要求（实施轮）
 
-- [ ] **server 单测**：admissions 接口（树形组装、降序、`isCurrent`、科室升序、越权 30002/30006、审计动作）；
-      report `startTime/endTime`（秒级闭区间边界、单侧缺省、start>end → 10001、
-      统计与分页 total 随过滤范围、行内只含范围内记录）
-- [ ] **server 单测（双写）**：建档 → `Admission(seq=1)` + 首条停留；`admit()` → `seq=max+1` 新住院 +
-      首条停留、上一次住院的停留已全部关闭；并发办理住院幂等（where 带状态条件既有模式）
-- [ ] **shared 单测**：query schema 秒粒度格式校验、可选性
-- [ ] **web 单测**：`deriveQueryDefaults`（在院/出院/无记录三态）、`deriveTimeBounds`
-      （科室 > 住院 > 无限制三层回退）、`buildAdmissionLabel/buildDepartmentLabel`（Q5/Q8 格式、空日期省略）、
-      重置回默认态
-- [ ] **迁移回填演练**：dev 库跑回填 → 抽查在院/出院/老数据（`admissionAt` 空）三类患者
-- [ ] **手工 e2e**：`dr.wang` 查林*（在院）默认「本次住院」态；办理住院造第二次住院 → 下拉出现
-      `第1次 (…)`；dev 库直插转科停留 → 科室下拉多条、时间联动；开始>结束被拦；重置回默认；
-      全屏态表单可用；打印预览无表单
+- [x] **server 单测**：admissions（树形组装、排序参数、`isCurrent` 脏数据防御、越权 30002、
+      归档/不存在 40001 不泄露存在性）；report `startTime/endTime`（秒级闭区间透传、
+      窗口查询叠加范围条件、start>end → 10001、统计与分页 total 随过滤范围）
+- [x] **server 单测（双写）**：建档 → `Admission(seq=1)` + 首条停留、住院号重复不创建；
+      `admit()` → `seq=max+1` 新住院 + 首条停留、防御性关闭用原出院时间（为空则以办理时刻近似）、
+      无历史记录兜底 seq=1；并发幂等由 where 带状态条件 + 事务回滚保证（既有模式）
+- [x] **shared**：query schema 复用 `dateTimeStringSchema`（既有格式校验，71 用例全绿）
+- [x] **web 单测**（21 用例）：`deriveQueryDefaults`（在院/出院/脏数据三态）、
+      `deriveAdmissionSelection`/`deriveStaySelection`（Q9/Q10/Q11/§11-1）、`deriveTimeBounds`
+      （科室 > 住院 > 无限制三层回退，进行中上限=今天）、`buildAdmissionLabel/buildDepartmentLabel`
+      （Q5/Q7/Q8 格式、空日期省略）、选项集构造（降序保持、全部末项、平铺）、
+      `toReportRange/isRangeInverted`（Q13）、组件渲染两态
+- [x] **迁移回填演练**：dev 库 1000 患者 → 1000 住院 + 1000 停留；700 在院 = 700 进行中停留；
+      部分唯一索引与枚举新值落库核验通过
+- [x] **接口 e2e（实测）**：`dr.wang` 查林*——admissions 树（2 次住院、转科 2 段停留、isCurrent、
+      本地时刻格式）✓；秒粒度过滤（范围 4 天 total vs 全量 18 天，stats 25 vs 102）✓；
+      start>end → 10001 + details ✓；`ADMISSION_QUERY`/`GLUCOSE_REPORT_VIEW` 审计落库 ✓
+- [ ] **手工 e2e（浏览器，待需求人验收）**：表单默认态、下拉联动、时间上下限、查询/重置、
+      全屏态表单可用、打印预览无表单
 
 ## 9. 非功能要求
 
@@ -334,22 +342,41 @@ export const glucoseReportQuerySchema = z.object({
 
 ## 10. 验收标准（实施轮勾选）
 
-- [ ] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` 全绿
-- [ ] schema 变更经人工评审；迁移 + 回填 + 部分唯一索引 SQL 落库；双写生效
-- [ ] admissions 接口契约、排序、审计符合 §3.1/§5；越权被拒且落 DENIED
-- [ ] 报表秒粒度过滤、统计/分页随范围（Q14/Q16）；初始加载按默认条件（Q15）
-- [ ] 联动状态机符合 §4（Q5–Q13 逐条）；重置回默认态（Q17）
-- [ ] 布局符合 Q18a；全屏态表单可用；打印隐藏表单
-- [ ] 文档回写：`glucose-report.md` R24 行、`ROADMAP.md`、`DB-MIGRATION-NOTES.md`（迁移记录）
+- [x] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` 全绿（server 246 / web 121 / shared 71 用例）
+- [x] schema 变更经人工评审（设计稿 §2 评审通过后实施）；迁移 + 回填 + 部分唯一索引 SQL 落库；双写生效（单测钉住）
+- [x] admissions 接口契约、排序、审计符合 §3.1/§5；越权被拒（30002 单测 + 审计 DENIED 既有拦截器口径）
+- [x] 报表秒粒度过滤、统计/分页随范围（Q14/Q16，接口实测）；初始加载按默认条件（Q15，ready 门控）
+- [x] 联动状态机符合 §4（Q5–Q13 逐条，21 个 web 单测钉住）；重置回默认态（Q17）
+- [x] 布局符合 Q18a；打印隐藏表单（`gc-no-print`）；全屏态表单可用（fixed 覆盖层包住整棵子树）
+- [x] 文档回写：`glucose-report.md` R24 行、`ROADMAP.md`、`DB-MIGRATION-NOTES.md`（迁移记录）
+- [ ] 浏览器视觉验收（需求人）：表单默认态/联动/查询/重置/全屏/打印
 
-## 11. 待确认项（设计补充细节，实施前如无异议按此执行）
+## 11. 待确认项（实施后状态）
 
-1. **科室清空后的时间值**（Q11 未细化）：回退为所选住院记录的 `[admittedAt, dischargedAt]`
-   （在院则结束为空）；「全部」时清空、无限制
-2. **重置是否自动查询**（Q17 未细化）：重置 = 回默认态 + 自动按默认条件查询（与初始加载一致）
-3. **出院写入口现状**：当前代码未发现独立的出院操作（`dischargeAt` 仅建档输入与查询排序出现），
-   实施轮先核实；若出院功能后续落地，须按 §2.4 双写
-4. **演示数据**（实施轮裁定）：是否为林* 造「第二次住院 + 转科停留」演示数据供 e2e 验收
-   （办理住院走既有接口，转科停留只能 dev 库直插——转科功能未实现）
-5. **`AdmissionDepartment` 操作人留痕列**：本轮不加（转科功能实现时随转科规格补
-   `transferredById` 等），避免为未实现功能预建字段（error-codes 规则同款教训）
+1. **科室清空后的时间值**：已按设计补充实施（回退为所选住院记录起止；「全部」清空）——单测钉住
+2. **重置自动查询**：已按设计补充实施（回默认态 + 自动查询）
+3. **出院写入口现状**：实施轮核实**确认无出院接口**（ROADMAP P2-6 仍 ❌；`dischargeAt` 仅建档输入
+   与查询排序出现）。出院功能落地时须按 §2.4 双写（关闭 `Admission.dischargedAt` + 进行中停留）；
+   `admit()` 已做防御性关闭兜底（原出院时间为空时以办理时刻近似），保证「每患者至多一条本次住院」不变量
+4. **演示数据**：已为林*（`de6f6beb`）dev 库直插「第二次住院 + 转科停留」——
+   seq=1（11-15 ~ 11-16 出院）、seq=2（11-17 入院在院：心内科 11-17~11-18 → 内分泌科 11-18~至今），
+   `Patient.admissionAt` 已同步（双写口径）
+5. **`AdmissionDepartment` 操作人留痕列**：维持不加（转科功能实现时随转科规格补）
+
+## 12. 实施记录（2026-11-20，与设计稿的差异与新增发现）
+
+1. **既有缺陷修复（计划外）**：`GLUCOSE_REPORT_VIEW` 自 2026-11-19 报表上线即被 `@Audit` 使用，
+   但 `AuditAction` 枚举漏登记——拦截器 `as AuditAction` 强转通过 TS，运行时 PG 拒绝非法枚举值，
+   审计写入失败被 catch 吞掉（只打 console.error），**报表审计行从未落表**。本次迁移补登记，
+   实测已恢复留痕（SUCCESS/FAILED 均落库，detail 含 rangeFrom/rangeTo/count）。
+   教训：`@Audit` 的 action 参数是宽松 string，新增动作必须同步登记枚举（已写入迁移注释）。
+2. **admissions 数据获取改手写 hook**：设计稿 §3.1 写 TanStack Query，实施遵循仓库约定
+   （全仓零 `useQuery` 使用）改为手写 `useAdmissions`（useState/useEffect + cancelled 标志，
+   同 `useGlucoseReport` 风格）；换患者时清空旧数据防竞态。
+3. **`AdmissionsResponse` 增加 `status` 字段**：前端初始态判定（在院 → 本次住院 / 出院 → 全部）
+   以患者状态为权威，不依赖 `isCurrent` 推断——出院患者若存在 `dischargedAt` 为空的脏数据行，
+   `isCurrent` 恒 false 但状态仍须准确。
+4. **窗口查询叠加范围条件**：天粒度时代「窗口 = 本页日期跨度、无需叠加用户范围」的假设随秒粒度
+   升级失效（窗口内可能存在范围外记录），`buildReportRows` 已叠加 `range.where`（单测钉住）。
+5. **报表 ready 门控**：`useGlucoseReport` 新增 `ready` 参数——住院记录未就绪时不发请求，
+   保证初始加载即按默认条件查询（Q15），避免「先全量再默认范围」的双请求与闪变。

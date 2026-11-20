@@ -77,7 +77,7 @@
 
 | 原编号 | 功能 | 状态 | 缺口 |
 |---|---|---|---|
-| P3-2 | 血糖查询 | ⚠️ | **血糖报告已落地**：`GET /patients/:id/glucose/report`（本地时区按日分组、分页单位=日期、强化时段归组、`GLUCOSE_REPORT_VIEW` 审计）+ 详情页 5 内容页全路由化。剩余：血糖记录列表页、趋势图仍为占位（`DetailPlaceholder`），日期范围选择器未做（契约已预留 `startDate`/`endDate`） |
+| P3-2 | 血糖查询 | ⚠️ | **血糖报告已落地**：`GET /patients/:id/glucose/report`（本地时区按日分组、分页单位=日期、强化时段归组、`GLUCOSE_REPORT_VIEW` 审计）+ 详情页 5 内容页全路由化。**R24 表单查询已落地**（2026-11-20，`docs/specs/glucose-report-query.md`）：住院记录/科室记录/秒级时间范围筛选（契约升级 `startTime`/`endTime`），新增 `Admission`/`AdmissionDepartment` 表与 `GET /patients/:id/admissions`（`ADMISSION_QUERY` 审计）。剩余：血糖记录列表页、趋势图仍为占位（`DetailPlaceholder`） |
 | P3-3 | 日内血糖汇总 | ❌ | `GlucoseDailySummary` 表未建 |
 | P3-4 | 数据管理 | ❌ | 无作废/更正流程 |
 | P3-5 | 异常值复核 | ❌ | `GlucoseRecord` 无 `status` 字段；越界值当前由 `createGlucoseSchema` 直接拒为 `10001`，不入库 |
@@ -151,6 +151,8 @@
 > 与上一版（约 35%）的差异来自**按代码复核**而非新增功能：P2 补上了此前漏记的入院办理与血糖录入，
 > P5/P6 从 0%/5% 上调（只读下发接口与审计写入链路其实已落地），P2 详情从「已完成」下调为「部分」。
 > 2026-11-18：P2-8 虚拟病区后端 + 前端全量落地（进出记录、双 Tab 列表、权限与审计、并发兜底 44001/44002），由「部分」上调为「已完成」。
+> 2026-11-20：R24 血糖报告表单查询落地（住院记录/科室记录/秒级时间范围，`Admission`/`AdmissionDepartment` 两表 + `GET /patients/:id/admissions`），
+> 规格 `docs/specs/glucose-report-query.md`；同轮修复既有缺陷——`GLUCOSE_REPORT_VIEW` 审计动作自 2026-11-19 上线即被使用但枚举漏登记，审计行从未落表，本次迁移补登记后恢复留痕。
 > 2026-11-18：P2-2 患者详情**前端独立详情页落地**（路由 `/inpatient/patients/:id`、脱敏基本信息摘要、列表姓名/卡片整卡入口、C1 方式B 返回还原、住院「添加血糖」），后端详情出参补 `nurseName`；血糖数据/基本信息/出入院记录 Tab 仍占位，状态维持「⚠️ 部分完成」。规格见 `docs/specs/patient-detail.md`。
 
 ---
@@ -159,7 +161,7 @@
 
 | 项 | 依赖 | 备注 |
 |---|---|---|
-| 血糖查询（剩余）/ 图表 / 日内汇总 | 无 | 原 P3-2、P3-3、P3-7；P3-2 的血糖报告已落地（2026-11-19，`docs/specs/glucose-report.md`），剩余记录列表/趋势图/日期范围选择器；汇总需先定口径与是否建 `GlucoseDailySummary` |
+| 血糖查询（剩余）/ 图表 / 日内汇总 | 无 | 原 P3-2、P3-3、P3-7；P3-2 的血糖报告已落地（2026-11-19，`docs/specs/glucose-report.md`），R24 表单查询（住院/科室/时间范围）已落地（2026-11-20，`docs/specs/glucose-report-query.md`），剩余记录列表/趋势图；汇总需先定口径与是否建 `GlucoseDailySummary`；**转科功能模块**待立项（R24 已落 `AdmissionDepartment` 表结构） |
 | 血糖数据管理（作废/更正） | 审计 | 原 P3-4；医疗记录不得物理删除，需设计作废留痕 |
 | 异常值复核 | schema 评审 | 原 P3-5；需给 `GlucoseRecord` 加状态字段，并登记 `41002`。`41006 GLUCOSE_RECORD_LOCKED` 已提前占位（`8e22a4b`）但无代码抛出 |
 | 导出框架（异步任务 + 水印 + 审批留痕） | P5、P6 | 原 P3-6 与 P5 导出共用；需登记 `41008` |
