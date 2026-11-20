@@ -77,7 +77,7 @@
 
 | 原编号 | 功能 | 状态 | 缺口 |
 |---|---|---|---|
-| P3-2 | 血糖查询 | ⚠️ | **血糖报告已落地**：`GET /patients/:id/glucose/report`（本地时区按日分组、分页单位=日期、强化时段归组、`GLUCOSE_REPORT_VIEW` 审计）+ 详情页 5 内容页全路由化。**R24 表单查询已落地**（2026-11-20，`docs/specs/glucose-report-query.md`）：住院记录/科室记录/秒级时间范围筛选（契约升级 `startTime`/`endTime`），新增 `Admission`/`AdmissionDepartment` 表与 `GET /patients/:id/admissions`（`ADMISSION_QUERY` 审计）。剩余：血糖记录列表页、趋势图仍为占位（`DetailPlaceholder`） |
+| P3-2 | 血糖查询 | ⚠️ | **血糖报告已落地**：`GET /patients/:id/glucose/report`（本地时区按日分组、分页单位=日期、强化时段归组、`GLUCOSE_REPORT_VIEW` 审计）+ 详情页 5 内容页全路由化。**R24 表单查询已落地**（2026-11-20，`docs/specs/glucose-report-query.md`）：住院记录/科室记录/秒级时间范围筛选（契约升级 `startTime`/`endTime`），新增 `Admission`/`AdmissionDepartment` 表与 `GET /patients/:id/admissions`（`ADMISSION_QUERY` 审计）。**R25 单元格增改废已落地**（2026-11-20，`docs/specs/glucose-report-edit.md`）：软删除留痕 + 部分唯一索引 `glucose_record_active_unique`、新权限点 `glucose:update`/`glucose:delete`。**R26 公共模块已抽取**（统计栏/查询表单/全屏 → `apps/web/src/components/glucose/`，记录页与趋势图可零改动接入）。剩余：血糖记录列表页、趋势图仍为占位（`DetailPlaceholder`）——**起点、缺口与待裁定项见 `docs/HANDOFF-2026-11-20-GLUCOSE-REPORT.md` §9** |
 | P3-3 | 日内血糖汇总 | ❌ | `GlucoseDailySummary` 表未建 |
 | P3-4 | 数据管理 | ❌ | 无作废/更正流程 |
 | P3-5 | 异常值复核 | ❌ | `GlucoseRecord` 无 `status` 字段；越界值当前由 `createGlucoseSchema` 直接拒为 `10001`，不入库 |
