@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
+import type { CSSProperties } from 'react';
+import { FullscreenExitOutlined, FullscreenOutlined } from '@ant-design/icons';
 import { Alert, Button, Table, Typography, theme } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useOutletContext, useParams } from 'react-router-dom';
@@ -161,6 +163,35 @@ export function filterReportRows(
 }
 
 /**
+ * R23（2026-11-20 需求人提出）：全屏切换按钮。
+ *
+ * 挂在统计栏行右侧（该行本就是 space-between 且右侧预留，R20）。图标 + 文字双通道
+ * （ui-design-tokens 规则 5 的可达性口径），图标用 @ant-design/icons（规则 10）。
+ * 打印时隐藏（交互控件对纸质输出无意义）。导出仅为单测（同 ReportCell 的理由）。
+ */
+export function FullscreenToggle({
+  fullscreen,
+  onToggle,
+}: {
+  fullscreen: boolean;
+  onToggle: (next: boolean) => void;
+}) {
+  return (
+    <Button
+      className="gc-no-print"
+      type="text"
+      size="small"
+      icon={fullscreen ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
+      onClick={() => onToggle(!fullscreen)}
+      // marginLeft auto：统计栏未加载（data 为 null）时按钮仍靠右，避免布局跳动
+      style={{ marginLeft: 'auto', flexShrink: 0 }}
+    >
+      {fullscreen ? '退出全屏' : '全屏'}
+    </Button>
+  );
+}
+
+/**
  * 报表统计栏（R20，2026-11-19 需求人裁定）：替代原「单位：mmol/L」标注
  * （D5 被推翻：格内数值不再有单位标注，单位只随最高/最低值的后缀出现）。
  *
@@ -237,16 +268,33 @@ export default function GlucoseReportTab() {
   const { glucoseVersion, reportDisplay } = useOutletContext<DetailChildContext>();
   const { token } = theme.useToken();
   const [page, setPage] = useState(1);
+  // R23：全屏态（表格撑满视口）。纯视图状态，不持久化、不影响请求与分页
+  const [fullscreen, setFullscreen] = useState(false);
   const { data, loading, error, reload } = useGlucoseReport(id, page, glucoseVersion);
   // 字典只在这里订阅一次，再传给每个单元格（见 ReportCell 注释）
   const resultTypes = useCommonDataStore(
     (state) => state.dicts[DICT_TYPE.GLUCOSE_RESULT] ?? EMPTY_RESULT_TYPES,
   );
 
-  // 换患者时回到第 1 页：同一路由不同 :id 不会重挂载组件，state 需手动重置
+  // 换患者时回到第 1 页并退出全屏：同一路由不同 :id 不会重挂载组件，state 需手动重置
   useEffect(() => {
     setPage(1);
+    setFullscreen(false);
   }, [id]);
+
+  // R23：ESC 退出全屏（通用全屏交互；仅全屏态挂监听，退出即卸载）
+  useEffect(() => {
+    if (!fullscreen) {
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setFullscreen(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [fullscreen]);
 
   // R22 规则 4：勾选变化实时过滤已下发数据，不重新请求（裁定 Q5）
   const rows = useMemo(
@@ -282,21 +330,34 @@ export default function GlucoseReportTab() {
     return [dateColumn, ...slotColumns];
   }, [data?.columns, resultTypes, reportDisplay]);
 
+  // R21（2026-11-19 裁定）：根节点撑满内容区高度，统计栏固定、表格占据剩余空间、
+  // 只在表格 body 内滚动。overflow auto 仅作极矮视口兜底（表格区压到最小高度后
+  // 整页在根节点内滚动），正常视口下内容恰好占满、不出现滚动条。
+  // R23 全屏态：fixed 覆盖整个视口（不用浏览器 Fullscreen API——antd 弹层挂 body，
+  // 该模式下会不可见，且纯 CSS 方案无兼容性问题）；flex 链与 .gc-report-table 不变，
+  // 表格随之撑满视口、body 内滚、分页钉底。zIndex 取 token 不写魔法数字，
+  // 低于 message（zIndexPopupBase 之上还有弹层增量），全屏中操作反馈不被遮挡
+  const rootStyle: CSSProperties = {
+    height: '100%',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: token.marginXS,
+    overflow: 'auto',
+    ...(fullscreen
+      ? {
+          position: 'fixed',
+          inset: 0,
+          zIndex: token.zIndexPopupBase,
+          background: token.colorBgContainer,
+          padding: token.padding,
+        }
+      : null),
+  };
+
   return (
-    // R21（2026-11-19 裁定）：根节点撑满内容区高度，统计栏固定、表格占据剩余空间、
-    // 只在表格 body 内滚动。overflow auto 仅作极矮视口兜底（表格区压到最小高度后
-    // 整页在根节点内滚动），正常视口下内容恰好占满、不出现滚动条
-    <div
-      style={{
-        height: '100%',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: token.marginXS,
-        overflow: 'auto',
-      }}
-    >
-      {/* R20 布局预留：统计栏居左；下一个任务的查询筛选表单挂同一行右侧（左右分布），
-          本轮不实现表单——space-between 下单个子元素天然左对齐，无需占位节点 */}
+    <div style={rootStyle}>
+      {/* R20 布局预留：统计栏居左；下一个任务的查询筛选表单挂同一行右侧（左右分布）。
+          R23：全屏切换按钮先行挂右侧（marginLeft auto 保证统计栏未加载时也靠右） */}
       <div
         style={{
           display: 'flex',
@@ -308,6 +369,7 @@ export default function GlucoseReportTab() {
         }}
       >
         {data ? <ReportStatsBar stats={data.stats} resultTypes={resultTypes} /> : null}
+        <FullscreenToggle fullscreen={fullscreen} onToggle={setFullscreen} />
       </div>
 
       {error ? (

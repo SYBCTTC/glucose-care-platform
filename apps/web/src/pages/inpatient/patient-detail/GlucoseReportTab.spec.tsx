@@ -21,7 +21,12 @@ import type {
   GlucoseReportStats,
 } from '@gc/shared';
 import { DEFAULT_GLUCOSE_REPORT_DISPLAY, type GlucoseReportDisplay } from './detail-tabs';
-import { filterReportRows, ReportCell, ReportStatsBar } from './GlucoseReportTab';
+import {
+  filterReportRows,
+  FullscreenToggle,
+  ReportCell,
+  ReportStatsBar,
+} from './GlucoseReportTab';
 
 /** 与 seed 一致的 DY-RESULT 片段。注意 '3' 的标签是 `Low`（血糖仪超下限），不是"未测" */
 const RESULT_TYPES = [
@@ -282,6 +287,25 @@ describe('filterReportRows — R22 记录级过滤（裁定 Q3/Q4/Q5/Q6）', () 
     const rows = [row(mixed)];
 
     expect(filterReportRows(rows, display({ time: false, operator: false }))).toBe(rows);
+  });
+});
+
+/* -------------------- R23 全屏切换按钮（2026-11-20 需求人提出） -------------------- */
+
+describe('FullscreenToggle — R23 全屏切换按钮', () => {
+  it('非全屏态：文案「全屏」，带打印隐藏类', () => {
+    const html = renderToStaticMarkup(<FullscreenToggle fullscreen={false} onToggle={() => {}} />);
+
+    expect(textOf(html)).toContain('全屏');
+    expect(html).not.toContain('退出全屏');
+    // 交互控件对纸质输出无意义，打印时隐藏
+    expect(html).toContain('gc-no-print');
+  });
+
+  it('全屏态：文案「退出全屏」', () => {
+    const html = renderToStaticMarkup(<FullscreenToggle fullscreen onToggle={() => {}} />);
+
+    expect(textOf(html)).toContain('退出全屏');
   });
 });
 
