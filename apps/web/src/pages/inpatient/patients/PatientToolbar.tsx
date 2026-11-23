@@ -34,8 +34,7 @@ export default function PatientToolbar({ value, onChange, onAddPatient }: Patien
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
-        // 公共 Tabs 自带 8px 下边距，外层补 8px 保持与表格原 16px 间距
-        marginBottom: 8,
+        marginBottom: 16,
       }}
     >
       <Tabs
@@ -45,8 +44,7 @@ export default function PatientToolbar({ value, onChange, onAddPatient }: Patien
         variant="underline"
       />
       {canCreate || canBulk ? (
-        // 与 Tabs 的下边距对称，保证 flex 居中对齐不被单边 margin 破坏
-        <Space style={{ marginBottom: 'var(--gc-space-sm)' }}>
+        <Space>
           {canCreate ? (
             <Button type="primary" icon={<PlusOutlined />} onClick={onAddPatient}>
               添加患者

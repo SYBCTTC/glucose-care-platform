@@ -7,9 +7,8 @@ interface VirtualWardToolbarProps {
 }
 
 export default function VirtualWardToolbar({ value, onChange }: VirtualWardToolbarProps) {
-  // 公共 Tabs 自带 8px 下边距，外层补 8px 保持与表格原 16px 间距
   return (
-    <div style={{ marginBottom: 8 }}>
+    <div style={{ marginBottom: 16 }}>
       <Tabs
         items={VIRTUAL_WARD_TABS}
         value={value}
