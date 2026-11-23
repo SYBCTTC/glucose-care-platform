@@ -38,8 +38,8 @@ export default function Tabs({ items, value, onChange, variant = 'underline' }: 
           variant === 'background'
             ? '1px solid var(--gc-color-tab-border)'
             : `1px solid ${token.colorBorderSecondary}`,
-        // background 变体整体下边距 8px（公共组件，患者管理/虚拟病区视图 Tabs 同样生效）
-        marginBottom: variant === 'background' ? 'var(--gc-space-sm)' : undefined,
+        // background 变体整体下边距 16px（公共组件，患者管理/虚拟病区视图 Tabs 同样生效）
+        marginBottom: variant === 'background' ? 'var(--gc-space-md)' : undefined,
       }}
     >
       {items.map((item, index) => {

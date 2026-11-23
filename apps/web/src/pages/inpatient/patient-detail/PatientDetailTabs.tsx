@@ -125,8 +125,8 @@ export default function PatientDetailTabs({
                 display: 'flex',
                 alignItems: 'center',
                 gap: token.margin,
-                // 与子 Tabs 自带的 8px 下边距对称，保证同行 flex 居中对齐不被单边 margin 破坏
-                marginBottom: 'var(--gc-space-sm)',
+                // 与子 Tabs 自带的 16px 下边距对称，保证同行 flex 居中对齐不被单边 margin 破坏
+                marginBottom: 'var(--gc-space-md)',
               }}
             >
               {REPORT_DISPLAY_OPTIONS.map((option) => (
