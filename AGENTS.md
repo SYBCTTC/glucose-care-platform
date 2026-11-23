@@ -111,18 +111,28 @@ packages/
 - `@gc/shared` 的 `TIME_SLOTS` 已降级为**仅 seed 数据源**，静态兜底函数 `getFallbackTimeSlots` / `getTimeSlotLabel` 已删除；**禁止**在运行时用它做校验或展示兜底（会与库数据漂移）
 - 手工录入时 `operatorId` 必须记录当前医护 ID（**留痕**）
 
-### 4.5 去重（唯一约束兜底，已落地 2026-10-28）
-> 实现：`@@unique([patientId, measuredAt])`（唯一索引 `GlucoseRecord_patientId_measuredAt_key`）。
+### 4.5 去重（唯一约束兜底，2026-10-28 落地，**2026-11-20 R25 改为部分唯一索引**）
+> 实现：**部分唯一索引** `glucose_record_active_unique` = `UNIQUE ("patientId", "measuredAt") WHERE "voidedAt" IS NULL`，
+> **只约束有效记录**。原全表 `@@unique([patientId, measuredAt])`（索引 `GlucoseRecord_patientId_measuredAt_key`）
+> 已由迁移 `20261120120000_add_glucose_void` **DROP**——否则作废行仍占用时间戳，同一检测时间无法补录。
+> Prisma 不支持部分索引，SQL 在 `prisma/sql/glucose_record_active_unique.sql`（`migrate deploy` 后手工执行一次，幂等；
+> 与 `ward_one_active.sql` / `binding_partial_unique.sql` 同一套约定）。
 > **没有** `dedupeKey` 字段，也不要再拼 `manual:{...}` / `device:{...}` 键。
 
-- 同一患者同一 `measuredAt` 只允许一条记录；重复提交（连点、网络重试）命中 P2002 时**幂等跳过**，不得抛错
-- 命中时接口返回 `skipped: true` 并回读已有记录；前端必须提示"未重复保存"，**不得提示成功**
+- 同一患者同一 `measuredAt` 只允许一条**有效**记录；已作废行不占位，可在同一时间点补录新记录
+- **添加**时重复提交（连点、网络重试）命中 P2002 → **幂等跳过**，不得抛错：返回 `skipped: true` 并回读已有记录；
+  前端必须提示"未重复保存"，**不得提示成功**。
+  ⚠️ 复合唯一键已不存在，回读必须用 `findFirst` + `voidedAt: null`（**不是 `findUnique`**）
+- **编辑**时把检测时间改成另一条有效记录的时间 → `41003`（字段级挂 `measuredAt`），与添加的 `skipped` 口径**不同**：
+  那不是重复提交，是用户改错了时间，必须报错
 - 迁移遇历史重复组会**直接失败并报出组数**，不静默删除医疗记录，需人工确认后清理
 - 将来若要允许"同一时间点多来源各一条"（设备+手工），必须先改本约束，属契约变更
 
 ### 4.6 CGM 扩展（**当前未预留，属目标态**）
 > 现状（2026-10-22 重构后简化重建，见 `docs/ARCHITECTURE.md` §4；引用章节而非行号，避免行号漂移后指错）：`GlucoseRecord` 仅
-> `resultType / valueMmolL / mealContext / measuredAt / operatorId / testStrip / remark`；
+> `resultType / valueMmolL / mealContext / measuredAt / operatorId / testStrip / remark`
+> 加 `createdAt` 与 R25 软删除 `voidedAt / voidedById`（医疗记录不得物理删除，删除按作废实现；
+> **所有读路径一律排除已作废记录**，新增血糖查询漏加 `voidedAt: null` 即数据错误）；
 > **没有** `kind`、`rawPayload`、`GlucoseDailySummary`，**没有** `GlucoseIngestionService`
 > （现为 `GlucoseService`），`prisma/sql/glucose_record_partition.sql` **不存在**。
 

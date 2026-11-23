@@ -15,11 +15,8 @@ globs:
 
 # 血糖领域规则
 
-> 与 `AGENTS.md` §4 同源，冲突以 `AGENTS.md` 为准。最后核对：2026-11-23（对齐 R25 软删除与部分唯一索引、R26 公共模块迁移）。
->
-> ⚠️ **一处例外**：`AGENTS.md` §4.5 的去重口径**尚未同步**——仍写全表 `@@unique([patientId, measuredAt])`
-> 与索引 `GlucoseRecord_patientId_measuredAt_key`，而该索引已被迁移 `20261120120000_add_glucose_void` 删除。
-> **去重与作废口径以本文件 + `schema.prisma` L245-249 为准**，不要按 `AGENTS.md` §4.5 回退。
+> 与 `AGENTS.md` §4 同源，冲突以 `AGENTS.md` 为准。最后核对：2026-11-23（对齐 R25 软删除与部分唯一索引、R26 公共模块迁移；
+> `AGENTS.md` §4.5 / §4.6 已同日同步，两处口径一致，无例外）。
 
 ## 单位
 - 存储唯一单位：`mmol/L`，字段 `GlucoseRecord.valueMmolL`，`Decimal(4,1)`

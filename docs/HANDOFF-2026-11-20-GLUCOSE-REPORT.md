@@ -23,8 +23,8 @@
 2. R26 公共化后的**手工 e2e 未做**（全屏/ESC/换患者重置/打印预览单测覆盖不到）。
 3. ~~`.codebuddy/rules/glucose-domain.md` 有两处事实性过时~~ → **已于 2026-11-23 核对代码后修正**，
    并连带补齐软删除读路径口径与 `globs`（§7.2）。
-4. ⚠️ **`AGENTS.md` §4.5 仍是旧去重口径**，而规则文件声明「冲突以 `AGENTS.md` 为准」——
-   已加显式例外标注临时消歧，**根治需改 `AGENTS.md`，待裁定**（§7.2.1）。
+4. ~~`AGENTS.md` §4.5 仍是旧去重口径~~ → **已于 2026-11-23 一并同步修正**（§4.5 / §4.6 + 一处代码注释），
+   规则文件的临时例外标注已移除，口径彻底统一（§7.2.1）。
 5. 血糖记录页的**统计口径与分页语义未定**，需按 `FEATURE-SPEC-TEMPLATE` 立项（§9）。
 
 ---
@@ -32,7 +32,7 @@
 ## 1. 新窗口阅读顺序
 
 1. 仓库根 `AGENTS.md`：项目总纲、技术栈版本约束、目录结构、分层职责、合规要求（**最高优先级上下文**）。
-   ⚠️ 一处例外：§4.5 去重口径已过时，以 `glucose-domain.md` + `schema.prisma:245-249` 为准（§7.2.1）。
+   §4.5 / §4.6 已于 2026-11-23 同步 R25 口径，与 `glucose-domain.md` 一致，**无需例外处理**。
 2. `.codebuddy/rules/`：`ai-collaboration.md`（产出前/时/后约定、禁止清单）、
    `glucose-domain.md`（单位/时间语义/取值异常/时段/去重/**作废**/住院记录模型，2026-11-23 已核对修正）、
    `permissions.md`、`security-and-audit.md`、`shared-package.md`（改共享包三步流程）、
@@ -388,17 +388,24 @@ const admissions = useAdmissions(id);          // hook 留在页面侧，公共�
 - `globs` 补 `apps/web/src/components/glucose/**` 与 `apps/web/src/pages/inpatient/patient-detail/**`
   —— R26 迁移后未同步，导致**改血糖报告页/公共模块时这条规则不会被自动加载**（功能性缺陷，不只是文档过时）。
 
-### 7.2.1 ⚠️ 仍待裁定：`AGENTS.md` §4.5 与一处代码注释未同步
+### 7.2.1 `AGENTS.md` §4.5 / §4.6 与一处代码注释 —— ✅ 已于 2026-11-23 同步修正（需求人裁定）
 
-`glucose-domain.md` 开头声明「冲突以 `AGENTS.md` 为准」，而 **`AGENTS.md:115` 仍写旧口径**
+`glucose-domain.md` 开头声明「冲突以 `AGENTS.md` 为准」，而 `AGENTS.md:115` 原写旧口径
 （`@@unique([patientId, measuredAt])` + 索引 `GlucoseRecord_patientId_measuredAt_key`）。
-若不修正，AI 遇到冲突会**回退到错误口径**，等于抵消上面的修正。
+若不修正，AI 遇到冲突会**回退到错误口径**，等于抵消 §7.2 的修正。经裁定已一并修正：
 
-已在 `glucose-domain.md:20-22` 加**显式例外标注**临时消歧（去重与作废以规则文件 + `schema.prisma` 为准），
-但**根治需改 `AGENTS.md` §4.5**。因 `AGENTS.md` 是人工维护的最高优先级总纲，未擅自改动，待裁定。
+- **`AGENTS.md` §4.5**：去重口径改为部分唯一索引 `glucose_record_active_unique`（附 DROP 它的迁移名
+  `20261120120000_add_glucose_void`、SQL 位置与「`migrate deploy` 后手工执行一次」的时机），
+  并补三条口径：只允许一条**有效**记录（作废后可补录同一时间点）、回读用 `findFirst` 而非 `findUnique`、
+  编辑撞有效记录时间 → `41003`（与添加的 `skipped` 语义不同）。
+- **`AGENTS.md` §4.6**：`GlucoseRecord` 字段列举补 `createdAt` 与 `voidedAt / voidedById`，
+  并写明「所有读路径一律排除已作废记录，新增血糖查询漏加 `voidedAt: null` 即数据错误」。
+- **`apps/server/src/common/utils/prisma-error.ts:10`**：旧索引名改为 `glucose_record_active_unique`
+  并注明「仅约束 `voidedAt IS NULL` 的有效记录」（纯注释，行为无变化）。
+  同文件 `:12` 的 `virtual_ward_record_one_active` 经核对**正确**（`ward_one_active.sql:18`），未改。
+- **`glucose-domain.md:18-19`**：临时例外标注已移除，改为「`AGENTS.md` §4.5 / §4.6 已同日同步，两处口径一致，无例外」。
 
-同类待同步：`AGENTS.md` §4.6 的 `GlucoseRecord` 字段列举同样缺 `voidedAt/voidedById`；
-`apps/server/src/common/utils/prisma-error.ts:10` 注释仍写旧索引名（仅注释，不影响行为）。
+⚠️ 新窗口读 `AGENTS.md` 时**不必再对 §4.5 做例外处理**；§0 剩余事项与 §1 阅读顺序已同步更新。
 
 ### 7.3 R26 公共化后的手工 e2e 未做
 
