@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { Checkbox, message, theme } from 'antd';
 import { Outlet, useLocation, useParams } from 'react-router-dom';
 import Tabs, { type TabItem } from '@/components/common/Tabs';
-import { layoutSize } from '@/styles/tokens';
 import {
   DEFAULT_GLUCOSE_REPORT_DISPLAY,
   GLUCOSE_TAB_PATH,
@@ -105,7 +104,6 @@ export default function PatientDetailTabs({
       {main === 'glucose' ? (
         <div
           style={{
-            marginTop: layoutSize.cardGap,
             flexShrink: 0,
             display: 'flex',
             alignItems: 'center',
@@ -139,8 +137,8 @@ export default function PatientDetailTabs({
           flex: 1,
           minHeight: 0,
           overflow: 'auto',
-          // 有子 Tabs 时内容紧随其下（保持原视觉间距 0）；无子 Tabs 时与主 Tab 拉开 cardGap
-          marginTop: main === 'glucose' ? 0 : layoutSize.cardGap,
+          // 有子 Tabs 时内容紧随其下（间距 0）；无子 Tabs 时与主 Tab 的间距由主 Tabs 自身 8px 下边距提供
+          marginTop: 0,
         }}
       >
         <Outlet context={{ ...outletContext, reportDisplay }} />

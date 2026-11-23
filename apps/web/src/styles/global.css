@@ -26,6 +26,8 @@
   --gc-color-bg-header: #fafafa;
   --gc-color-border: #d9d9d9;
   --gc-color-border-secondary: #f0f0f0;
+  /* 公共 Tabs 边框与项间竖线：明暗同值（与既有 background 变体视觉一致），暗色不覆盖 */
+  --gc-color-tab-border: #cdcdcd;
   --gc-color-mask: rgba(0, 0, 0, 0.45);
   --gc-color-sider: #001529;
   --gc-color-sider-text: rgba(255, 255, 255, 0.65);
