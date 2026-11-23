@@ -31,8 +31,13 @@ export default function Tabs({ items, value, onChange, variant = 'underline' }: 
         gap: variant === 'background' ? 0 : 4,
         // background 变体边框（含下边框）= 1px solid rgb(205,205,205)，色值走令牌
         border: variant === 'background' ? '1px solid var(--gc-color-tab-border)' : undefined,
+        // ⚠️ borderBottom 必须显式赋值、不可为 undefined：React 会把 undefined 写成 ''，
+        // CSSOM 随即移除上面 border 简写已设的下边框分量 → background 变体下边框不渲染
+        //（历史遗留缺陷，2026-11-23 实机取证定位）
         borderBottom:
-          variant === 'underline' ? `1px solid ${token.colorBorderSecondary}` : undefined,
+          variant === 'background'
+            ? '1px solid var(--gc-color-tab-border)'
+            : `1px solid ${token.colorBorderSecondary}`,
         // background 变体整体下边距 8px（公共组件，患者管理/虚拟病区视图 Tabs 同样生效）
         marginBottom: variant === 'background' ? 'var(--gc-space-sm)' : undefined,
       }}
