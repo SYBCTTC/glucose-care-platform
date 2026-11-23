@@ -120,7 +120,15 @@ export default function PatientDetailTabs({
           />
           {/* R22 规则 1/2：展示项勾选紧跟子 Tabs、同一水平线，仅「血糖报告」子 Tab 渲染 */}
           {glucose === 'report' ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: token.margin }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: token.margin,
+                // 与子 Tabs 自带的 8px 下边距对称，保证同行 flex 居中对齐不被单边 margin 破坏
+                marginBottom: 'var(--gc-space-sm)',
+              }}
+            >
               {REPORT_DISPLAY_OPTIONS.map((option) => (
                 <Checkbox
                   key={option.value}
@@ -139,7 +147,7 @@ export default function PatientDetailTabs({
           flex: 1,
           minHeight: 0,
           overflow: 'auto',
-          // 有子 Tabs 时内容紧随其下（保持原视觉间距 0）；无子 Tabs 时与主 Tab 拉开 cardGap
+          // 有子 Tabs 时内容紧随其下（间距由子 Tabs 自带 8px 下边距提供）；无子 Tabs 时与主 Tab 拉开 cardGap
           marginTop: main === 'glucose' ? 0 : layoutSize.cardGap,
         }}
       >

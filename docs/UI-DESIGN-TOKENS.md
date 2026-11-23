@@ -53,20 +53,21 @@
 
 ## 3. 中性色（文字 / 背景 / 边框）—— 建议直接采用默认
 
-| Token                           | 填写 | 推荐默认（浅色模式） | 用途               |
-| ------------------------------- | ---- | -------------------- | ------------------ |
-| 一级文字 `colorText`            | ____ | `rgba(0,0,0,0.88)`   | 标题、正文         |
-| 二级文字 `colorTextSecondary`   | ____ | `rgba(0,0,0,0.65)`   | 次要说明、表格内容 |
-| 三级文字 `colorTextTertiary`    | ____ | `rgba(0,0,0,0.45)`   | 占位符、辅助信息   |
-| 四级文字 `colorTextQuaternary`  | ____ | `rgba(0,0,0,0.25)`   | 禁用态             |
-| 页面底色 `colorBgLayout`        | ____ | `#F5F7FA`            | 整体背景           |
-| 容器底色 `colorBgContainer`     | ____ | `#FFFFFF`            | 卡片、表格、弹窗   |
-| 悬浮层底色 `colorBgElevated`    | ____ | `#FFFFFF`            | 下拉、Tooltip      |
-| 斑马纹/表头底                   | ____ | `#FAFAFA`            | 表格表头、隔行     |
-| 一级边框 `colorBorder`          | ____ | `#D9D9D9`            | 输入框、卡片边     |
-| 二级边框 `colorBorderSecondary` | ____ | `#F0F0F0`            | 分割线、表格线     |
-| 分割线 `colorSplit`             | ____ | `rgba(5,5,5,0.06)`   | Divider            |
-| 遮罩 `colorBgMask`              | ____ | `rgba(0,0,0,0.45)`   | Modal 遮罩         |
+| Token                                 | 填写 | 推荐默认（浅色模式） | 用途                                                |
+| ------------------------------------- | ---- | -------------------- | --------------------------------------------------- |
+| 一级文字 `colorText`                  | ____ | `rgba(0,0,0,0.88)`   | 标题、正文                                          |
+| 二级文字 `colorTextSecondary`         | ____ | `rgba(0,0,0,0.65)`   | 次要说明、表格内容                                  |
+| 三级文字 `colorTextTertiary`          | ____ | `rgba(0,0,0,0.45)`   | 占位符、辅助信息                                    |
+| 四级文字 `colorTextQuaternary`        | ____ | `rgba(0,0,0,0.25)`   | 禁用态                                              |
+| 页面底色 `colorBgLayout`              | ____ | `#F5F7FA`            | 整体背景                                            |
+| 容器底色 `colorBgContainer`           | ____ | `#FFFFFF`            | 卡片、表格、弹窗                                    |
+| 悬浮层底色 `colorBgElevated`          | ____ | `#FFFFFF`            | 下拉、Tooltip                                       |
+| 斑马纹/表头底                         | ____ | `#FAFAFA`            | 表格表头、隔行                                      |
+| 一级边框 `colorBorder`                | ____ | `#D9D9D9`            | 输入框、卡片边                                      |
+| 二级边框 `colorBorderSecondary`       | ____ | `#F0F0F0`            | 分割线、表格线                                      |
+| 分割线 `colorSplit`                   | ____ | `rgba(5,5,5,0.06)`   | Divider                                             |
+| Tab 边框/竖线 `--gc-color-tab-border` | ____ | `#CDCDCD`            | 公共 Tabs background 变体边框与项间竖线（明暗同值） |
+| 遮罩 `colorBgMask`                    | ____ | `rgba(0,0,0,0.45)`   | Modal 遮罩                                          |
 
 ---
 
