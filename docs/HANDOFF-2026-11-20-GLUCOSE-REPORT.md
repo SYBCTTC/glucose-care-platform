@@ -21,16 +21,20 @@
 
 1. `ADMISSION_QUERY` 的 StrictMode 守卫**待硬刷新复验**（§7.1）。
 2. R26 公共化后的**手工 e2e 未做**（全屏/ESC/换患者重置/打印预览单测覆盖不到）。
-3. `.codebuddy/rules/glucose-domain.md` 有**两处事实性过时**，会误导新会话（§7.2）。
-4. 血糖记录页的**统计口径与分页语义未定**，需按 `FEATURE-SPEC-TEMPLATE` 立项（§9）。
+3. ~~`.codebuddy/rules/glucose-domain.md` 有两处事实性过时~~ → **已于 2026-11-23 核对代码后修正**，
+   并连带补齐软删除读路径口径与 `globs`（§7.2）。
+4. ⚠️ **`AGENTS.md` §4.5 仍是旧去重口径**，而规则文件声明「冲突以 `AGENTS.md` 为准」——
+   已加显式例外标注临时消歧，**根治需改 `AGENTS.md`，待裁定**（§7.2.1）。
+5. 血糖记录页的**统计口径与分页语义未定**，需按 `FEATURE-SPEC-TEMPLATE` 立项（§9）。
 
 ---
 
 ## 1. 新窗口阅读顺序
 
 1. 仓库根 `AGENTS.md`：项目总纲、技术栈版本约束、目录结构、分层职责、合规要求（**最高优先级上下文**）。
+   ⚠️ 一处例外：§4.5 去重口径已过时，以 `glucose-domain.md` + `schema.prisma:245-249` 为准（§7.2.1）。
 2. `.codebuddy/rules/`：`ai-collaboration.md`（产出前/时/后约定、禁止清单）、
-   `glucose-domain.md`（单位/时间语义/取值异常/时段/去重/住院记录模型，⚠️ 见 §7.2）、
+   `glucose-domain.md`（单位/时间语义/取值异常/时段/去重/**作废**/住院记录模型，2026-11-23 已核对修正）、
    `permissions.md`、`security-and-audit.md`、`shared-package.md`（改共享包三步流程）、
    `error-codes.md`、`ui-design-tokens.md`、`git-commit.md`、`agent-efficiency.md`。
 3. 本文档。
@@ -356,17 +360,45 @@ const admissions = useAdmissions(id);          // hook 留在页面侧，公共�
 **复验方式**：硬刷新（Ctrl+F5）患者详情页 → network 里两个接口应各只剩 1 次；
 或查审计表比对刷新后时间戳是否各 1 条。
 
-### 7.2 ⚠️ `.codebuddy/rules/glucose-domain.md` 两处事实性过时
+### 7.2 `.codebuddy/rules/glucose-domain.md` 两处过时 —— ✅ 已于 2026-11-23 核对代码后修正
 
-规则文件是 AI 的强制上下文，过时会直接误导新会话。**建议人工确认后修正**：
+规则文件是 AI 的强制上下文，过时会直接误导新会话。原两处已修正：
 
-1. 「报表查询表单联动…见 **`ReportQueryForm.tsx`** 导出纯函数与其 spec」
-   → R26 已迁移改名为 `apps/web/src/components/glucose/GlucoseQueryForm.tsx`
-   （`ReportQueryFormState`→`GlucoseQueryFormState`、`toReportRange`→`toQueryRange`），原文件已删除。
-2. 「去重（唯一约束兜底）实现：**`@@unique([patientId, measuredAt])`**（索引 `GlucoseRecord_patientId_measuredAt_key`）」
-   → R25 已改为**部分唯一索引** `glucose_record_active_unique`（`WHERE voidedAt IS NULL`，
-   手写 SQL 在 `prisma/sql/glucose_record_active_unique.sql`），见 schema L245-250。
-   原全表唯一约束会让「作废后重录同一时间点」失败，故必须带 `WHERE`。
+1. 「报表查询表单联动…见 **`ReportQueryForm.tsx`**」→ 改为
+   `apps/web/src/components/glucose/GlucoseQueryForm.tsx`（R26 改名迁移；全仓搜索确认旧文件名**无代码残留引用**，
+   仅规格文档里作为历史说明存在）。
+2. 「去重实现：**`@@unique([patientId, measuredAt])`**（索引 `GlucoseRecord_patientId_measuredAt_key`）」
+   → 改为**部分唯一索引** `glucose_record_active_unique`（`WHERE "voidedAt" IS NULL`）。
+   证据链：迁移 `20261120120000_add_glucose_void/migration.sql:31` 有 `DROP INDEX "GlucoseRecord_patientId_measuredAt_key"`；
+   新索引 SQL 在 `prisma/sql/glucose_record_active_unique.sql:18-20`；`schema.prisma:245-249` 有对应说明。
+
+**同批修正的连带项**（核对时发现，不改仍会误导）：
+
+- 语义修正：「同一 `measuredAt` 只允许一条记录」→「只允许一条**有效**记录」，作废后可在同一时间点补录
+  （这正是部分索引存在的理由，原表述会让人以为作废后无法重录）。
+- 幂等回读口径：复合唯一键已不存在，必须 `findFirst` + `voidedAt: null`（**不是 `findUnique`**），
+  见 `glucose.service.ts:506-521`。
+- 新增「作废（软删除）」整节：读路径一律排除已作废——**已逐处核实 6 个读路径**
+  （报表单元格 `glucose.service.ts:690`、日期分组 `:382`、统计聚合 `:443`、极值 `:483`、
+  单条回读 `:171`、最新血糖 `patient.service.ts:82`）；并补错误码口径
+  （并发/已作废 `10008`、记录不存在 `41001`、编辑撞有效记录时间 `41003`）与权限/审计口径。
+- CGM 节字段列举补 `createdAt` 与 `voidedAt/voidedById`（原文用「仅」字列举，会让人以为无软删除字段）。
+- 图表节补：已作废不进图；全屏后必须 `resize`，用 R26 的 `useFullscreen({ onResize })`，
+  不要另写 Fullscreen API（纯 CSS 覆盖层不触发浏览器 fullscreen 事件）。
+- `globs` 补 `apps/web/src/components/glucose/**` 与 `apps/web/src/pages/inpatient/patient-detail/**`
+  —— R26 迁移后未同步，导致**改血糖报告页/公共模块时这条规则不会被自动加载**（功能性缺陷，不只是文档过时）。
+
+### 7.2.1 ⚠️ 仍待裁定：`AGENTS.md` §4.5 与一处代码注释未同步
+
+`glucose-domain.md` 开头声明「冲突以 `AGENTS.md` 为准」，而 **`AGENTS.md:115` 仍写旧口径**
+（`@@unique([patientId, measuredAt])` + 索引 `GlucoseRecord_patientId_measuredAt_key`）。
+若不修正，AI 遇到冲突会**回退到错误口径**，等于抵消上面的修正。
+
+已在 `glucose-domain.md:20-22` 加**显式例外标注**临时消歧（去重与作废以规则文件 + `schema.prisma` 为准），
+但**根治需改 `AGENTS.md` §4.5**。因 `AGENTS.md` 是人工维护的最高优先级总纲，未擅自改动，待裁定。
+
+同类待同步：`AGENTS.md` §4.6 的 `GlucoseRecord` 字段列举同样缺 `voidedAt/voidedById`；
+`apps/server/src/common/utils/prisma-error.ts:10` 注释仍写旧索引名（仅注释，不影响行为）。
 
 ### 7.3 R26 公共化后的手工 e2e 未做
 
@@ -458,6 +490,8 @@ R26 第 1 笔提交（`f015230`）已单独 `git checkout` 验证可独立编译
 - 本次归档范围是**血糖报告**；开发血糖记录时**不要顺手改报表页行为**，公共模块的调整需保证报表页回归通过。
 - **趋势图页不要一起动**（`routes.tsx:89` 同为占位），除非明确立项。
 - 患者数据查询必须继续走后端数据权限过滤，**不要在前端或 service 内手写绕过 `buildScopeWhere`** 的科室条件。
+- ⚠️ **新增的任何血糖查询必须加 `where.voidedAt = null`**（R25 软删除）：漏加会把已作废记录当有效数据展示，
+  属医疗数据错误。现有 6 个读路径均已加，清单见 `.codebuddy/rules/glucose-domain.md`「作废」节。
 - 查询患者血糖属敏感操作，**必须逐条留痕**；新增接口不要漏 `@Audit`，也不要为了减少审计而合并请求。
 - 禁止新增依赖（含图表库、表格库）；确需新增须说明用途并等人工批准。
 - 禁止修改 `prisma/schema.prisma`、migration、`docker-compose.yml`、CI、`.env*` 而不走人工审查
