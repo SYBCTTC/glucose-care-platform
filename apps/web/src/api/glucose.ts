@@ -1,6 +1,7 @@
 import type {
   GlucoseCreateResult,
   GlucoseRecordDetail,
+  GlucoseRecordListResponse,
   GlucoseReportResponse,
   GlucoseUpdateResult,
   GlucoseVoidResult,
@@ -62,6 +63,32 @@ export function fetchGlucoseReport(
   params: GlucoseReportParams = {},
 ): Promise<GlucoseReportResponse> {
   return http.get<GlucoseReportResponse>(`/patients/${patientId}/glucose/report`, params);
+}
+
+/**
+ * R27：血糖记录列表查询参数（前端以字符串/数字传递，后端用共享 schema 校验）。
+ * 时间口径与报表一致：秒粒度本地时间 `YYYY-MM-DD HH:mm:ss` 闭区间，单侧不传则该侧不限。
+ */
+export interface GlucoseRecordParams {
+  [key: string]: string | number | undefined;
+  /** YYYY-MM-DD HH:mm:ss，本地时间，含该秒；不传则不限起点 */
+  startTime?: string;
+  /** YYYY-MM-DD HH:mm:ss，本地时间，含该秒；不传则不限终点 */
+  endTime?: string;
+  page?: number;
+  /** 每页**记录条数**（不是日期数），固定 15（GLUCOSE_RECORD_PAGE_SIZE），无条数切换器 */
+  pageSize?: number;
+}
+
+/**
+ * R27：血糖记录列表（平铺分页 + 统计栏，统计口径与报表一致——裁定 Q8）。
+ * 属敏感查询，后端每次调用写一条 GLUCOSE_RECORD_QUERY 审计（含越权 DENIED）。
+ */
+export function fetchGlucoseRecords(
+  patientId: string,
+  params: GlucoseRecordParams = {},
+): Promise<GlucoseRecordListResponse> {
+  return http.get<GlucoseRecordListResponse>(`/patients/${patientId}/glucose/records`, params);
 }
 
 /**
