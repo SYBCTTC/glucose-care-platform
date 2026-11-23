@@ -3,12 +3,13 @@ import type { Request } from 'express';
 import {
   createGlucoseSchema,
   glucoseRecordParamsSchema,
+  glucoseRecordQuerySchema,
   glucoseReportQuerySchema,
   patientIdSchema,
   PERMISSION,
   RESOURCE,
 } from '@gc/shared';
-import type { CreateGlucoseInput, GlucoseReportQuery } from '@gc/shared';
+import type { CreateGlucoseInput, GlucoseRecordQuery, GlucoseReportQuery } from '@gc/shared';
 import { Audit } from '../../common/decorators/audit.decorator';
 import { RequireDataScope } from '../../common/data-scope/data-scope.decorator';
 import { RequirePermissions } from '../../common/guards/permissions.guard';
@@ -71,6 +72,31 @@ export class GlucoseController {
   }
 
   /**
+   * R27：血糖记录列表（平铺分页，只读 + review/编辑入口，docs/specs/glucose-record.md）。
+   *
+   * ⚠️ 路由顺序：必须声明在 `:id/glucose/:recordId` **之前**，否则 `records` 会被 `:recordId` 捕获。
+   * 权限口径同报表（`patient:view`，不新增权限点）；审计 GLUCOSE_RECORD_QUERY（裁定 Q1：
+   * 独立动作，可与报表查询区分过滤），detail 的 `rangeFrom`/`rangeTo`/`count` 由 service
+   * 回显、拦截器按既有白名单提取，**无需改白名单**。
+   */
+  @Get(':id/glucose/records')
+  @RequirePermissions(PERMISSION.PATIENT_VIEW)
+  @RequireDataScope(RESOURCE.PATIENT)
+  @Audit('GLUCOSE_RECORD_QUERY', { targetType: 'PATIENT' })
+  async records(
+    @Req() request: Request,
+    @Param(new ZodValidationPipe(patientIdSchema)) params: { id: string },
+    @Query(new ZodValidationPipe(glucoseRecordQuerySchema)) query: GlucoseRecordQuery,
+  ) {
+    const result = await this.glucoseService.records(
+      request.user as AuthenticatedUser,
+      params.id,
+      query,
+    );
+    return ok(result);
+  }
+
+  /**
    * R25：单条血糖详情（review/编辑弹框回填）。
    *
    * ⚠️ 路由顺序：必须声明在 `:id/glucose/report` **之后**，否则 `report` 会被 `:recordId` 捕获。
@@ -83,7 +109,8 @@ export class GlucoseController {
   @RequireDataScope(RESOURCE.PATIENT)
   async detail(
     @Req() request: Request,
-    @Param(new ZodValidationPipe(glucoseRecordParamsSchema)) params: { id: string; recordId: string },
+    @Param(new ZodValidationPipe(glucoseRecordParamsSchema))
+    params: { id: string; recordId: string },
   ) {
     const result = await this.glucoseService.detail(
       request.user as AuthenticatedUser,
@@ -104,7 +131,8 @@ export class GlucoseController {
   @Audit('GLUCOSE_UPDATE', { targetType: 'PATIENT' })
   async update(
     @Req() request: Request,
-    @Param(new ZodValidationPipe(glucoseRecordParamsSchema)) params: { id: string; recordId: string },
+    @Param(new ZodValidationPipe(glucoseRecordParamsSchema))
+    params: { id: string; recordId: string },
     @Body(new ZodValidationPipe(createGlucoseSchema)) body: CreateGlucoseInput,
   ) {
     const result = await this.glucoseService.update(
@@ -128,7 +156,8 @@ export class GlucoseController {
   @Audit('GLUCOSE_VOID', { targetType: 'PATIENT' })
   async voidRecord(
     @Req() request: Request,
-    @Param(new ZodValidationPipe(glucoseRecordParamsSchema)) params: { id: string; recordId: string },
+    @Param(new ZodValidationPipe(glucoseRecordParamsSchema))
+    params: { id: string; recordId: string },
   ) {
     const result = await this.glucoseService.voidRecord(
       request.user as AuthenticatedUser,

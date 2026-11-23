@@ -22,6 +22,8 @@ import type {
   FieldError,
   GlucoseCreateResult,
   GlucoseRecordDetail,
+  GlucoseRecordListResponse,
+  GlucoseRecordQuery,
   GlucoseReportCell,
   GlucoseReportColumn,
   GlucoseReportColumnType,
@@ -343,9 +345,7 @@ export class GlucoseService {
 
   /** 41003 字段级错误（details 挂 measuredAt，前端表单就地提示） */
   private measuredAtDuplicateError(): BusinessException {
-    const details: FieldError[] = [
-      { field: 'measuredAt', message: '该检测时间已存在血糖记录' },
-    ];
+    const details: FieldError[] = [{ field: 'measuredAt', message: '该检测时间已存在血糖记录' }];
     return new BusinessException(ERROR_CODES.GLUCOSE_MEASURED_AT_DUPLICATE, undefined, details);
   }
 
@@ -414,6 +414,71 @@ export class GlucoseService {
       rangeFrom: range.from,
       rangeTo: range.to,
       count,
+      stats,
+    };
+  }
+
+  /**
+   * R27：血糖记录列表（GET /patients/:id/glucose/records，平铺分页，docs/specs/glucose-record.md）。
+   *
+   * 口径：
+   *  1. 患者校验同报表（存在、未归档、数据范围内；**不要求住院中**）；
+   *  2. 时间过滤与报表契约一致：秒粒度闭区间，单侧不传则不限（resolveTimeRange 同一实现）；
+   *  3. **只含有效记录**（voidedAt null，全仓不变量，裁定 Q2）；结果类型 0~9 全量下发不过滤（规则 3）；
+   *  4. 排序 `measuredAt DESC, id ASC`（裁定 Q5：最新在前；id 第二键防同秒记录页间漂移）；
+   *  5. 分页按**记录条数** take/skip（与报表「按日期分组再切」不同），total = 过滤后总条数；
+   *  6. 统计栏复用 buildReportStats（裁定 Q8：同范围下与报表 Tab 数字完全一致；
+   *     总计只计 counted=true 类型，5~9 列表可见但不计入）；
+   *  7. `operatorName` 走关联 select（同报表 nurseName / R25 详情口径）；时段名不下发，
+   *     前端按 code 查动态时段（含停用项回显），避免第二份名称口径；
+   *  8. 响应回显 rangeFrom/rangeTo/count，供 AuditLogInterceptor 按既有白名单落审计 detail。
+   */
+  async records(
+    user: AuthenticatedUser,
+    patientId: string,
+    query: GlucoseRecordQuery,
+  ): Promise<GlucoseRecordListResponse> {
+    await this.assertPatientReadable(user, patientId);
+
+    const range = this.resolveTimeRange(query);
+    const where = { patientId, measuredAt: range.where, voidedAt: null };
+
+    const [total, rows, stats] = await Promise.all([
+      this.prisma.glucoseRecord.count({ where }),
+      this.prisma.glucoseRecord.findMany({
+        where,
+        select: {
+          id: true,
+          measuredAt: true,
+          mealContext: true,
+          resultType: true,
+          valueMmolL: true,
+          remark: true,
+          operator: { select: { name: true } },
+        },
+        orderBy: [{ measuredAt: 'desc' }, { id: 'asc' }],
+        skip: (query.page - 1) * query.pageSize,
+        take: query.pageSize,
+      }),
+      this.buildReportStats(patientId, range.where),
+    ]);
+
+    return {
+      items: rows.map((record) => ({
+        id: record.id,
+        measuredAt: formatDateTime(record.measuredAt) ?? '',
+        mealContext: record.mealContext,
+        resultType: record.resultType,
+        valueMmolL: record.valueMmolL === null ? null : Number(record.valueMmolL),
+        operatorName: record.operator?.name ?? null,
+        remark: record.remark,
+      })),
+      total,
+      page: query.page,
+      pageSize: query.pageSize,
+      rangeFrom: range.from,
+      rangeTo: range.to,
+      count: rows.length,
       stats,
     };
   }
@@ -598,8 +663,11 @@ export class GlucoseService {
    * `measuredAt` 同口径，无 UTC 日界偏移问题），过滤为**闭区间** `[startTime, endTime]`
    * （裁定 Q14：范围外记录不展示、不统计）。单侧不传则该侧不限。
    * rangeFrom/rangeTo 回显本地时刻字符串，供审计 detail（字段名沿用既有白名单）。
+   *
+   * R27：参数放宽为只取时间两键——记录列表（glucoseRecordQuerySchema）与报表契约
+   * 的时间口径一字不差，共用本实现，避免第二份区间换算。
    */
-  private resolveTimeRange(query: GlucoseReportQuery): {
+  private resolveTimeRange(query: Pick<GlucoseReportQuery, 'startTime' | 'endTime'>): {
     where: Prisma.DateTimeFilter;
     from: string | null;
     to: string | null;
@@ -631,23 +699,25 @@ export class GlucoseService {
    * 其历史血糖按检测时间合并进启用的宿主列并带弃用时段名后缀——历史仍可展示，只是不再占列。
    */
   private buildReportColumns(slots: TimeSlotOption[]): GlucoseReportColumn[] {
-    return slots
-      .filter(
-        (slot) =>
-          // R22：只有**启用的**普通/特殊时段成列；弃用时段的历史记录合并进启用列（见 resolveColumn）
-          slot.enabled &&
-          (slot.type === TIME_SLOT_CATEGORY.NORMAL || slot.type === TIME_SLOT_CATEGORY.SPECIAL),
-      )
-      // list() 已按 sortOrder、code 排序，这里再排一次是不依赖上游顺序的防御
-      .sort((left, right) => left.sortOrder - right.sortOrder || left.code.localeCompare(right.code))
-      .map(
-        (slot): GlucoseReportColumn => ({
+    return (
+      slots
+        .filter(
+          (slot) =>
+            // R22：只有**启用的**普通/特殊时段成列；弃用时段的历史记录合并进启用列（见 resolveColumn）
+            slot.enabled &&
+            (slot.type === TIME_SLOT_CATEGORY.NORMAL || slot.type === TIME_SLOT_CATEGORY.SPECIAL),
+        )
+        // list() 已按 sortOrder、code 排序，这里再排一次是不依赖上游顺序的防御
+        .sort(
+          (left, right) => left.sortOrder - right.sortOrder || left.code.localeCompare(right.code),
+        )
+        .map((slot): GlucoseReportColumn => ({
           code: slot.code,
           name: slot.name,
           type: slot.type as GlucoseReportColumnType,
           sortOrder: slot.sortOrder,
-        }),
-      );
+        }))
+    );
   }
 
   /**
@@ -711,9 +781,7 @@ export class GlucoseService {
     for (const date of pageDates) {
       rowByDate.set(date, {
         date,
-        cells: columns.map(
-          (column): GlucoseReportCell => ({ slotCode: column.code, entries: [] }),
-        ),
+        cells: columns.map((column): GlucoseReportCell => ({ slotCode: column.code, entries: [] })),
       });
     }
 
@@ -726,7 +794,13 @@ export class GlucoseService {
         continue;
       }
 
-      const resolved = this.resolveColumn(record.mealContext, record.measuredAt, slots, slotByCode, fallbackCode);
+      const resolved = this.resolveColumn(
+        record.mealContext,
+        record.measuredAt,
+        slots,
+        slotByCode,
+        fallbackCode,
+      );
       let index = columnIndex.get(resolved.code);
       if (index === undefined && fallbackCode !== null) {
         // 归到的列不在表头里（如库里出现了非 0/1/4 的脏 type）→ 退回兜底列，不丢记录
