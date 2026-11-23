@@ -1,7 +1,7 @@
 # 血糖记录列表（患者详情 · 血糖数据 · 血糖记录 Tab）
 
-> 按 `docs/FEATURE-SPEC-TEMPLATE.md` 归档。状态：📝 **设计稿待评审**（2026-11-23 需求人提出 R27，
-> 同日 8 项裁定 Q1–Q8 全部锁定；裁定 Q7：本轮只出规格不动代码，实施放下轮）。
+> 按 `docs/FEATURE-SPEC-TEMPLATE.md` 归档。状态：✅ **已实施**（2026-11-23 需求人提出 R27 并当日评审通过，
+> 8 项裁定 Q1–Q8 全部锁定；同日实施完成，验证见 §12）。
 >
 > 上游规格：`docs/specs/glucose-report.md`（报表本体 R1–R23，含 R26 公共组件抽取）、
 > `docs/specs/glucose-report-query.md`（R24 表单查询，18 项裁定）、
@@ -14,26 +14,26 @@
 
 ## 0. 元信息
 
-| 项 | 内容 |
-|---|---|
-| 阶段号 | P3-2 血糖查询剩余部分（`docs/ROADMAP.md`） |
-| 模块 | 后端 `modules/glucose`（records 接口）；前端 `pages/inpatient/patient-detail`（新 `GlucoseRecordTab`）；共享包 `glucose/schema.ts`（query schema + 分页常量 + 响应类型） |
-| 优先级 | P1 |
-| 依赖 | R24 `GET /patients/:id/admissions` + `GlucoseQueryForm` 联动状态机；R25 `GlucoseReviewModal` + GET/PATCH/DELETE `:recordId`；R26 公共件（`GlucoseToolbar` / `GlucoseStatsBar` / `GlucoseQueryForm` / `useFullscreen`）；`scope.util.ts`；`AuditLogInterceptor` |
-| 需求人 | 产品（2026-11-23 提出，8 项裁定 Q1–Q8） |
+| 项     | 内容                                                                                                                                                                                                                                                           |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 阶段号 | P3-2 血糖查询剩余部分（`docs/ROADMAP.md`）                                                                                                                                                                                                                     |
+| 模块   | 后端 `modules/glucose`（records 接口）；前端 `pages/inpatient/patient-detail`（新 `GlucoseRecordTab`）；共享包 `glucose/schema.ts`（query schema + 分页常量 + 响应类型）                                                                                       |
+| 优先级 | P1                                                                                                                                                                                                                                                             |
+| 依赖   | R24 `GET /patients/:id/admissions` + `GlucoseQueryForm` 联动状态机；R25 `GlucoseReviewModal` + GET/PATCH/DELETE `:recordId`；R26 公共件（`GlucoseToolbar` / `GlucoseStatsBar` / `GlucoseQueryForm` / `useFullscreen`）；`scope.util.ts`；`AuditLogInterceptor` |
+| 需求人 | 产品（2026-11-23 提出，8 项裁定 Q1–Q8）                                                                                                                                                                                                                        |
 
 ## 0.1 决策记录（需求人裁定，2026-11-23）
 
-| # | 裁定 |
-|---|---|
-| Q1 | 审计动作**新增 `GLUCOSE_RECORD_QUERY`**（语义准确、可与报告查询区分过滤；含 schema 枚举 + migration 批准） |
-| Q2 | 已作废记录**列表不可见、不做「含作废」开关**（遵守全仓不变量「所有读路径排除 voided」；作废痕迹经审计 `GLUCOSE_VOID` 追溯） |
-| Q3 | 血糖值列**同报告格约定**：数值型(0/1/2)显示一位小数数值 + 结果类型字典色；非数值型(3~9)显示字典标签（Low/High/拒检/外出…）+ 字典色；色+文双通道 |
-| Q4 | 公共件组合 = **统计栏 + 三层联动表单 + 全屏**三件齐上、逻辑与报告一致；记录 Tab **不渲染**报告的 4 个展示勾选（常规/强化/检测时间/操作人，R22 规则 2 已钉死） |
-| Q5 | 默认排序 **`measuredAt DESC` + `id` 第二键**（最新在前，防页漂移；与报告矩阵日期降序一致） |
-| Q6 | schema/migration 执行方式：**AI 起草、需求人评审**（AGENTS.md §6.5），评审通过后才落库 |
-| Q7 | **本轮只出规格草案**（文档非代码），实现放下轮 |
-| Q8 | 统计栏**同报告口径**：总计只计字典 `counted=true` 类型（当前 0~4）；拒检/外出/请假等 5~9 **列表可见但不计入总计/合格**——「列表行数 ≠ 统计总计」是正常现象；同范围下与报告 Tab 数字完全一致 |
+| #   | 裁定                                                                                                                                                                                       |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Q1  | 审计动作**新增 `GLUCOSE_RECORD_QUERY`**（语义准确、可与报告查询区分过滤；含 schema 枚举 + migration 批准）                                                                                 |
+| Q2  | 已作废记录**列表不可见、不做「含作废」开关**（遵守全仓不变量「所有读路径排除 voided」；作废痕迹经审计 `GLUCOSE_VOID` 追溯）                                                                |
+| Q3  | 血糖值列**同报告格约定**：数值型(0/1/2)显示一位小数数值 + 结果类型字典色；非数值型(3~9)显示字典标签（Low/High/拒检/外出…）+ 字典色；色+文双通道                                            |
+| Q4  | 公共件组合 = **统计栏 + 三层联动表单 + 全屏**三件齐上、逻辑与报告一致；记录 Tab **不渲染**报告的 4 个展示勾选（常规/强化/检测时间/操作人，R22 规则 2 已钉死）                              |
+| Q5  | 默认排序 **`measuredAt DESC` + `id` 第二键**（最新在前，防页漂移；与报告矩阵日期降序一致）                                                                                                 |
+| Q6  | schema/migration 执行方式：**AI 起草、需求人评审**（AGENTS.md §6.5），评审通过后才落库                                                                                                     |
+| Q7  | **本轮只出规格草案**（文档非代码），实现放下轮                                                                                                                                             |
+| Q8  | 统计栏**同报告口径**：总计只计字典 `counted=true` 类型（当前 0~4）；拒检/外出/请假等 5~9 **列表可见但不计入总计/合格**——「列表行数 ≠ 统计总计」是正常现象；同范围下与报告 Tab 数字完全一致 |
 
 ## 1. 目标与用户故事
 
@@ -80,12 +80,12 @@ ALTER TYPE "AuditAction" ADD VALUE 'GLUCOSE_RECORD_QUERY';
 
 ### 3.1 新增 `GET /patients/:id/glucose/records`
 
-| 项 | 内容 |
-|---|---|
-| 权限点 | `PERMISSION.PATIENT_VIEW`（同报告/admissions，**不新增权限点**） |
-| 数据范围 | `@RequireDataScope(RESOURCE.PATIENT)` + `assertInScope`（跨科室 → 30002、不存在/归档 → 40001，口径同报告） |
-| 审计 | `@Audit('GLUCOSE_RECORD_QUERY', { targetType: 'PATIENT' })`，一次调用一条；detail 记 `rangeFrom / rangeTo / count`（三键已在 `AUDIT_DETAIL_ALLOW_LIST`，**白名单零改动**）；DENIED 按 3xxxx 号段落审计 |
-| 前端取数 | 手写 hook `useGlucoseRecords`（与 `useGlucoseReport` 同风格，全仓零 TanStack Query）；ready 门控：admissions 就绪并推导出默认范围后才发首个请求（防「先全量再默认范围」双请求闪变，R24 已实证的模式） |
+| 项       | 内容                                                                                                                                                                                                   |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 权限点   | `PERMISSION.PATIENT_VIEW`（同报告/admissions，**不新增权限点**）                                                                                                                                       |
+| 数据范围 | `@RequireDataScope(RESOURCE.PATIENT)` + `assertInScope`（跨科室 → 30002、不存在/归档 → 40001，口径同报告）                                                                                             |
+| 审计     | `@Audit('GLUCOSE_RECORD_QUERY', { targetType: 'PATIENT' })`，一次调用一条；detail 记 `rangeFrom / rangeTo / count`（三键已在 `AUDIT_DETAIL_ALLOW_LIST`，**白名单零改动**）；DENIED 按 3xxxx 号段落审计 |
+| 前端取数 | 手写 hook `useGlucoseRecords`（与 `useGlucoseReport` 同风格，全仓零 TanStack Query）；ready 门控：admissions 就绪并推导出默认范围后才发首个请求（防「先全量再默认范围」双请求闪变，R24 已实证的模式）  |
 
 shared 新增（`packages/shared/src/glucose/schema.ts`，走共享包三步流程）：
 
@@ -151,18 +151,18 @@ export interface GlucoseRecordListResponse {
 - 分页：Prisma `take/skip` 按记录条数切（与报告「按日期分组再切」不同，这里是平铺列表）
 - 统计：复用 `glucose.service.ts` 的 `buildReportStats(patientId, range.where)`（Q8 同口径；
   总计只计 `counted=true` 字典项、合格 = `resultType='1'`、最高/最低 High/Low 优先否则数值极值）
-- `startTime > endTime` → 10001 + `details[{field:'startTime'}]`（服务端兜底，前端已拦截）
+- `startTime > endTime` → 10001 + `details[{field:'endTime'}]`（服务端兜底，前端已拦截；与报表 `resolveTimeRange` 同实现）
 - 索引：既有部分唯一索引 `glucose_record_active_unique (patientId, measuredAt) WHERE voidedAt IS NULL`
   可服务本查询的过滤与排序，**无需新索引**
 
 ### 3.2 复用接口（零改动）
 
-| 接口 | 用途 | 来源 |
-|---|---|---|
-| `GET /patients/:id/admissions` | 表单住院/科室下拉数据源 | R24 |
-| `GET /patients/:id/glucose/:recordId` | 复核弹窗详情 | R25 |
-| `PATCH /patients/:id/glucose/:recordId` | 编辑保存（审计 `GLUCOSE_UPDATE`） | R25 |
-| `DELETE /patients/:id/glucose/:recordId` | 作废（审计 `GLUCOSE_VOID`，软删除） | R25 |
+| 接口                                     | 用途                                | 来源 |
+| ---------------------------------------- | ----------------------------------- | ---- |
+| `GET /patients/:id/admissions`           | 表单住院/科室下拉数据源             | R24  |
+| `GET /patients/:id/glucose/:recordId`    | 复核弹窗详情                        | R25  |
+| `PATCH /patients/:id/glucose/:recordId`  | 编辑保存（审计 `GLUCOSE_UPDATE`）   | R25  |
+| `DELETE /patients/:id/glucose/:recordId` | 作废（审计 `GLUCOSE_VOID`，软删除） | R25  |
 
 ## 4. 业务规则与校验
 
@@ -186,13 +186,13 @@ export interface GlucoseRecordListResponse {
 
 ## 5. 权限与数据安全
 
-| 项 | 内容 |
-|---|---|
+| 项       | 内容                                                                                                                                  |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | 功能权限 | 接口 `PATIENT_VIEW`；弹窗内编辑/作废按钮沿用 R25 的 `glucose:update` / `glucose:delete` 门控（无权限则 review 只读、无编辑/作废按钮） |
-| 数据范围 | `buildScopeWhere`/`assertInScope`：DEPARTMENT 档按科室过滤；NONE 档（设备管理员）→ 30006；跨科室 → 30002，DENIED 落审计 |
-| 脱敏 | 列表不含患者姓名/身份证/电话；`operatorName` 是医护姓名（非患者敏感字段），不脱敏 |
-| 加密 | 不新增加密字段 |
-| 审计 | `GLUCOSE_RECORD_QUERY` 逐次留痕（敏感操作）；detail 仅 `rangeFrom/rangeTo/count`，无患者敏感明文；编辑/作废沿用 R25 审计 |
+| 数据范围 | `buildScopeWhere`/`assertInScope`：DEPARTMENT 档按科室过滤；NONE 档（设备管理员）→ 30006；跨科室 → 30002，DENIED 落审计               |
+| 脱敏     | 列表不含患者姓名/身份证/电话；`operatorName` 是医护姓名（非患者敏感字段），不脱敏                                                     |
+| 加密     | 不新增加密字段                                                                                                                        |
+| 审计     | `GLUCOSE_RECORD_QUERY` 逐次留痕（敏感操作）；detail 仅 `rangeFrom/rangeTo/count`，无患者敏感明文；编辑/作废沿用 R25 审计              |
 
 ## 6. 前端交互
 
@@ -217,14 +217,14 @@ export interface GlucoseRecordListResponse {
 
 ## 7. 错误码与前端行为（无新增错误码）
 
-| 场景 | 错误码 | HTTP | 前端行为 |
-|---|---|---|---|
-| `startTime/endTime` 格式非法 / start > end | 10001 | 422 | 字段级（details 映射表单项） |
-| 患者不存在 / 已归档 | 40001 | 404 | toast（同详情页既有口径） |
-| 跨科室访问 | 30002 | 403 | toast + 审计 DENIED |
-| 无权限点 | 30004 | 403 | toast |
-| NONE 档角色（设备管理员） | 30006 | 403 | toast + 审计 DENIED |
-| 编辑改时间撞另一条有效记录（弹窗内） | 41003 | 409 | 字段级挂 `measuredAt`（R25 既有） |
+| 场景                                       | 错误码 | HTTP | 前端行为                                                                 |
+| ------------------------------------------ | ------ | ---- | ------------------------------------------------------------------------ |
+| `startTime/endTime` 格式非法 / start > end | 10001  | 422  | 字段级（复用 `resolveTimeRange`，details field=`endTime`，与报表同实现） |
+| 患者不存在 / 已归档                        | 40001  | 404  | toast（同详情页既有口径）                                                |
+| 跨科室访问                                 | 30002  | 403  | toast + 审计 DENIED                                                      |
+| 无权限点                                   | 30004  | 403  | toast                                                                    |
+| NONE 档角色（设备管理员）                  | 30006  | 403  | toast + 审计 DENIED                                                      |
+| 编辑改时间撞另一条有效记录（弹窗内）       | 41003  | 409  | 字段级挂 `measuredAt`（R25 既有）                                        |
 
 ## 8. 测试要求（实施轮）
 
@@ -243,24 +243,55 @@ export interface GlucoseRecordListResponse {
 
 ## 9. 非功能要求
 
-| 项 | 要求 |
-|---|---|
+| 项   | 要求                                                                                                                           |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------ |
 | 性能 | 单页 15 条 + 统计全范围聚合；过滤与排序可走既有部分唯一索引 `glucose_record_active_unique (patientId, measuredAt)`，无需新索引 |
-| 内网 | 不引用任何公网资源 |
-| 等保 | 敏感查询逐次留痕（`GLUCOSE_RECORD_QUERY`）；审计 detail 无患者敏感明文；编辑/作废留痕沿用 R25 |
-| 兼容 | 大字号、暗色、打印、窄屏换行——全部由 R26 公共件与设计令牌承接 |
+| 内网 | 不引用任何公网资源                                                                                                             |
+| 等保 | 敏感查询逐次留痕（`GLUCOSE_RECORD_QUERY`）；审计 detail 无患者敏感明文；编辑/作废留痕沿用 R25                                  |
+| 兼容 | 大字号、暗色、打印、窄屏换行——全部由 R26 公共件与设计令牌承接                                                                  |
 
-## 10. 验收标准（实施轮勾选）
+## 10. 验收标准（2026-11-23 实施轮已勾选）
 
-- [ ] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` 全绿
-- [ ] 接口返回符合 §3.1 契约，错误码符合 §7
-- [ ] **审计表实证出现 `GLUCOSE_RECORD_QUERY` 行**（detail 含 rangeFrom/rangeTo/count）
-- [ ] 越权场景（`dr.chen` 访问内分泌患者）被拒 30002 并落 DENIED 审计
-- [ ] 列表 5 列、DESC 排序、固定 15 条/页、统计与报告 Tab 同范围同数字
-- [ ] 点血糖值 → review → 编辑全流程可用（权限门控生效）；作废后行从列表消失
-- [ ] 记录 Tab 无展示勾选、无添加入口；壳顶部「添加血糖」行为不变
-- [ ] 文档回写：ROADMAP P3-2 进度、本规格状态行改「✅ 已实施」+ §12 实施记录
+- [x] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` 全绿
+- [x] 接口返回符合 §3.1 契约，错误码符合 §7（API 级 26 项断言全过，`.devtools/e2e-r27/api-check.mjs`）
+- [x] **审计表实证出现 `GLUCOSE_RECORD_QUERY` 行**（detail 含 rangeFrom/rangeTo/count；SUCCESS 行 Prisma 直查实证）
+- [x] 越权场景（`dr.chen` 访问内分泌患者）被拒 30002 并落 DENIED 审计（临时翻转改密门禁验证后已还原）
+- [x] 列表 5 列、DESC 排序、固定 15 条/页、统计与报告 Tab 同范围同数字（浏览器 54 项断言全过）
+- [x] 点血糖值 → review → 编辑全流程可用（权限门控生效：dr.wang 见编辑不见作废）；
+      作废后行消失由「服务端读路径恒排除 voided」保证（API 级实证 105 条全量翻页零 voided id；
+      浏览器侧作废动作本轮不重演——R25 已验证且会改演示数据）
+- [x] 记录 Tab 无展示勾选、无添加入口；壳顶部「添加血糖」行为不变（截图目视复核）
+- [x] 文档回写：ROADMAP P3-2 进度、本规格状态行改「✅ 已实施」+ §12 实施记录
 
 ## 11. 待确认项
 
 无——8 项裁定（Q1–Q8）已全部锁定（§0.1）。
+
+## 12. 实施记录（2026-11-23）
+
+**提交**（按 git 粒度规则拆分）：
+
+| 提交                   | 内容                                                                                                                     |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `feat(shared)`         | `GLUCOSE_RECORD_PAGE_SIZE` / `glucoseRecordQuerySchema` / `GlucoseRecordListItem` / `GlucoseRecordListResponse` + 4 单测 |
+| `feat(prisma)` ⚠️ 敏感 | `AuditAction` 末尾追加 `GLUCOSE_RECORD_QUERY` + 迁移 `20261123000000`；`db:deploy` 后 `migrate diff` 实证零漂移          |
+| `feat(glucose)`        | `records()` + 路由（`:recordId` 之前）+ 9 单测                                                                           |
+| `feat(web)`            | `fetchGlucoseRecords` / `useGlucoseRecords` / `GlucoseRecordTab` / 路由替换 + 12 单测                                    |
+
+**验证**：shared 75 用例、server 274 用例、web 162 用例全绿；API 级 26 项断言全过
+（`.devtools/e2e-r27/api-check.mjs`，可复跑）；浏览器 e2e 4 阶段 54 项断言全过
+（`.devtools/e2e-r27/s0~s4`，截图 8 张目视复核：列表/复核弹窗/编辑态/非数值详情/全屏/打印/暗色大字号）。
+
+**实施期发现与处置**（供后续轮次避坑）：
+
+1. **`pnpm install` 会破坏 shared 分发约定**：本仓 `node-linker=hoisted` 下 `apps/*/node_modules/@gc/shared`
+   应由 `pnpm sync:shared` 拷 dist 副本；误跑 `pnpm install` 会把它换成指向源码包的 junction，
+   Vite/Rollup 随之把 CJS dist 当仓库内源码处理（跳过 commonjs 转换）→ 构建报
+   `"ERROR_CODES" is not exported`。处置：`pnpm sync:shared` 恢复 + 清 `apps/web/node_modules/.vite`。
+   另：`pnpm install` 顺手修剪了 lockfile（jsdom 相关），与本需求无关已还原。
+2. **dr.chen 首登改密门禁（20005 PASSWORD_CHANGE_REQUIRED）**会拦在数据范围校验之前，
+   API 级越权验证需临时翻转 `mustChangePassword`（验证后还原，密码不动）。
+3. **暗色验证必须走 UI 开关**：直接改 `html[data-theme]` 只切自定义 CSS 变量，
+   antd 组件色由 ConfigProvider（主题 store）驱动不会变——截图会呈「body 暗、组件亮」假象。
+4. `resolveTimeRange` 对 start>end 抛 10001 的 details field 是 **`endTime`**（与报表同实现），
+   规格 §3.1/§7 原文误写 `startTime`，已随实施修正。
