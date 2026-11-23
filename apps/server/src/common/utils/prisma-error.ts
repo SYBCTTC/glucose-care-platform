@@ -7,7 +7,8 @@ import { Prisma } from '@prisma/client';
  * 库层唯一约束是最终兜底，撞到时必须映射为对应的业务错误码，而不是漏成 50000。
  *
  * 现有三处调用：
- *  - 血糖重复提交（`GlucoseRecord_patientId_measuredAt_key`）→ 幂等跳过，返回 `skipped: true`
+ *  - 血糖重复提交（部分唯一索引 `glucose_record_active_unique`，仅约束 `voidedAt IS NULL` 的有效记录）
+ *    → 幂等跳过，返回 `skipped: true`
  *  - 患者住院号重复（`Patient.patientNo` 唯一）→ 40002 PATIENT_NO_DUPLICATE
  *  - 虚拟病区重复加入（部分唯一索引 `virtual_ward_record_one_active`）→ 44001 WARD_ALREADY_JOINED
  *
