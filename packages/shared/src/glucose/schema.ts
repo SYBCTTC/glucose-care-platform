@@ -375,3 +375,68 @@ export interface GlucoseReportResponse {
   /** 统计栏数据（R20）：按查询范围全量统计，与分页无关 */
   stats: GlucoseReportStats;
 }
+
+/* -------------------------------------------------------------------------- */
+/* R27 血糖记录列表（GET /patients/:id/glucose/records）                        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 血糖记录列表每页固定 **15 条记录**（R27 规则 5，2026-11-23 裁定）。
+ * ⚠️ 与 `GLUCOSE_REPORT_PAGE_SIZE` 数字相同但语义不同：那边分页单位是「日期」，
+ * 这边是「血糖记录条数」。独立常量，禁止互相引用。
+ */
+export const GLUCOSE_RECORD_PAGE_SIZE = 15;
+
+/**
+ * 血糖记录列表查询入参（R27）。
+ *
+ * 时间过滤与报表契约同口径：秒粒度本地时间、闭区间 `measuredAt ∈ [startTime, endTime]`、
+ * 单侧不传则该侧不限（复用 `dateTimeStringSchema`，服务端 `resolveTimeRange` 同一实现）。
+ * `pageSize` 默认 15，前端不提供条数切换器；`max(100)` 仅服务端防御。
+ */
+export const glucoseRecordQuerySchema = z.object({
+  /** YYYY-MM-DD HH:mm:ss，本地时间，含该秒；不传则不限起点 */
+  startTime: dateTimeStringSchema.optional(),
+  /** YYYY-MM-DD HH:mm:ss，本地时间，含该秒；不传则不限终点 */
+  endTime: dateTimeStringSchema.optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(GLUCOSE_RECORD_PAGE_SIZE),
+});
+export type GlucoseRecordQuery = z.infer<typeof glucoseRecordQuerySchema>;
+
+/**
+ * 血糖记录列表行（R27 规则 2 的 5 个展示字段 + 定位/渲染辅助字段）。
+ * 只含**有效**记录（voidedAt null，全仓不变量，裁定 Q2）；
+ * 结果类型 0~9 全量下发不做过滤（规则 3，裁定 Q8：5~9 列表可见但不计入统计总计）。
+ */
+export interface GlucoseRecordListItem {
+  id: string;
+  /** YYYY-MM-DD HH:mm:ss 本地时间；前端展示截到分钟（规则 2），排序/查询用秒级全量 */
+  measuredAt: string;
+  /** 时段 code；前端按 code 查动态时段名（含停用项回显），null → '-' */
+  mealContext: string | null;
+  /** DY-RESULT code '0'~'9'；前端取字典 label/color（裁定 Q3），禁止硬编码 */
+  resultType: string;
+  /** mmol/L；非数值型(3~9)为 null，前端改显示字典标签 */
+  valueMmolL: number | null;
+  /** 检测人 = 记录者姓名（与报表 nurseName 同源，服务端 join 下发）；null → '-' */
+  operatorName: string | null;
+  /** 备注；null → '-' */
+  remark: string | null;
+}
+
+export interface GlucoseRecordListResponse {
+  /** 按 measuredAt DESC + id ASC（裁定 Q5：最新在前，id 第二键防同秒页漂移） */
+  items: GlucoseRecordListItem[];
+  /** 过滤后总记录条数（分页依据，规则 5） */
+  total: number;
+  page: number;
+  pageSize: number;
+  /** 实际生效的查询区间回显（审计 detail 同源，同报表契约，白名单零改动） */
+  rangeFrom: string | null;
+  rangeTo: string | null;
+  /** 本页条数 */
+  count: number;
+  /** 统计栏：复用报表统计类型与口径（裁定 Q8），同范围下与报表 Tab 数字完全一致 */
+  stats: GlucoseReportStats;
+}

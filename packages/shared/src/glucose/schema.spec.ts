@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { createGlucoseSchema, GLUCOSE_ENTRY_DETECT, MEAL_CONTEXT_MAX } from './schema';
+import {
+  createGlucoseSchema,
+  GLUCOSE_ENTRY_DETECT,
+  GLUCOSE_RECORD_PAGE_SIZE,
+  glucoseRecordQuerySchema,
+  MEAL_CONTEXT_MAX,
+} from './schema';
 
 /**
  * `mealContext` 的契约：**只做格式校验，不做白名单**。
@@ -60,5 +66,49 @@ describe('createGlucoseSchema.mealContext', () => {
   it('缺失或非字符串被拒', () => {
     expect(createGlucoseSchema.safeParse(input({ mealContext: undefined })).success).toBe(false);
     expect(createGlucoseSchema.safeParse(input({ mealContext: 123 })).success).toBe(false);
+  });
+});
+
+/**
+ * R27 血糖记录列表查询契约。
+ * 时间口径与报表契约一致（秒粒度本地时间、闭区间、单侧可缺省）；
+ * 分页默认 15 条**记录**（与报表的 15 个「日期」语义不同，常量独立）。
+ */
+describe('glucoseRecordQuerySchema — 血糖记录列表查询（R27）', () => {
+  it('默认值：page=1、pageSize=GLUCOSE_RECORD_PAGE_SIZE(15)', () => {
+    const parsed = glucoseRecordQuerySchema.parse({});
+
+    expect(parsed.page).toBe(1);
+    expect(parsed.pageSize).toBe(GLUCOSE_RECORD_PAGE_SIZE);
+    expect(GLUCOSE_RECORD_PAGE_SIZE).toBe(15);
+    expect(parsed.startTime).toBeUndefined();
+    expect(parsed.endTime).toBeUndefined();
+  });
+
+  it('startTime/endTime 按本地时区解析为 Date（与报表契约同口径）', () => {
+    const parsed = glucoseRecordQuerySchema.parse({
+      startTime: '2026-11-18 10:00:00',
+      endTime: '2026-11-20 23:59:59',
+    });
+
+    expect(parsed.startTime).toEqual(new Date(2026, 10, 18, 10, 0, 0));
+    expect(parsed.endTime).toEqual(new Date(2026, 10, 20, 23, 59, 59));
+  });
+
+  it('时间格式非法被拒（10001 由服务端 ZodValidationPipe 落地）', () => {
+    expect(glucoseRecordQuerySchema.safeParse({ startTime: '2026-11-18' }).success).toBe(false);
+    expect(glucoseRecordQuerySchema.safeParse({ endTime: 'not-a-date' }).success).toBe(false);
+  });
+
+  it('page/pageSize 支持查询串数字并拒绝越界', () => {
+    expect(glucoseRecordQuerySchema.parse({ page: '2', pageSize: '15' })).toMatchObject({
+      page: 2,
+      pageSize: 15,
+    });
+    expect(glucoseRecordQuerySchema.safeParse({ page: 0 }).success).toBe(false);
+    expect(glucoseRecordQuerySchema.safeParse({ pageSize: 0 }).success).toBe(false);
+    // max(100) 仅服务端防御：前端固定 15、无条数切换器
+    expect(glucoseRecordQuerySchema.safeParse({ pageSize: 101 }).success).toBe(false);
+    expect(glucoseRecordQuerySchema.safeParse({ pageSize: 1.5 }).success).toBe(false);
   });
 });
