@@ -72,6 +72,18 @@ function build(overrides: Partial<Parameters<typeof buildTrendOption>[0]> = {}) 
 const seriesOf = (option: ReturnType<typeof buildTrendOption>): SeriesShape[] =>
   option.series as unknown as SeriesShape[];
 
+/** xAxis 的宽松断言形状（EChartsOption['xAxis'] 是联合类型，不便直接索引） */
+type XAxisShape = {
+  type: string;
+  min?: number;
+  max?: number;
+  minInterval?: number;
+  axisLabel?: { formatter?: string; hideOverlap?: boolean };
+};
+
+const xAxisOf = (option: ReturnType<typeof buildTrendOption>): XAxisShape =>
+  option.xAxis as unknown as XAxisShape;
+
 describe('buildTrendOption — 散点模式（chartType: scatter，P3-7）', () => {
   it('三个点系列（字典标签/色）+ 一个不进图例的阈值系列；图例只列点系列', () => {
     const option = build();
@@ -236,5 +248,53 @@ describe('buildTrendOption — 折线模式（chartType: line，默认形态，P
       itemStyle: { color: glucoseColor.low },
     });
     expect(series[0].lineStyle?.color).toBe(glucoseColor.low);
+  });
+});
+
+describe('buildTrendOption — X 轴日期级范围/刻度（P3-7 增补）', () => {
+  it('多日数据 → min/max 取数据日界（最小日 00:00 / 最大日 endOf 天），刻度标签 MM-DD、刻度下限 1 天', () => {
+    const xAxis = xAxisOf(
+      build({
+        points: [
+          point({ measuredAt: '2026-11-19 08:00:00' }),
+          point({ id: 'g-2', measuredAt: '2026-11-22 20:30:00' }),
+        ],
+      }),
+    );
+
+    expect(xAxis.type).toBe('time');
+    expect(xAxis.min).toBe(dayjs('2026-11-19').startOf('day').valueOf());
+    expect(xAxis.max).toBe(dayjs('2026-11-22').endOf('day').valueOf());
+    expect(xAxis.minInterval).toBe(86400000);
+    expect(xAxis.axisLabel?.formatter).toBe('{MM}-{dd}');
+    expect(xAxis.axisLabel?.hideOverlap).toBe(true);
+  });
+
+  it('单日数据（最小日 = 最大日）→ 向两侧各扩 1 天（跨 3 天居中该日，避免刻度重复同一 MM-DD）', () => {
+    const xAxis = xAxisOf(
+      build({
+        points: [
+          point({ measuredAt: '2026-11-19 08:00:00' }),
+          point({ id: 'g-2', measuredAt: '2026-11-19 20:00:00' }),
+        ],
+      }),
+    );
+
+    expect(xAxis.min).toBe(dayjs('2026-11-18').startOf('day').valueOf());
+    expect(xAxis.max).toBe(dayjs('2026-11-20').endOf('day').valueOf());
+  });
+
+  it('数据点保留时分秒：value 横坐标仍是精确毫秒时间戳（未截断到日）', () => {
+    const series = seriesOf(build({ points: [point({ measuredAt: '2026-11-19 08:30:15' })] }));
+
+    // resultType '1' → 第二个系列；横坐标 = 完整时间戳（含时分秒），仅轴标签显示 MM-DD
+    expect(series[1].data[0].value[0]).toBe(dayjs('2026-11-19 08:30:15').valueOf());
+  });
+
+  it('空点 → X 轴 min/max 为 undefined（交轴自动，不设日界）', () => {
+    const xAxis = xAxisOf(build({ points: [] }));
+
+    expect(xAxis.min).toBeUndefined();
+    expect(xAxis.max).toBeUndefined();
   });
 });

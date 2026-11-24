@@ -65,6 +65,26 @@ export function buildTrendOption({
     VALUE_TYPE_FALLBACK_COLOR[code] ??
     glucoseColor.normal;
 
+  // X 轴日期级范围（P3-7 增补）：取数据点最小/最大日期，轴扩到日界；数据点仍保留时分秒定位。
+  // 单日（最小日 = 最大日）向两侧各扩 1 天，保证轴有宽度、刻度标签不重复同一个 MM-DD。
+  // 空点不设 min/max（交轴自动）。用循环而非 Math.min(...arr)：避免 CGM 大数据量展开爆栈。
+  let xMin: number | undefined;
+  let xMax: number | undefined;
+  if (points.length > 0) {
+    let minTs = Infinity;
+    let maxTs = -Infinity;
+    for (const point of points) {
+      const ts = dayjs(point.measuredAt).valueOf();
+      if (ts < minTs) minTs = ts;
+      if (ts > maxTs) maxTs = ts;
+    }
+    const minDay = dayjs(minTs).startOf('day');
+    const maxDay = dayjs(maxTs).startOf('day');
+    const singleDay = minDay.isSame(maxDay);
+    xMin = (singleDay ? minDay.subtract(1, 'day') : minDay).valueOf();
+    xMax = (singleDay ? maxDay.add(1, 'day') : maxDay).endOf('day').valueOf();
+  }
+
   return {
     textStyle: { fontFamily: 'inherit' },
     tooltip: {
@@ -96,9 +116,20 @@ export function buildTrendOption({
     grid: { left: 56, right: 48, top: 56, bottom: 48 },
     xAxis: {
       type: 'time',
+      // 日期级轴范围：min/max 取数据日界（空点时 undefined，轴自动）
+      min: xMin,
+      max: xMax,
+      // 刻度 ≥1 天：避免短范围出现小时级刻度导致 MM-DD 重复同一天；长范围仍自动放大间隔（周/月）
+      minInterval: 86400000,
       axisLine: { lineStyle: { color: splitLineColor(mode) } },
       axisTick: { show: false },
-      axisLabel: { color: axisTextColor(mode), fontSize: 12, hideOverlap: true },
+      // 刻度标签固定 MM-DD（两位月-两位日）；tooltip 仍显示完整时间（见上方 formatter）
+      axisLabel: {
+        color: axisTextColor(mode),
+        fontSize: 12,
+        hideOverlap: true,
+        formatter: '{MM}-{dd}',
+      },
     },
     yAxis: {
       type: 'value',
