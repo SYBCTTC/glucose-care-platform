@@ -93,7 +93,7 @@ export function buildTrendOption({
       data: GLUCOSE_VALUE_RESULT_CODES.map(labelOf),
       textStyle: { color: axisTextColor(mode), fontSize: 12 },
     },
-    grid: { left: 56, right: 24, top: 56, bottom: 48 },
+    grid: { left: 56, right: 48, top: 56, bottom: 48 },
     xAxis: {
       type: 'time',
       axisLine: { lineStyle: { color: splitLineColor(mode) } },
