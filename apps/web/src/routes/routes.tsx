@@ -25,6 +25,7 @@ import DetailFallbackRedirect from '@/pages/inpatient/patient-detail/DetailFallb
 import DetailPlaceholder from '@/pages/inpatient/patient-detail/DetailPlaceholder';
 import GlucoseRecordTab from '@/pages/inpatient/patient-detail/GlucoseRecordTab';
 import GlucoseReportTab from '@/pages/inpatient/patient-detail/GlucoseReportTab';
+import GlucoseTrendTab from '@/pages/inpatient/patient-detail/GlucoseTrendTab';
 import { DETAIL_ROUTE_PATH, DETAIL_TAB_PATH } from '@/pages/inpatient/patient-detail/detail-tabs';
 import type { AppRoute } from './menu';
 
@@ -85,9 +86,9 @@ export const APP_ROUTES: AppRoute[] = [
       { path: DETAIL_TAB_PATH.basic, element: <DetailPlaceholder label="基本信息" /> },
       { path: DETAIL_TAB_PATH.admission, element: <DetailPlaceholder label="出入院记录" /> },
       { path: DETAIL_TAB_PATH.glucoseReport, element: <GlucoseReportTab /> },
-      // 血糖记录（R27）：占位已替换为正式页面；趋势图仍保持占位且不发请求（R2），后续开发只需替换 element
+      // 血糖记录（R27）+ 趋势图（P3-7）：占位均已替换为正式页面
       { path: DETAIL_TAB_PATH.glucoseRecord, element: <GlucoseRecordTab /> },
-      { path: DETAIL_TAB_PATH.glucoseTrend, element: <DetailPlaceholder label="趋势图" /> },
+      { path: DETAIL_TAB_PATH.glucoseTrend, element: <GlucoseTrendTab /> },
       // 兜底：没有它，未知子路径会让 <Outlet/> 渲染 null（Tab 栏在、内容区空白、无 Tab 高亮）
       { path: '*', element: <DetailFallbackRedirect /> },
     ],

@@ -3,6 +3,7 @@ import type {
   GlucoseRecordDetail,
   GlucoseRecordListResponse,
   GlucoseReportResponse,
+  GlucoseTrendResponse,
   GlucoseUpdateResult,
   GlucoseVoidResult,
 } from '@gc/shared';
@@ -89,6 +90,30 @@ export function fetchGlucoseRecords(
   params: GlucoseRecordParams = {},
 ): Promise<GlucoseRecordListResponse> {
   return http.get<GlucoseRecordListResponse>(`/patients/${patientId}/glucose/records`, params);
+}
+
+/**
+ * P3-7：血糖趋势查询参数（前端以字符串传递，后端用共享 schema 校验）。
+ * 时间口径与报表/记录一致：秒粒度本地时间 `YYYY-MM-DD HH:mm:ss` 闭区间，单侧不传则该侧不限。
+ * **无分页**：趋势图返回范围内全部数值点。
+ */
+export interface GlucoseTrendParams {
+  [key: string]: string | undefined;
+  /** YYYY-MM-DD HH:mm:ss，本地时间，含该秒；不传则不限起点 */
+  startTime?: string;
+  /** YYYY-MM-DD HH:mm:ss，本地时间，含该秒；不传则不限终点 */
+  endTime?: string;
+}
+
+/**
+ * P3-7：血糖趋势（原始测量点散点/折线 + 阈值 + 统计栏，统计口径与报表一致）。
+ * 属敏感查询，后端每次调用写一条 GLUCOSE_TREND_VIEW 审计（含越权 DENIED）。
+ */
+export function fetchGlucoseTrend(
+  patientId: string,
+  params: GlucoseTrendParams = {},
+): Promise<GlucoseTrendResponse> {
+  return http.get<GlucoseTrendResponse>(`/patients/${patientId}/glucose/trend`, params);
 }
 
 /**
