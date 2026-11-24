@@ -455,6 +455,23 @@ export const glucoseTrendQuerySchema = z.object({
   startTime: dateTimeStringSchema.optional(),
   /** YYYY-MM-DD HH:mm:ss，本地时间，含该秒；不传则不限终点 */
   endTime: dateTimeStringSchema.optional(),
+  /**
+   * 时段过滤（2026-11-24 增补）：按记录的 `mealContext` 码筛选趋势点与统计。
+   *
+   * 前端以**逗号分隔字符串**下发（`http.get` 用 `URLSearchParams` 序列化，数组会被 `String()`
+   * 拼成 `A,B,C`），这里 transform 还原为数组；缺省/空串 → `undefined`/`[]`，服务端视为**不过滤**
+   * （即「全部」：返回范围内全部数值记录，含停用时段 mealContext 的历史记录，与无此参数时一致）。
+   * 只做格式拆分、不做白名单：code 是否存在/启用同 `mealContext`（动态时段，服务端查库）。
+   */
+  mealContexts: z
+    .string()
+    .transform((value) =>
+      value
+        .split(',')
+        .map((code) => code.trim())
+        .filter(Boolean),
+    )
+    .optional(),
 });
 export type GlucoseTrendQuery = z.infer<typeof glucoseTrendQuerySchema>;
 
@@ -499,4 +516,10 @@ export interface GlucoseTrendResponse {
   rangeTo: string | null;
   /** 本响应点数（= points.length），同为审计 detail 而回显 */
   count: number;
+  /**
+   * 实际生效的时段过滤回显（`mealContext` 码数组）；未过滤（「全部」）时为 null。
+   * 与 `rangeFrom`/`rangeTo`/`count` 同因：让审计 detail 自洽——`count` 随时段过滤变化，
+   * 不回显过滤条件则事后无法解释「同范围下 count 为何不同」。
+   */
+  mealContexts: string[] | null;
 }

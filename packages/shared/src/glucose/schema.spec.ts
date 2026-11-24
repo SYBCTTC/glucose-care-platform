@@ -4,6 +4,7 @@ import {
   GLUCOSE_ENTRY_DETECT,
   GLUCOSE_RECORD_PAGE_SIZE,
   glucoseRecordQuerySchema,
+  glucoseTrendQuerySchema,
   MEAL_CONTEXT_MAX,
 } from './schema';
 
@@ -110,5 +111,41 @@ describe('glucoseRecordQuerySchema — 血糖记录列表查询（R27）', () =>
     // max(100) 仅服务端防御：前端固定 15、无条数切换器
     expect(glucoseRecordQuerySchema.safeParse({ pageSize: 101 }).success).toBe(false);
     expect(glucoseRecordQuerySchema.safeParse({ pageSize: 1.5 }).success).toBe(false);
+  });
+});
+
+/**
+ * P3-7 血糖趋势查询契约（2026-11-24 增补 mealContexts 时段过滤）。
+ * 前端以逗号分隔字符串下发（http.get 序列化数组为 `A,B,C`），schema transform 还原为数组。
+ */
+describe('glucoseTrendQuerySchema — 血糖趋势查询（P3-7）', () => {
+  it('缺省 mealContexts → undefined（「全部」：服务端不过滤）', () => {
+    expect(glucoseTrendQuerySchema.parse({}).mealContexts).toBeUndefined();
+  });
+
+  it('逗号分隔字符串 → 数组（时段过滤）', () => {
+    expect(glucoseTrendQuerySchema.parse({ mealContexts: 'FASTING,BEDTIME' }).mealContexts).toEqual(
+      ['FASTING', 'BEDTIME'],
+    );
+  });
+
+  it('每项裁剪空白、剔除空段（防御尾随逗号/空格）', () => {
+    expect(
+      glucoseTrendQuerySchema.parse({ mealContexts: ' FASTING , ,BEDTIME ,' }).mealContexts,
+    ).toEqual(['FASTING', 'BEDTIME']);
+  });
+
+  it('空串 → 空数组（服务端视为不过滤）', () => {
+    expect(glucoseTrendQuerySchema.parse({ mealContexts: '' }).mealContexts).toEqual([]);
+  });
+
+  it('startTime/endTime 仍按本地时区解析为 Date（与报表/记录同口径）', () => {
+    const parsed = glucoseTrendQuerySchema.parse({
+      startTime: '2026-11-18 10:00:00',
+      endTime: '2026-11-20 23:59:59',
+    });
+
+    expect(parsed.startTime).toEqual(new Date(2026, 10, 18, 10, 0, 0));
+    expect(parsed.endTime).toEqual(new Date(2026, 10, 20, 23, 59, 59));
   });
 });

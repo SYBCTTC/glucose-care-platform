@@ -41,6 +41,8 @@ export interface GlucoseTrendRange {
  *  - `patientId`：换患者；
  *  - `version`：壳层「添加血糖」/ 本页复核弹窗编辑、作废成功后自增，趋势立刻反映变化；
  *  - `range`：已应用的秒粒度查询范围（点「查询」/初始默认态/重置才更新，改表单不触发请求）；
+ *  - `mealContexts`：时段过滤（逗号分隔码，2026-11-24 增补）；`undefined` = 不过滤（「全部」）。
+ *    勾选/取消时段即变 → 立即重查（裁定：与报表/记录「改筛选即查」一致）；
  *  - `ready`：住院记录树未就绪时**不发请求**且 loading 恒真——初始加载必须按默认条件
  *    查询（R24 裁定 Q15 口径），不能先拉一次全量再拉一次默认范围。
  */
@@ -48,6 +50,7 @@ export function useGlucoseTrend(
   patientId: string | undefined,
   version: number,
   range: GlucoseTrendRange,
+  mealContexts: string | undefined,
   ready: boolean,
 ): GlucoseTrendState {
   const [state, setState] = useState({ ...IDLE, loading: Boolean(patientId) });
@@ -70,7 +73,7 @@ export function useGlucoseTrend(
 
     const load = async (): Promise<void> => {
       try {
-        const data = await fetchGlucoseTrend(patientId, { startTime, endTime });
+        const data = await fetchGlucoseTrend(patientId, { startTime, endTime, mealContexts });
         if (!cancelled) {
           setState({ data, loading: false, error: null, forbidden: false });
         }
@@ -89,7 +92,7 @@ export function useGlucoseTrend(
     return () => {
       cancelled = true;
     };
-  }, [patientId, version, nonce, startTime, endTime, ready]);
+  }, [patientId, version, nonce, startTime, endTime, mealContexts, ready]);
 
   const reload = useCallback(() => setNonce((value) => value + 1), []);
 

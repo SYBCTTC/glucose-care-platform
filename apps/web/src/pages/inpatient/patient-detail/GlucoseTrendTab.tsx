@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { DotChartOutlined, LineChartOutlined } from '@ant-design/icons';
-import { Alert, Button, Empty, Spin, message, theme } from 'antd';
+import { Alert, Button, Checkbox, Empty, Spin, message, theme } from 'antd';
 import { useOutletContext, useParams } from 'react-router-dom';
 import ReactECharts from 'echarts-for-react';
 import { DICT_TYPE } from '@gc/shared';
@@ -69,10 +69,31 @@ export default function GlucoseTrendTab() {
   const admissions = useAdmissions(id);
   const [queryForm, setQueryForm] = useState<GlucoseQueryFormState | null>(null);
   const [appliedRange, setAppliedRange] = useState<GlucoseTrendRange>({});
+
+  // 时段过滤（P3-7 增补，2026-11-24 需求人裁定）：选项 =「全部」+ 所有启用时段（普通+特殊+强化，与录入下拉一致）。
+  // 状态记录用户**取消勾选**的时段集合（默认空 = 全选 =「全部」）：时段是异步加载的，
+  // 用「取消集」可免掉「时段到达后重置」的 effect——selectedCodes 始终由 enabledCodes 减去取消集派生。
+  const timeSlots = useCommonDataStore((state) => state.timeSlots);
+  const enabledSlots = useMemo(() => timeSlots.filter((slot) => slot.enabled), [timeSlots]);
+  const enabledCodes = useMemo(() => enabledSlots.map((slot) => slot.code), [enabledSlots]);
+  const [uncheckedSlots, setUncheckedSlots] = useState<Set<string>>(() => new Set());
+  const selectedCodes = useMemo(
+    () => enabledCodes.filter((code) => !uncheckedSlots.has(code)),
+    [enabledCodes, uncheckedSlots],
+  );
+  const allSlotsChecked = selectedCodes.length === enabledCodes.length;
+  // 「全部」（全选）= 不发 mealContexts（不过滤，含停用时段的历史记录，与默认视图一致）；
+  // 部分勾选 = 发选中码（逗号分隔）→ 后端按 mealContext IN 过滤点并重算统计（口径与报表一致）
+  const mealContextsParam = useMemo(
+    () => (allSlotsChecked ? undefined : selectedCodes.join(',')),
+    [allSlotsChecked, selectedCodes],
+  );
+
   const { data, loading, error, reload } = useGlucoseTrend(
     id,
     glucoseVersion,
     appliedRange,
+    mealContextsParam,
     queryForm !== null,
   );
   // 字典只在这里订阅一次再传下去（同记录页：避免逐点订阅）
@@ -92,12 +113,49 @@ export default function GlucoseTrendTab() {
     }
   }, []);
 
+  // 点「全部」：所有启用时段勾上（回到默认视图）= 清空取消集（裁定 #4）。
+  // 已全选时再点仍清空 → 保持全选，不会反选成空（与「至少 1 个时段」一致）
+  const handleSelectAllSlots = useCallback(() => setUncheckedSlots(new Set()), []);
+  // 勾选/取消单个时段：勾选 = 从取消集移除；取消 = 加入取消集，但须保留 ≥1 个时段——
+  // 取消最后一个时弹提示并拦截（裁定 #3，同报表 toggleDisplay 的最少 1 项口径）。
+  // 副作用（message.warning）放在 updater 外，避免 StrictMode 下 updater 双调用重复弹提示
+  const handleToggleSlot = useCallback(
+    (code: string, checked: boolean) => {
+      if (checked) {
+        setUncheckedSlots((prev) => {
+          if (!prev.has(code)) {
+            return prev;
+          }
+          const next = new Set(prev);
+          next.delete(code);
+          return next;
+        });
+        return;
+      }
+      if (selectedCodes.length <= 1) {
+        void message.warning('请至少选择一个时段');
+        return;
+      }
+      setUncheckedSlots((prev) => {
+        if (prev.has(code)) {
+          return prev;
+        }
+        const next = new Set(prev);
+        next.add(code);
+        return next;
+      });
+    },
+    [selectedCodes.length],
+  );
+
   // 换患者时退出全屏并重置查询表单：同一路由不同 :id 不会重挂载组件，state 需手动重置。
   // 表单置回 null（未就绪）→ 趋势请求挂起，等新患者的住院记录到达
   useEffect(() => {
     exitFullscreen();
     setQueryForm(null);
     setAppliedRange({});
+    // 换患者时段过滤回到默认（全选）：取消集清空，避免沿用上一患者的时段选择
+    setUncheckedSlots(new Set());
   }, [id, exitFullscreen]);
 
   // R24（裁定 Q15）：住院记录就绪 → 初始化默认表单态并自动按默认条件查询；
@@ -190,7 +248,8 @@ export default function GlucoseTrendTab() {
   return (
     <div style={rootStyle}>
       {/* R26 公共工具栏：统计栏（左）+ 查询表单（中）+ 全屏按钮（右）。
-          裁定：extra 插槽不使用——趋势页无追加筛选；展示勾选属报表专属，本页不渲染 */}
+          裁定：extra 插槽不使用——时段过滤放在下方图表区顶部覆盖行（紧贴图例，勾选即所见即所滤），
+          不挤进工具栏；展示勾选属报表专属，本页不渲染 */}
       <GlucoseToolbar
         stats={statsItems}
         form={
@@ -222,31 +281,66 @@ export default function GlucoseTrendTab() {
       ) : null}
 
       <div style={chartBoxStyle}>
+        {/* 顶部覆盖行：时段过滤（左，限宽横向滚动）+ 图表形态切换按钮（右）。
+            data 就绪即渲染——空态下用户仍需能重新勾选时段，故不能随 Empty 一起隐藏。
+            行高 ~22px，落在图表图例（top:32）上方，不挤压绘图区（裁定：图表布局不变） */}
+        {data ? (
+          <div
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              zIndex: 10,
+              display: 'flex',
+              alignItems: 'center',
+              gap: token.marginXS,
+            }}
+          >
+            {/* 时段过滤：「全部」+ 所有启用时段（裁定：单行横向滚动，见 .gc-slot-filter）。
+                「全部」点击 = 全选（部分选中时 indeterminate）；单项切换走 handleToggleSlot（含最少 1 时段拦截） */}
+            <div className="gc-slot-filter" style={{ flex: 1, minWidth: 0 }}>
+              <Checkbox
+                checked={allSlotsChecked}
+                indeterminate={!allSlotsChecked && selectedCodes.length > 0}
+                onChange={handleSelectAllSlots}
+              >
+                全部
+              </Checkbox>
+              {enabledSlots.map((slot) => (
+                <Checkbox
+                  key={slot.code}
+                  checked={!uncheckedSlots.has(slot.code)}
+                  onChange={(event) => handleToggleSlot(slot.code, event.target.checked)}
+                >
+                  {slot.name}
+                </Checkbox>
+              ))}
+            </div>
+            {/* 图表形态切换按钮：文案/图标显示**目标**形态（当前折线→「散点图」，当前散点→「折线图」），点击来回切换 */}
+            <Button
+              size="small"
+              icon={chartType === 'line' ? <DotChartOutlined /> : <LineChartOutlined />}
+              onClick={() => setChartType(chartType === 'line' ? 'scatter' : 'line')}
+              style={{ flexShrink: 0 }}
+            >
+              {chartType === 'line' ? '散点图' : '折线图'}
+            </Button>
+          </div>
+        ) : null}
         {loading && !data ? (
           <div style={centerStyle}>
             <Spin />
           </div>
         ) : option ? (
-          <>
-            {/* 图表形态切换按钮：叠加在容器右上角（图例上方——图例已下移 top:32 让位）。
-                文案/图标显示**目标**形态：当前折线→显示「散点图」，当前散点→显示「折线图」，点击来回切换 */}
-            <Button
-              size="small"
-              icon={chartType === 'line' ? <DotChartOutlined /> : <LineChartOutlined />}
-              onClick={() => setChartType(chartType === 'line' ? 'scatter' : 'line')}
-              style={{ position: 'absolute', top: 0, right: 0, zIndex: 10 }}
-            >
-              {chartType === 'line' ? '散点图' : '折线图'}
-            </Button>
-            <ReactECharts
-              ref={chartRef}
-              option={option}
-              // notMerge：数据/主题变化时整体替换 option，避免旧系列残留（点数与系列会变）
-              notMerge
-              style={{ height: '100%', width: '100%' }}
-              onEvents={{ click: handleChartClick }}
-            />
-          </>
+          <ReactECharts
+            ref={chartRef}
+            option={option}
+            // notMerge：数据/主题变化时整体替换 option，避免旧系列残留（点数与系列会变）
+            notMerge
+            style={{ height: '100%', width: '100%' }}
+            onEvents={{ click: handleChartClick }}
+          />
         ) : (
           <div style={centerStyle}>
             <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="该范围无数值型血糖记录" />

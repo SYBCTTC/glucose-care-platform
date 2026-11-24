@@ -103,6 +103,8 @@ export interface GlucoseTrendParams {
   startTime?: string;
   /** YYYY-MM-DD HH:mm:ss，本地时间，含该秒；不传则不限终点 */
   endTime?: string;
+  /** 时段过滤：逗号分隔的 mealContext 码（如 `FASTING,BEDTIME`）；不传 = 不过滤（「全部」） */
+  mealContexts?: string;
 }
 
 /**

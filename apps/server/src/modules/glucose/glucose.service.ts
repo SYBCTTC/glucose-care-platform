@@ -510,9 +510,16 @@ export class GlucoseService {
 
     const range = this.resolveTimeRange(query);
 
+    // 时段过滤（2026-11-24 增补）：mealContexts 非空 → 按记录的 mealContext 码收窄；
+    // 缺省/空数组 = 不过滤（「全部」，含停用时段 mealContext 的历史记录，与无此参数时完全一致）。
+    // points 与 stats 叠加**同一** where：统计栏与图表同源，取消勾选某时段两者一起排除（需求 #2）。
+    const mealContexts = query.mealContexts ?? [];
+    const mealContextWhere: Prisma.GlucoseRecordWhereInput =
+      mealContexts.length > 0 ? { mealContext: { in: mealContexts } } : {};
+
     const [rows, stats, thresholds] = await Promise.all([
       this.prisma.glucoseRecord.findMany({
-        where: this.numericRecordWhere(patientId, range.where),
+        where: { ...this.numericRecordWhere(patientId, range.where), ...mealContextWhere },
         select: {
           id: true,
           measuredAt: true,
@@ -522,7 +529,7 @@ export class GlucoseService {
         },
         orderBy: [{ measuredAt: 'asc' }, { id: 'asc' }],
       }),
-      this.buildReportStats(patientId, range.where),
+      this.buildReportStats(patientId, range.where, mealContextWhere),
       this.systemConfig.getGlucoseAlertThreshold(),
     ]);
 
@@ -542,6 +549,8 @@ export class GlucoseService {
       rangeFrom: range.from,
       rangeTo: range.to,
       count: points.length,
+      // 回显实际生效的时段过滤（null = 未过滤/「全部」）：供审计 detail，使 count 随过滤变化可解释
+      mealContexts: mealContexts.length > 0 ? mealContexts : null,
     };
   }
 
@@ -558,6 +567,8 @@ export class GlucoseService {
   private async buildReportStats(
     patientId: string,
     measuredAt: Prisma.DateTimeFilter,
+    // 时段过滤（2026-11-24 增补）：趋势按时段勾选收窄统计时传入；报表/记录不传 → 默认 {} 不受影响
+    mealContextWhere: Prisma.GlucoseRecordWhereInput = {},
   ): Promise<GlucoseReportStats> {
     const [countedDicts, grouped, maxRecord, minRecord] = await Promise.all([
       this.prisma.dictItem.findMany({
@@ -567,17 +578,17 @@ export class GlucoseService {
       this.prisma.glucoseRecord.groupBy({
         by: ['resultType'],
         // R25：已作废记录不计入统计
-        where: { patientId, measuredAt, voidedAt: null },
+        where: { patientId, measuredAt, voidedAt: null, ...mealContextWhere },
         _count: { _all: true },
       }),
       // 极值取**记录本身**（而非 aggregate）：还要带回 resultType 供前端按字典色着色
       this.prisma.glucoseRecord.findFirst({
-        where: this.numericRecordWhere(patientId, measuredAt),
+        where: { ...this.numericRecordWhere(patientId, measuredAt), ...mealContextWhere },
         select: { valueMmolL: true, resultType: true },
         orderBy: { valueMmolL: 'desc' },
       }),
       this.prisma.glucoseRecord.findFirst({
-        where: this.numericRecordWhere(patientId, measuredAt),
+        where: { ...this.numericRecordWhere(patientId, measuredAt), ...mealContextWhere },
         select: { valueMmolL: true, resultType: true },
         orderBy: { valueMmolL: 'asc' },
       }),

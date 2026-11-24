@@ -291,6 +291,36 @@ body {
   flex-shrink: 0;
 }
 
+/* ---------- 血糖趋势图：时段过滤行（P3-7 增补，2026-11-24 裁定：单行横向滚动） ---------- */
+
+/**
+ * 时段复选框排一行，容器限宽（避开右上形态切换按钮）不足时横向滚动（「全部」+ 13 启用时段 = 14 项）。
+ * 隐藏滚动条但保留滚动能力：行高维持 ~22px，不挤压下方图表图例区（top:32）。
+ * 不含任何色值，明暗模式天然兼容。
+ */
+.gc-slot-filter {
+  display: flex;
+  align-items: center;
+  gap: var(--gc-space-sm);
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+  /* 隐藏滚动条（Firefox） */
+  scrollbar-width: none;
+}
+
+/* 隐藏滚动条（WebKit：Chrome/Edge/Safari） */
+.gc-slot-filter::-webkit-scrollbar {
+  display: none;
+}
+
+/* 相邻 Antd Checkbox 默认带 inline-start 外边距，flex 布局下间距由 gap 统一控制，
+   清零避免双倍间距；flex-shrink:0 让每项保持自然宽度、由容器横向滚动而非压缩文字 */
+.gc-slot-filter .ant-checkbox-wrapper {
+  margin-inline-start: 0;
+  flex-shrink: 0;
+}
+
 /* ---------- 打印与导出（15 节） ---------- */
 @media print {
   .gc-no-print,

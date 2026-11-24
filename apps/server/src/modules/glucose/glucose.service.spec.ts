@@ -1724,4 +1724,71 @@ describe('GlucoseService.trend — P3-7 血糖趋势（原始测量点）', () =
       expect(ctx.prisma.glucoseRecord.findMany).not.toHaveBeenCalled();
     }
   });
+
+  it('mealContexts 时段过滤：points 与 stats 的 where 同叠 mealContext IN，并回显过滤（需求 #2：统计栏跟随排除）', async () => {
+    const { service, prisma } = createTrendService([lrec(19, 9, 0)]);
+
+    const result = await service.trend(
+      deptUser,
+      'p-1',
+      trendQuery({ mealContexts: ['FASTING', 'BEDTIME'] }),
+    );
+
+    // points 查询：numericRecordWhere 之上叠 mealContext IN
+    expect(prisma.glucoseRecord.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          patientId: 'p-1',
+          resultType: { in: [...GLUCOSE_VALUE_RESULT_CODES] },
+          valueMmolL: { not: null },
+          voidedAt: null,
+          mealContext: { in: ['FASTING', 'BEDTIME'] },
+        }),
+      }),
+    );
+    // stats groupBy：同一 mealContext 过滤（统计栏与图表同源，一起排除未勾选时段）
+    expect(prisma.glucoseRecord.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          patientId: 'p-1',
+          voidedAt: null,
+          mealContext: { in: ['FASTING', 'BEDTIME'] },
+        }),
+      }),
+    );
+    // 极值查询（findFirst）也带时段过滤
+    expect(prisma.glucoseRecord.findFirst.mock.calls[0]?.[0].where).toMatchObject({
+      mealContext: { in: ['FASTING', 'BEDTIME'] },
+    });
+    // 回显实际生效的时段过滤
+    expect(result.mealContexts).toEqual(['FASTING', 'BEDTIME']);
+  });
+
+  it('不传 mealContexts → where 无 mealContext、回显 null（「全部」：含停用时段历史记录，与无此参数一致）', async () => {
+    const { service, prisma } = createTrendService([lrec(19, 9, 0)]);
+
+    const result = await service.trend(deptUser, 'p-1', trendQuery());
+
+    const findManyWhere = (
+      prisma.glucoseRecord.findMany.mock.calls[0]?.[0] as {
+        where: Record<string, unknown>;
+      }
+    ).where;
+    expect(findManyWhere.mealContext).toBeUndefined();
+    expect(result.mealContexts).toBeNull();
+  });
+
+  it('mealContexts 空数组 → 视为不过滤（防御：前端「全部」不发该参数）', async () => {
+    const { service, prisma } = createTrendService([lrec(19, 9, 0)]);
+
+    const result = await service.trend(deptUser, 'p-1', trendQuery({ mealContexts: [] }));
+
+    const findManyWhere = (
+      prisma.glucoseRecord.findMany.mock.calls[0]?.[0] as {
+        where: Record<string, unknown>;
+      }
+    ).where;
+    expect(findManyWhere.mealContext).toBeUndefined();
+    expect(result.mealContexts).toBeNull();
+  });
 });
