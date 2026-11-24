@@ -33,10 +33,10 @@
 
 ## 2. 数据模型变更
 
-| 模型                  | 字段                      | 类型       | 说明                                                                                                  | 是否需迁移     |
-| --------------------- | ------------------------- | ---------- | ----------------------------------------------------------------------------------------------------- | -------------- |
-| —                     | —                         | —          | **无表/字段变更**：趋势按原始测量点即时查询 `GlucoseRecord`，不建 `GlucoseDailySummary`（P3-3 仍 ❌） | 否             |
-| `AuditAction`（枚举） | 追加 `GLUCOSE_TREND_VIEW` | enum value | 趋势查询独立审计动作（裁定：新审计动作）。**AI 禁改 schema/migration，需人工执行**，见 §11            | **是（人工）** |
+| 模型                  | 字段                      | 类型       | 说明                                                                                                                                              | 是否需迁移       |
+| --------------------- | ------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
+| —                     | —                         | —          | **无表/字段变更**：趋势按原始测量点即时查询 `GlucoseRecord`，不建 `GlucoseDailySummary`（P3-3 仍 ❌）                                             | 否               |
+| `AuditAction`（枚举） | 追加 `GLUCOSE_TREND_VIEW` | enum value | 趋势查询独立审计动作（裁定：新审计动作）。**2026-11-24 已应用**（迁移 `20261124000000_add_glucose_trend_view_audit`，需求人授权 AI 执行），见 §11 | **是（已应用）** |
 
 ## 3. 接口契约
 
@@ -164,11 +164,12 @@
 
 ## 11. 待确认项 / 人工动作（阻塞）
 
-1. ⚠️ **【人工执行，AI 禁改】Prisma 枚举 + 迁移**：`AuditAction` 追加 `GLUCOSE_TREND_VIEW`。
-   - `apps/server/prisma/schema.prisma`：在 `enum AuditAction` **末尾**追加 `GLUCOSE_TREND_VIEW`（PG `ALTER TYPE ADD VALUE` 只能加到末尾，见 `docs/DB-MIGRATION-NOTES.md` §2.3）。
-   - 迁移 SQL：`ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'GLUCOSE_TREND_VIEW';`（`ADD VALUE` 不能在事务块内，需按本仓枚举迁移先例单独执行）。
-   - 应用后跑 `pnpm db:generate` 重新生成 Prisma Client。
-   - **在迁移应用前**：`@Audit('GLUCOSE_TREND_VIEW')` 能通过 typecheck（装饰器参数是 `string`），接口能正常返回数据，但审计写入会被 PG 拒绝（非法枚举值）、拦截器吞错只打 `console.error` → **审计静默不落表**（即 schema 注释里 `GLUCOSE_REPORT_VIEW` 旧缺陷同款）。故本功能「合规完成」以迁移应用为准。
+1. ✅ **【2026-11-24 已应用】Prisma 枚举 + 迁移**：`AuditAction` 追加 `GLUCOSE_TREND_VIEW`（需求人授权 AI 起草并执行；原属 `AGENTS.md §6.5` 人工评审项，本次经明确授权在**本地开发库**完成，未触碰生产/内网库）。
+   - `apps/server/prisma/schema.prisma`：已在 `enum AuditAction` **末尾**追加 `GLUCOSE_TREND_VIEW`（PG `ALTER TYPE ADD VALUE` 只能加到末尾，见 `docs/DB-MIGRATION-NOTES.md` §2.3）。
+   - 迁移 `apps/server/prisma/migrations/20261124000000_add_glucose_trend_view_audit/migration.sql`：`ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'GLUCOSE_TREND_VIEW';`（仿 `20261123000000_add_glucose_record_query_audit` 先例；本迁移不插审计数据，不受「同一事务内不得使用新枚举值」限制，随 `db:deploy` 正常应用）。
+   - 已执行 `pnpm exec prisma migrate deploy`（18 迁移全部应用）+ `pnpm exec prisma generate`（Prisma Client 重生成）。
+   - **验证**：`prisma migrate status` → up to date；`migrate diff` 漂移为空（实库枚举与 schema 一致）；`pg_enum` 查询 → `AuditAction` 共 24 值、`GLUCOSE_TREND_VIEW` 位于末尾；`pnpm typecheck`（三包）✅ / server 单测 285 ✅。
+   - 背景：应用前 `@Audit('GLUCOSE_TREND_VIEW')` 虽过 typecheck（装饰器参数是 `string`）、接口正常返数据，但审计写入被 PG 拒绝（非法枚举值）、拦截器吞错 → 审计静默不落表（`GLUCOSE_REPORT_VIEW` 旧缺陷同款）。应用后趋势审计恢复落表（detail 含 `rangeFrom`/`rangeTo`/`count`/`mealContexts`）。
 2. 阈值配置非法时趋势请求整体失败（`10000`）——已确认接受（与全系统口径一致，seed 保证有效配置；趋势图缺阈值参照判读价值大减，故不降级为「无阈值线」）。
 
 ## 12. 实施记录（2026-11-24）
@@ -250,7 +251,9 @@
 
 验证：`pnpm sync:shared` ✅ / `pnpm typecheck`（shared+server+web）✅ / shared `schema.spec.ts`（15 用例）✅ / server `glucose.service.spec.ts`（89 用例）✅ / `pnpm lint` ✅ / `pnpm --filter @gc/web build` ✅。目检增补项：默认全选 =「全部」、取消某时段图表 + 统计栏同步排除、X 轴重贴、「全部」联动与 indeterminate、取消最后一个时段拦截、单行横向滚动不叠图例、空态下过滤行可用、换患者重置过滤行。
 
-### 遗留项（阻塞「合规完成」）
+### 遗留项（阻塞「合规完成」）—— 已全部闭环（2026-11-24）
 
-1. ⚠️ **人工执行**：`AuditAction` 追加 `GLUCOSE_TREND_VIEW` + 迁移 `ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'GLUCOSE_TREND_VIEW';` + `pnpm db:generate`（详见 §11）。应用前接口正常返数据，但审计写入被 PG 拒绝、拦截器吞错 → 审计不落表。
-2. 需求人浏览器目检：散点描点/字典色/阈值线/目标带/tooltip（时间+录入人）/图例切换/全屏 resize/点击复核/明暗模式/大字号。
+1. ✅ **迁移已应用**：`AuditAction` 追加 `GLUCOSE_TREND_VIEW`（迁移 `20261124000000_add_glucose_trend_view_audit` + `pnpm db:generate`，详见 §11）。趋势审计恢复落表（detail 含 `rangeFrom`/`rangeTo`/`count`/`mealContexts`）。
+2. ✅ **需求人浏览器目检已完成**（2026-11-24）：散点描点/字典色/阈值线/目标带/tooltip（时间+录入人）/图例切换/全屏 resize/点击复核/明暗模式/大字号/时段过滤。
+
+> 至此 P3-7 血糖趋势图（含时段过滤增补）**合规完成**：功能、审计落表、文档三者齐备。
