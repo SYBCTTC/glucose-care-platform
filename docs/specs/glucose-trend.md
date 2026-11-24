@@ -105,12 +105,12 @@
 - **入口与路由**：`/inpatient/patients/:id/glucose/trend`（子 Tab「趋势图」，权限继承父路由 `PATIENT_VIEW`）。`routes.tsx` 将 `glucoseTrend` 的 `element` 由 `DetailPlaceholder` 替换为 `GlucoseTrendTab`。
 - **页面结构**：工具栏行（统计栏 + 查询表单 + 全屏按钮，复用 `GlucoseToolbar`）+ 图表主体（ECharts，占满剩余高度）。
 - **查询表单**：复用 `GlucoseQueryForm`（住院记录 → 科室记录 → 时间范围三层联动），`extra` 插槽不使用（趋势无追加筛选）。状态机同记录页：表单态与**已应用**范围分离，点「查询」/初始默认态/重置才发请求；初始按住院记录默认范围自动查询（R24 裁定 Q15）。
-- **图表**（ECharts 时间轴散点，`buildTrendOption` 重写）：
+- **图表**（ECharts 时间轴，`buildTrendOption` 重写；支持**折线/散点切换**）：
   - X 轴 `type:'time'`（`measuredAt`）；Y 轴 `type:'value'`，名 `mmol/L`。
-  - 三个 scatter 系列「偏低/正常/偏高」，**颜色与图例文案取 DY-RESULT 字典**（`resultType` 0/1/2 的 `color`/`label`），字典缺失回退 `glucoseColor` 令牌；图例可分类切换（色+文双通道）。
+  - **形态切换按钮**（2026-11-24 增补）：叠加在图表容器右上角（图例上方，图例下移 `top:32`、绘图区 `top:56` 让位），折线 ↔ 散点来回切换；**默认折线图**，按钮文案/图标显示**目标**形态（当前折线 → 显示「散点图」+ `DotChartOutlined`；当前散点 → 显示「折线图」+ `LineChartOutlined`）。切换仅改系列 `type`（`line`/`scatter`）与渲染参数，数据/颜色/图例/tooltip/点击复核完全一致。
+  - 三个系列「偏低/正常/偏高」（折线/散点同构），**颜色与图例文案取 DY-RESULT 字典**（`resultType` 0/1/2 的 `color`/`label`），字典缺失回退 `glucoseColor` 令牌；图例可分类切换（色+文双通道）。折线模式 `showSymbol:true` 保留可点击符号、`lineStyle` 与字典同色（宽 1.5）；散点模式 `large:true`+`largeThreshold:2000` 渐进渲染（CGM 大数据量预留）。
   - 阈值线：`markLine` 低值（`glucoseColor.low` 虚线）/ 高值（`glucoseColor.high` 虚线）；目标范围带：`markArea`（low→high 半透明绿）。挂在不进图例的专用系列上，切换点系列时恒可见。
   - tooltip（`trigger:'item'`）：**同时展示测量时间 + 血糖值 + 录入人**（`glucose-domain` 图表节硬要求），格式 `时间 / X.X mmol/L（类型标签）/ 记录者：name`。
-  - 大数据量：`sampling:'lttb'`、`large:true`。
   - 点击数据点 → `GlucoseReviewModal`（复用 R25，与报表/记录一致）；编辑/作废成功走 `onGlucoseChanged` → 版本号 +1 → 趋势重拉。
 - **全屏**：`useFullscreen({ onResize })`，回调里 `chartRef.current?.getEchartsInstance().resize()`（不另写 resize 监听 / Fullscreen API）。
 - **统计栏**：`buildReportStatsItems(data.stats, resultTypes)`（与记录页同一构建函数）。
@@ -191,6 +191,16 @@
 
 - `pnpm lint` ✅ / `pnpm typecheck`（shared+server+web）✅ / `pnpm test`（shared 75 + web 169 + server，含新增 trend 8 + chartTheme 7）✅ / `pnpm build` ✅。
 - 前端外层 `GlucoseTrendTab` 与 `useGlucoseTrend` 依赖 Outlet context/网络/ECharts DOM，按本仓口径（同 `GlucoseRecordTab`）不做 node 环境单测，靠 typecheck + 手工 e2e 验证。
+
+### 2026-11-24 增补：折线/散点切换按钮
+
+需求人追加：图表容器右上角（图例上方）加切换按钮，折线 ↔ 散点来回切换，**默认折线图**，按钮文案/图标显示**目标**形态（当前折线 → 显示「散点图」+ `DotChartOutlined`；当前散点 → 显示「折线图」+ `LineChartOutlined`）。
+
+- `src/styles/chartTheme.ts`：`buildTrendOption` 新增 `TrendChartType = 'line' | 'scatter'` 与 `chartType` 入参；三个结果类型系列按 `chartType` 在 `line`（`showSymbol:true` + `lineStyle` 同字典色、宽 1.5）/ `scatter`（`large:true`）间切换，数据/颜色/图例/tooltip/`recordId` 两模式完全一致；图例下移 `top:32`、绘图区 `top:56` 为按钮让位。
+- `src/pages/inpatient/patient-detail/GlucoseTrendTab.tsx`：新增 `chartType` 状态（默认 `'line'`）；图表容器右上角绝对定位 Antd `Button`（图标 + 目标形态文案，`zIndex:10`、位于绘图区上方不遮挡数据点），点击切换并经 `useMemo` 依赖重建 option。
+- `src/styles/chartTheme.spec.ts`：补折线模式 4 用例（系列 `type:line`、线色/线宽/`showSymbol`、数据点附加字段、字典缺失兜底），共 11 用例。
+
+验证：`pnpm --filter @gc/web typecheck` ✅ / `pnpm --filter @gc/web test chartTheme`（11 用例）✅ / `pnpm lint` ✅ / `pnpm --filter @gc/web build` ✅。目检增补项：切换按钮位置（图例上方）、默认折线、文案与图标随目标形态、折线/散点两种描点与字典色、点符号进复核、全屏 resize。
 
 ### 遗留项（阻塞「合规完成」）
 
