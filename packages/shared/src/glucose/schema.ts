@@ -70,10 +70,7 @@ const glucoseValueSchema = z
   .number({ invalid_type_error: '请输入血糖值' })
   .min(GLUCOSE_VALUE_MIN, `血糖值不能小于 ${GLUCOSE_VALUE_MIN}`)
   .max(GLUCOSE_VALUE_MAX, `血糖值不能大于 ${GLUCOSE_VALUE_MAX}`)
-  .refine(
-    (value) => Math.abs(value * 10 - Math.round(value * 10)) < 1e-9,
-    '血糖值最多 1 位小数',
-  );
+  .refine((value) => Math.abs(value * 10 - Math.round(value * 10)) < 1e-9, '血糖值最多 1 位小数');
 
 /** 试纸数量：0 ~ 999 的整数，不允许小数 */
 const testStripSchema = z
@@ -263,8 +260,7 @@ export type GlucoseReportQuery = z.infer<typeof glucoseReportQuerySchema>;
 
 /** 报表列的时段类型：只有普通(1)与特殊(4)成列；强化(0)按检测时间归入普通列，不单独成列 */
 export type GlucoseReportColumnType =
-  | typeof TIME_SLOT_CATEGORY.NORMAL
-  | typeof TIME_SLOT_CATEGORY.SPECIAL;
+  typeof TIME_SLOT_CATEGORY.NORMAL | typeof TIME_SLOT_CATEGORY.SPECIAL;
 
 /**
  * 报表列定义，由**服务端下发**。
@@ -439,4 +435,68 @@ export interface GlucoseRecordListResponse {
   count: number;
   /** 统计栏：复用报表统计类型与口径（裁定 Q8），同范围下与报表 Tab 数字完全一致 */
   stats: GlucoseReportStats;
+}
+
+/* -------------------------------------------------------------------------- */
+/* 血糖趋势图（GET /patients/:id/glucose/trend，P3-7）                           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 血糖趋势查询入参（P3-7，2026-11-24 裁定）。
+ *
+ * 时间口径与报表/记录契约**一字不差**：秒粒度本地时间、闭区间 `measuredAt ∈ [startTime, endTime]`、
+ * 单侧不传则该侧不限（复用 `dateTimeStringSchema`，服务端 `resolveTimeRange` 同一实现）。
+ *
+ * ⚠️ **无 page/pageSize**：趋势图不分页，返回范围内全部数值点。范围由前端查询表单按住院记录
+ * 默认收敛；大数据量由 ECharts `sampling:'lttb'` + `large:true` 承接（glucose-domain 图表节）。
+ */
+export const glucoseTrendQuerySchema = z.object({
+  /** YYYY-MM-DD HH:mm:ss，本地时间，含该秒；不传则不限起点 */
+  startTime: dateTimeStringSchema.optional(),
+  /** YYYY-MM-DD HH:mm:ss，本地时间，含该秒；不传则不限终点 */
+  endTime: dateTimeStringSchema.optional(),
+});
+export type GlucoseTrendQuery = z.infer<typeof glucoseTrendQuerySchema>;
+
+/**
+ * 趋势图上的一个**原始测量点**（裁定：图表形态=原始测量点散点/折线，不做按日聚合）。
+ *
+ * 只含**数值型**结果（`resultType` 0/1/2，`valueMmolL` 非空）：3~9 无读数无法在值轴描点，
+ * 不成点（但仍计入 `stats.total`，同报表口径）。恒为**有效**记录（voidedAt null，全仓不变量）。
+ */
+export interface GlucoseTrendPoint {
+  /** `GlucoseRecord.id`：点击数据点打开 R25 复核弹窗时定位是哪条记录 */
+  id: string;
+  /** YYYY-MM-DD HH:mm:ss 本地时间；前端作时间轴 X 值 */
+  measuredAt: string;
+  /** mmol/L；数值型记录恒有值，前端作 Y 值 */
+  valueMmolL: number;
+  /** DY-RESULT code '0'|'1'|'2'；前端取字典 label/color 着色，禁止硬编码 */
+  resultType: string;
+  /** 记录者姓名（tooltip 展示，glucose-domain 图表节硬要求）；`operatorId` 为空时 null，前端显示 '-' */
+  operatorName: string | null;
+}
+
+/**
+ * 血糖趋势响应。
+ *
+ * `thresholds` 由服务端从 `SystemConfig`（`glucose.low_threshold`/`glucose.high_threshold`）读取下发，
+ * 前端据此画阈值线与目标范围带，**禁止硬编码阈值**（裁定：沿用告警阈值，接口下发）。
+ * `stats` 复用报表统计类型与口径（裁定：复用报表统计口径），同范围下与报表/记录 Tab 数字完全一致。
+ */
+export interface GlucoseTrendResponse {
+  /** 数值型有效测量点，按 `measuredAt` **升序**（时间顺序）；无数据为空数组 */
+  points: GlucoseTrendPoint[];
+  /** 告警阈值（mmol/L），前端画低/高阈值线与目标范围带 */
+  thresholds: { low: number; high: number };
+  /** 统计栏：复用报表统计类型与口径，按查询范围全量、与分页无关 */
+  stats: GlucoseReportStats;
+  /**
+   * 实际生效的查询区间回显（本地时刻 YYYY-MM-DD HH:mm:ss）；未传时为 null。
+   * 与报表/记录同因：让 `AuditLogInterceptor` 按既有 `AUDIT_DETAIL_ALLOW_LIST` 自动落审计 detail，无需改白名单。
+   */
+  rangeFrom: string | null;
+  rangeTo: string | null;
+  /** 本响应点数（= points.length），同为审计 detail 而回显 */
+  count: number;
 }

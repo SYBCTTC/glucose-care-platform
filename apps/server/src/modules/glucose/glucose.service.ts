@@ -32,6 +32,8 @@ import type {
   GlucoseReportResponse,
   GlucoseReportRow,
   GlucoseReportStats,
+  GlucoseTrendQuery,
+  GlucoseTrendResponse,
   GlucoseUpdateResult,
   GlucoseVoidResult,
   TimeSlotCategory,
@@ -480,6 +482,66 @@ export class GlucoseService {
       rangeTo: range.to,
       count: rows.length,
       stats,
+    };
+  }
+
+  /**
+   * P3-7：血糖趋势（GET /patients/:id/glucose/trend，原始测量点，docs/specs/glucose-trend.md）。
+   *
+   * 口径（2026-11-24 需求人 4 项裁定）：
+   *  1. 患者校验同报表（存在、未归档、数据范围内；**不要求住院中**——出院患者历史趋势同样可查）；
+   *  2. 时间过滤与报表/记录契约一致：秒粒度闭区间，单侧不传则不限（resolveTimeRange 同一实现）；
+   *  3. **只含数值型读数成点**（resultType 0/1/2 且 valueMmolL 非空，复用 numericRecordWhere 口径）；
+   *     3~9 无读数不成点，但仍计入 stats.total（同报表口径）；**只含有效记录**（voidedAt null，全仓不变量）；
+   *  4. 排序 `measuredAt ASC, id ASC`（时间顺序，散点按时间铺开；id 第二键防同秒漂移）；
+   *  5. **不分页**：返回范围内全部数值点，大数据量由前端 ECharts sampling 承接（glucose-domain 图表节）；
+   *  6. 统计栏复用 buildReportStats（裁定：复用报表统计口径，同范围下与报表/记录 Tab 数字完全一致）；
+   *  7. 阈值经 SystemConfigService.getGlucoseAlertThreshold() 读取下发（裁定：沿用告警阈值、接口下发，
+   *     前端禁止硬编码）；配置缺失/非法抛 10000（与全系统口径一致，seed 保证有效配置）；
+   *  8. `operatorName` 走关联 select（同报表 nurseName / 记录 operatorName 口径，tooltip 展示录入人）；
+   *  9. 响应回显 rangeFrom/rangeTo/count，供 AuditLogInterceptor 按既有白名单落审计 detail，无需改白名单。
+   */
+  async trend(
+    user: AuthenticatedUser,
+    patientId: string,
+    query: GlucoseTrendQuery,
+  ): Promise<GlucoseTrendResponse> {
+    await this.assertPatientReadable(user, patientId);
+
+    const range = this.resolveTimeRange(query);
+
+    const [rows, stats, thresholds] = await Promise.all([
+      this.prisma.glucoseRecord.findMany({
+        where: this.numericRecordWhere(patientId, range.where),
+        select: {
+          id: true,
+          measuredAt: true,
+          valueMmolL: true,
+          resultType: true,
+          operator: { select: { name: true } },
+        },
+        orderBy: [{ measuredAt: 'asc' }, { id: 'asc' }],
+      }),
+      this.buildReportStats(patientId, range.where),
+      this.systemConfig.getGlucoseAlertThreshold(),
+    ]);
+
+    const points = rows.map((record) => ({
+      id: record.id,
+      measuredAt: formatDateTime(record.measuredAt) ?? '',
+      // numericRecordWhere 已保证 valueMmolL 非空（3~9 无值不成点），Number(Decimal) 取数值
+      valueMmolL: Number(record.valueMmolL),
+      resultType: record.resultType,
+      operatorName: record.operator?.name ?? null,
+    }));
+
+    return {
+      points,
+      thresholds,
+      stats,
+      rangeFrom: range.from,
+      rangeTo: range.to,
+      count: points.length,
     };
   }
 

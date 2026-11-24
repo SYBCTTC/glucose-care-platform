@@ -5,11 +5,17 @@ import {
   glucoseRecordParamsSchema,
   glucoseRecordQuerySchema,
   glucoseReportQuerySchema,
+  glucoseTrendQuerySchema,
   patientIdSchema,
   PERMISSION,
   RESOURCE,
 } from '@gc/shared';
-import type { CreateGlucoseInput, GlucoseRecordQuery, GlucoseReportQuery } from '@gc/shared';
+import type {
+  CreateGlucoseInput,
+  GlucoseRecordQuery,
+  GlucoseReportQuery,
+  GlucoseTrendQuery,
+} from '@gc/shared';
 import { Audit } from '../../common/decorators/audit.decorator';
 import { RequireDataScope } from '../../common/data-scope/data-scope.decorator';
 import { RequirePermissions } from '../../common/guards/permissions.guard';
@@ -89,6 +95,33 @@ export class GlucoseController {
     @Query(new ZodValidationPipe(glucoseRecordQuerySchema)) query: GlucoseRecordQuery,
   ) {
     const result = await this.glucoseService.records(
+      request.user as AuthenticatedUser,
+      params.id,
+      query,
+    );
+    return ok(result);
+  }
+
+  /**
+   * P3-7：血糖趋势（原始测量点散点/折线，只读，docs/specs/glucose-trend.md）。
+   *
+   * ⚠️ 路由顺序：必须声明在 `:id/glucose/:recordId` **之前**，否则 `trend` 会被 `:recordId` 捕获。
+   * 权限口径同报表/记录（`patient:view`，不新增权限点）；审计 GLUCOSE_TREND_VIEW（裁定：独立动作，
+   * 可与报表/记录查询区分过滤）。detail 的 `rangeFrom`/`rangeTo`/`count` 由 service 回显、
+   * 拦截器按既有白名单提取，**无需改白名单**。
+   * ⚠️ GLUCOSE_TREND_VIEW 枚举值需人工先加进 schema.prisma 并迁移（AI 禁改 schema/migration，
+   * 见 docs/specs/glucose-trend.md §11）；迁移应用前审计写入会被 PG 拒绝、拦截器吞错（接口仍正常返回）。
+   */
+  @Get(':id/glucose/trend')
+  @RequirePermissions(PERMISSION.PATIENT_VIEW)
+  @RequireDataScope(RESOURCE.PATIENT)
+  @Audit('GLUCOSE_TREND_VIEW', { targetType: 'PATIENT' })
+  async trend(
+    @Req() request: Request,
+    @Param(new ZodValidationPipe(patientIdSchema)) params: { id: string },
+    @Query(new ZodValidationPipe(glucoseTrendQuerySchema)) query: GlucoseTrendQuery,
+  ) {
+    const result = await this.glucoseService.trend(
       request.user as AuthenticatedUser,
       params.id,
       query,

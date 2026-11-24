@@ -5,6 +5,7 @@ import {
   GLUCOSE_ENTRY_DETECT,
   GLUCOSE_RECORD_PAGE_SIZE,
   GLUCOSE_REPORT_PAGE_SIZE,
+  GLUCOSE_VALUE_RESULT_CODES,
   TIME_SLOT_CATEGORY,
   TIME_SLOT_CODE_RANDOM,
   TIME_SLOTS,
@@ -14,6 +15,7 @@ import type {
   GlucoseRecordQuery,
   GlucoseReportQuery,
   GlucoseReportResponse,
+  GlucoseTrendQuery,
   TimeSlotOption,
 } from '@gc/shared';
 import { Prisma } from '@prisma/client';
@@ -1543,6 +1545,180 @@ describe('GlucoseService.records — R27 血糖记录列表', () => {
       const ctx = createRecordService([]);
       ctx.prisma.patient.findUnique.mockResolvedValue(patient);
       await expect(ctx.service.records(deptUser, 'p-1', recordQuery())).rejects.toMatchObject({
+        code: ERROR_CODES.PATIENT_NOT_FOUND,
+      });
+      expect(ctx.prisma.glucoseRecord.findMany).not.toHaveBeenCalled();
+    }
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* GlucoseService.trend — P3-7 血糖趋势（原始测量点）                            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 趋势用的 service 工厂。`findMany` 模拟服务端排序（measuredAt **ASC** + id ASC）、**不分页**；
+ * 与记录列表同思路：**不按 where 过滤**——where 的正确性（numericRecordWhere：resultType 0/1/2、
+ * valueMmolL 非空、voidedAt null、时间区间）走参数断言，mock 不重复实现查询语义。
+ * 复用 `lrec` 行（含 id/measuredAt/valueMmolL/resultType/operator.name，趋势 select 的子集）。
+ */
+function createTrendService(rows: RecordListRow[]) {
+  const ctx = createService();
+  ctx.prisma.patient.findUnique.mockResolvedValue({
+    departmentId: 'd-endo',
+    archivedAt: null,
+  });
+  ctx.prisma.glucoseRecord.findMany.mockImplementation(() => {
+    const sorted = [...rows].sort(
+      (left, right) =>
+        left.measuredAt.getTime() - right.measuredAt.getTime() || left.id.localeCompare(right.id),
+    );
+    return Promise.resolve(sorted);
+  });
+  return ctx;
+}
+
+function trendQuery(overrides: Partial<GlucoseTrendQuery> = {}): GlucoseTrendQuery {
+  return { ...overrides };
+}
+
+describe('GlucoseService.trend — P3-7 血糖趋势（原始测量点）', () => {
+  it('points 按 measuredAt ASC + id ASC，字段按契约映射（valueMmolL 转数值、operatorName 关联、时间格式化）', async () => {
+    const late = lrec(20, 9, 0, { id: 'g-t-b' });
+    const early = lrec(18, 9, 0, { id: 'g-t-c' });
+    const lateA = lrec(20, 9, 0, { id: 'g-t-a' });
+    const { service } = createTrendService([late, early, lateA]);
+
+    const result = await service.trend(deptUser, 'p-1', trendQuery());
+
+    // 时间升序；同秒（day20 09:00）两条按 id 升序
+    expect(result.points.map((point) => point.id)).toEqual(['g-t-c', 'g-t-a', 'g-t-b']);
+    expect(result.points[0]).toEqual({
+      id: 'g-t-c',
+      measuredAt: formatDateTime(early.measuredAt),
+      valueMmolL: 6.8,
+      resultType: '1',
+      operatorName: '李护士',
+    });
+    expect(result.count).toBe(3);
+  });
+
+  it('where 恒用 numericRecordWhere（resultType 0/1/2 + valueMmolL 非空 + voidedAt null），orderBy 升序，且不分页', async () => {
+    const { service, prisma } = createTrendService([]);
+    const startTime = new Date(2026, 10, 18, 10, 0, 0);
+    const endTime = new Date(2026, 10, 20, 23, 59, 59);
+
+    const result = await service.trend(deptUser, 'p-1', trendQuery({ startTime, endTime }));
+
+    expect(prisma.glucoseRecord.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          patientId: 'p-1',
+          measuredAt: { gte: startTime, lte: endTime },
+          resultType: { in: [...GLUCOSE_VALUE_RESULT_CODES] },
+          valueMmolL: { not: null },
+          voidedAt: null,
+        },
+        orderBy: [{ measuredAt: 'asc' }, { id: 'asc' }],
+      }),
+    );
+    // 不分页：findMany 不带 skip/take
+    const call = prisma.glucoseRecord.findMany.mock.calls[0]?.[0] as {
+      skip?: number;
+      take?: number;
+    };
+    expect(call.skip).toBeUndefined();
+    expect(call.take).toBeUndefined();
+    // 审计 detail 回显（既有白名单三键）
+    expect(result.rangeFrom).toBe(formatDateTime(startTime));
+    expect(result.rangeTo).toBe(formatDateTime(endTime));
+  });
+
+  it('不传时间 → 该侧不限（measuredAt 空过滤），rangeFrom/rangeTo 为 null', async () => {
+    const { service, prisma } = createTrendService([]);
+
+    const result = await service.trend(deptUser, 'p-1', trendQuery());
+
+    expect(prisma.glucoseRecord.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ patientId: 'p-1', measuredAt: {}, voidedAt: null }),
+      }),
+    );
+    expect(result.rangeFrom).toBeNull();
+    expect(result.rangeTo).toBeNull();
+  });
+
+  it('thresholds 经 getGlucoseAlertThreshold 下发；stats 复用报表口径（总计只计 counted 码集）', async () => {
+    const { service, prisma, systemConfig } = createTrendService([lrec(19, 9, 0)]);
+    systemConfig.getGlucoseAlertThreshold.mockResolvedValue({ low: 4.0, high: 15.0 });
+    // 分组含 '1'×3 与 '5'×2；dictItem 默认 0~4 counted → 总计只数 '1' 的 3 条，'5' 不计入
+    prisma.glucoseRecord.groupBy.mockResolvedValue([
+      { resultType: '1', _count: { _all: 3 } },
+      { resultType: '5', _count: { _all: 2 } },
+    ]);
+
+    const result = await service.trend(deptUser, 'p-1', trendQuery());
+
+    expect(result.thresholds).toEqual({ low: 4.0, high: 15.0 });
+    expect(result.stats.total).toBe(3);
+    expect(result.stats.qualified).toBe(3);
+  });
+
+  it('operator 为空 → operatorName null（tooltip 显示 -）', async () => {
+    const row = lrec(19, 9, 0, { operator: null });
+    const { service } = createTrendService([row]);
+
+    const result = await service.trend(deptUser, 'p-1', trendQuery());
+
+    expect(result.points[0]?.operatorName).toBeNull();
+  });
+
+  it('空范围 → points 空数组、count 0（不报错）', async () => {
+    const { service } = createTrendService([]);
+
+    const result = await service.trend(deptUser, 'p-1', trendQuery());
+
+    expect(result.points).toEqual([]);
+    expect(result.count).toBe(0);
+  });
+
+  it('startTime > endTime → 10001 字段级（服务端兜底），不发查询', async () => {
+    const { service, prisma } = createTrendService([]);
+
+    await expect(
+      service.trend(
+        deptUser,
+        'p-1',
+        trendQuery({
+          startTime: new Date(2026, 10, 20, 0, 0, 0),
+          endTime: new Date(2026, 10, 18, 0, 0, 0),
+        }),
+      ),
+    ).rejects.toMatchObject({ code: ERROR_CODES.VALIDATION_FAILED });
+    expect(prisma.glucoseRecord.findMany).not.toHaveBeenCalled();
+  });
+
+  it('跨科室 → 30002；NONE 档 → 30006；不存在/归档 → 40001，均不发查询', async () => {
+    const crossDept = createTrendService([]);
+    crossDept.prisma.patient.findUnique.mockResolvedValue({
+      departmentId: 'd-cardio',
+      archivedAt: null,
+    });
+    await expect(crossDept.service.trend(deptUser, 'p-1', trendQuery())).rejects.toMatchObject({
+      code: ERROR_CODES.CROSS_DEPARTMENT_DENIED,
+    });
+    expect(crossDept.prisma.glucoseRecord.findMany).not.toHaveBeenCalled();
+
+    const noneScope = createTrendService([]);
+    await expect(noneScope.service.trend(noneUser, 'p-1', trendQuery())).rejects.toMatchObject({
+      code: ERROR_CODES.NO_PATIENT_DATA_SCOPE,
+    });
+    expect(noneScope.prisma.glucoseRecord.findMany).not.toHaveBeenCalled();
+
+    for (const patient of [null, { departmentId: 'd-endo', archivedAt: new Date() }]) {
+      const ctx = createTrendService([]);
+      ctx.prisma.patient.findUnique.mockResolvedValue(patient);
+      await expect(ctx.service.trend(deptUser, 'p-1', trendQuery())).rejects.toMatchObject({
         code: ERROR_CODES.PATIENT_NOT_FOUND,
       });
       expect(ctx.prisma.glucoseRecord.findMany).not.toHaveBeenCalled();
