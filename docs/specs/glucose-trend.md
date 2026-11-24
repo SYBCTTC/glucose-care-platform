@@ -106,7 +106,8 @@
 - **页面结构**：工具栏行（统计栏 + 查询表单 + 全屏按钮，复用 `GlucoseToolbar`）+ 图表主体（ECharts，占满剩余高度）。
 - **查询表单**：复用 `GlucoseQueryForm`（住院记录 → 科室记录 → 时间范围三层联动），`extra` 插槽不使用（趋势无追加筛选）。状态机同记录页：表单态与**已应用**范围分离，点「查询」/初始默认态/重置才发请求；初始按住院记录默认范围自动查询（R24 裁定 Q15）。
 - **图表**（ECharts 时间轴，`buildTrendOption` 重写；支持**折线/散点切换**）：
-  - X 轴 `type:'time'`（`measuredAt`）；Y 轴 `type:'value'`，名 `mmol/L`。
+  - X 轴 `type:'time'`（数据点横坐标 = `measuredAt` 完整毫秒时间戳，**保留时分秒**，同日多次测量横向铺开）；Y 轴 `type:'value'`，名 `mmol/L`。
+  - **X 轴日期级范围/刻度**（2026-11-24 增补）：轴 `min`/`max` 取数据最小/最大日期的**日界**（最小日 `startOf('day')`、最大日 `endOf('day')`）；刻度标签固定 `MM-DD`（`axisLabel.formatter:'{MM}-{dd}'`，两位月-两位日、不含年）；`minInterval:86400000`（刻度下限 1 天）避免短范围出现小时级刻度致 MM-DD 重复同一天，长范围由 ECharts 自动放大间隔（周/月）+ `hideOverlap` 防拥挤。**单日数据**（最小日 = 最大日）向两侧各扩 1 天（轴跨 3 天、居中该日）。**空点**不设 min/max（交轴自动）。tooltip 不受影响，仍显示完整 `YYYY-MM-DD HH:mm:ss`。
   - **形态切换按钮**（2026-11-24 增补）：叠加在图表容器右上角（图例上方，图例下移 `top:32`、绘图区 `top:56` 让位），折线 ↔ 散点来回切换；**默认折线图**，按钮文案/图标显示**目标**形态（当前折线 → 显示「散点图」+ `DotChartOutlined`；当前散点 → 显示「折线图」+ `LineChartOutlined`）。切换仅改系列 `type`（`line`/`scatter`）与渲染参数，数据/颜色/图例/tooltip/点击复核完全一致。
   - 三个系列「偏低/正常/偏高」（折线/散点同构），**颜色与图例文案取 DY-RESULT 字典**（`resultType` 0/1/2 的 `color`/`label`），字典缺失回退 `glucoseColor` 令牌；图例可分类切换（色+文双通道）。折线模式 `showSymbol:true` 保留可点击符号、`lineStyle` 与字典同色（宽 1.5）；散点模式 `large:true`+`largeThreshold:2000` 渐进渲染（CGM 大数据量预留）。
   - 阈值线：`markLine` 低值（`glucoseColor.low` 虚线）/ 高值（`glucoseColor.high` 虚线）；目标范围带：`markArea`（low→high 半透明绿）。挂在不进图例的专用系列上，切换点系列时恒可见。
@@ -201,6 +202,15 @@
 - `src/styles/chartTheme.spec.ts`：补折线模式 4 用例（系列 `type:line`、线色/线宽/`showSymbol`、数据点附加字段、字典缺失兜底），共 11 用例。
 
 验证：`pnpm --filter @gc/web typecheck` ✅ / `pnpm --filter @gc/web test chartTheme`（11 用例）✅ / `pnpm lint` ✅ / `pnpm --filter @gc/web build` ✅。目检增补项：切换按钮位置（图例上方）、默认折线、文案与图标随目标形态、折线/散点两种描点与字典色、点符号进复核、全屏 resize。
+
+### 2026-11-24 增补：X 轴改日期级（MM-DD）
+
+需求人裁定 4 项：① 数据点保留时分秒（仅轴标签改日期）② 刻度自动间隔 ③ 单日数据向两侧各扩 1 天 ④ tooltip 保持完整时间。
+
+- `src/styles/chartTheme.ts`：`buildTrendOption` 在 `return` 前由 `points` 计算 `xMin`/`xMax`——循环取 `measuredAt` 最小/最大（用循环而非 `Math.min(...arr)` 避免大数据量爆栈），`startOf('day')`/`endOf('day')` 取日界；单日（最小日 = 最大日）向两侧各扩 1 天；空点保持 `undefined`。`xAxis` 加 `min`/`max`/`minInterval:86400000`（1 天下限，防短范围小时级刻度致 MM-DD 重复同一天）/`axisLabel.formatter:'{MM}-{dd}'`。数据点横坐标（完整时间戳）与 tooltip 均未变。
+- `src/styles/chartTheme.spec.ts`：补 X 轴日期级 4 用例（多日日界 + MM-DD + minInterval、单日扩 ±1 天、数据点保留时分秒、空点 min/max undefined），共 15 用例。
+
+验证：`pnpm --filter @gc/web typecheck` ✅ / `pnpm --filter @gc/web test chartTheme`（15 用例）✅ / `pnpm lint` ✅ / `pnpm --filter @gc/web build` ✅。目检增补项：X 轴标签为 MM-DD、轴范围贴数据日界、单日数据扩 3 天居中、短范围刻度不重复 MM-DD、长范围刻度自动稀疏、tooltip 仍完整时间。
 
 ### 遗留项（阻塞「合规完成」）
 
