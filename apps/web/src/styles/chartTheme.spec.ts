@@ -4,7 +4,8 @@
  * （同 GlucoseRecordTab.spec.tsx 口径：只测抽出来的纯函数）。
  *
  * 验收主体（docs/specs/glucose-trend.md）：
- *  - 图表形态：原始测量点时间轴散点，三系列（偏低/正常/偏高）按 DY-RESULT 字典色/标签；
+ *  - 图表形态：原始测量点时间轴图，三系列（偏低/正常/偏高）按 DY-RESULT 字典色/标签；
+ *    chartType 在折线（line，默认形态）/ 散点（scatter）间切换，仅系列 type 与渲染参数不同；
  *  - 阈值线 + 目标范围带挂在**不进图例**的专用系列，切换点系列时恒可见；
  *  - tooltip 同时展示测量时间 + 血糖值 + 录入人（glucose-domain 图表节硬要求）；
  *  - 字典缺失回退 glucoseColor 令牌与 code 原文（禁止硬编码色值/文案）。
@@ -40,6 +41,12 @@ type SeriesShape = {
   name: string;
   type: string;
   itemStyle?: { color?: string };
+  // 散点专属
+  large?: boolean;
+  largeThreshold?: number;
+  // 折线专属
+  showSymbol?: boolean;
+  lineStyle?: { color?: string; width?: number };
   data: Array<{
     value: [number, number];
     recordId: string;
@@ -50,12 +57,14 @@ type SeriesShape = {
   markArea?: unknown;
 };
 
+/** 默认按散点构建（保持既有用例）；折线模式用例显式传 chartType: 'line' */
 function build(overrides: Partial<Parameters<typeof buildTrendOption>[0]> = {}) {
   return buildTrendOption({
     points: [point()],
     thresholds: THRESHOLDS,
     mode: 'light',
     resultTypes: RESULT_TYPES,
+    chartType: 'scatter',
     ...overrides,
   });
 }
@@ -63,7 +72,7 @@ function build(overrides: Partial<Parameters<typeof buildTrendOption>[0]> = {}) 
 const seriesOf = (option: ReturnType<typeof buildTrendOption>): SeriesShape[] =>
   option.series as unknown as SeriesShape[];
 
-describe('buildTrendOption — 原始测量点时间轴散点（P3-7）', () => {
+describe('buildTrendOption — 散点模式（chartType: scatter，P3-7）', () => {
   it('三个点系列（字典标签/色）+ 一个不进图例的阈值系列；图例只列点系列', () => {
     const option = build();
     const series = seriesOf(option);
@@ -73,6 +82,7 @@ describe('buildTrendOption — 原始测量点时间轴散点（P3-7）', () => 
       name: '偏低',
       type: 'scatter',
       itemStyle: { color: '#1890FF' },
+      large: true,
     });
     expect(series[1]).toMatchObject({
       name: '正常',
@@ -170,5 +180,61 @@ describe('buildTrendOption — 原始测量点时间轴散点（P3-7）', () => 
     expect(series[1].data).toEqual([]);
     expect(series[2].data).toEqual([]);
     expect(series[3].markLine?.data).toHaveLength(2);
+  });
+});
+
+describe('buildTrendOption — 折线模式（chartType: line，默认形态，P3-7）', () => {
+  it('三个点系列 type 变 line，颜色/图例/阈值系列与散点一致（仅渲染形态不同）', () => {
+    const option = build({ chartType: 'line' });
+    const series = seriesOf(option);
+
+    expect(series).toHaveLength(4);
+    expect(series[0]).toMatchObject({
+      name: '偏低',
+      type: 'line',
+      itemStyle: { color: '#1890FF' },
+    });
+    expect(series[1]).toMatchObject({
+      name: '正常',
+      type: 'line',
+      itemStyle: { color: '#52C41A' },
+    });
+    expect(series[2]).toMatchObject({
+      name: '偏高',
+      type: 'line',
+      itemStyle: { color: '#F5222D' },
+    });
+    expect(series[3]).toMatchObject({ name: '__thresholds__', type: 'line' });
+
+    const legend = option.legend as unknown as { data?: string[] };
+    expect(legend.data).toEqual(['偏低', '正常', '偏高']);
+  });
+
+  it('折线系列保留可点击符号（showSymbol）、线色=字典色、线宽 1.5；不带散点渐进渲染字段', () => {
+    const series = seriesOf(build({ chartType: 'line' }));
+
+    expect(series[0].showSymbol).toBe(true);
+    expect(series[0].lineStyle).toEqual({ width: 1.5, color: '#1890FF' });
+    expect(series[0].large).toBeUndefined();
+  });
+
+  it('数据点仍带 recordId/录入人（点击复核、tooltip 不受形态影响）', () => {
+    const series = seriesOf(
+      build({ chartType: 'line', points: [point({ id: 'g-line', operatorName: '王医生' })] }),
+    );
+
+    // resultType '1' → 第二个系列
+    expect(series[1].data[0]).toMatchObject({ recordId: 'g-line', operatorName: '王医生' });
+  });
+
+  it('字典缺失 → 线色同样回退 glucoseColor 令牌（禁止硬编码）', () => {
+    const series = seriesOf(build({ chartType: 'line', resultTypes: [] }));
+
+    expect(series[0]).toMatchObject({
+      name: '0',
+      type: 'line',
+      itemStyle: { color: glucoseColor.low },
+    });
+    expect(series[0].lineStyle?.color).toBe(glucoseColor.low);
   });
 });

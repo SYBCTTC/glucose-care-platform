@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
+import { DotChartOutlined, LineChartOutlined } from '@ant-design/icons';
 import { Alert, Button, Empty, Spin, message, theme } from 'antd';
 import { useOutletContext, useParams } from 'react-router-dom';
 import ReactECharts from 'echarts-for-react';
@@ -18,6 +19,7 @@ import { useFullscreen } from '@/components/glucose/useFullscreen';
 import { useCommonDataStore } from '@/store/common-data';
 import { useThemeStore } from '@/store/theme';
 import { buildTrendOption } from '@/styles/chartTheme';
+import type { TrendChartType } from '@/styles/chartTheme';
 import type { DetailChildContext } from './detail-tabs';
 import GlucoseReviewModal from './GlucoseReviewModal';
 import { buildReportStatsItems } from './buildReportStatsItems';
@@ -80,6 +82,8 @@ export default function GlucoseTrendTab() {
 
   // R25 复核弹窗（点数据点打开）：编辑/作废成功走 onGlucoseChanged → 版本号 +1 → 趋势重拉
   const [reviewRecordId, setReviewRecordId] = useState<string | null>(null);
+  // 图表形态切换（P3-7 增补）：默认折线图；容器右上角按钮在折线↔散点间切换，按钮文案/图标显示**目标**形态
+  const [chartType, setChartType] = useState<TrendChartType>('line');
   // ECharts 点击事件：从数据点附带的 recordId 定位记录（buildTrendOption 已埋入）
   const handleChartClick = useCallback((params: unknown) => {
     const recordId = (params as { data?: { recordId?: string } })?.data?.recordId;
@@ -135,7 +139,7 @@ export default function GlucoseTrendTab() {
   };
 
   // 图表 option：仅在有点数据时构建（阈值随接口下发，空数据走 Empty 态）。
-  // mode/resultTypes 进依赖：明暗切换或字典到达时重建，颜色与图例文案跟随
+  // mode/resultTypes/chartType 进依赖：明暗切换、字典到达或折线/散点切换时重建，颜色、图例文案与系列 type 跟随
   const option = useMemo(
     () =>
       data && data.points.length > 0
@@ -144,9 +148,10 @@ export default function GlucoseTrendTab() {
             thresholds: data.thresholds,
             mode,
             resultTypes,
+            chartType,
           })
         : null,
-    [data, mode, resultTypes],
+    [data, mode, resultTypes, chartType],
   );
 
   // 统计栏：与报表/记录同一构建函数（裁定：复用报表口径，同范围下数字完全一致）。
@@ -222,14 +227,26 @@ export default function GlucoseTrendTab() {
             <Spin />
           </div>
         ) : option ? (
-          <ReactECharts
-            ref={chartRef}
-            option={option}
-            // notMerge：数据/主题变化时整体替换 option，避免旧系列残留（点数与系列会变）
-            notMerge
-            style={{ height: '100%', width: '100%' }}
-            onEvents={{ click: handleChartClick }}
-          />
+          <>
+            {/* 图表形态切换按钮：叠加在容器右上角（图例上方——图例已下移 top:32 让位）。
+                文案/图标显示**目标**形态：当前折线→显示「散点图」，当前散点→显示「折线图」，点击来回切换 */}
+            <Button
+              size="small"
+              icon={chartType === 'line' ? <DotChartOutlined /> : <LineChartOutlined />}
+              onClick={() => setChartType(chartType === 'line' ? 'scatter' : 'line')}
+              style={{ position: 'absolute', top: 0, right: 0, zIndex: 10 }}
+            >
+              {chartType === 'line' ? '散点图' : '折线图'}
+            </Button>
+            <ReactECharts
+              ref={chartRef}
+              option={option}
+              // notMerge：数据/主题变化时整体替换 option，避免旧系列残留（点数与系列会变）
+              notMerge
+              style={{ height: '100%', width: '100%' }}
+              onEvents={{ click: handleChartClick }}
+            />
+          </>
         ) : (
           <div style={centerStyle}>
             <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="该范围无数值型血糖记录" />
