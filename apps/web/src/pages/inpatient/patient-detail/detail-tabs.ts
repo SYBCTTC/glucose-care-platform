@@ -3,7 +3,7 @@ import type { PatientDetail } from '@gc/shared';
 /**
  * 患者详情页的**子路径与 Tab 派生规则**——唯一来源。
  *
- * 为什么集中：详情页有 5 个内容页（基本信息 / 出入院记录 / 血糖报告 / 血糖记录 / 趋势图），
+ * 为什么集中：详情页有 5 个内容页（控糖目标 / 出入院记录 / 血糖报告 / 血糖记录 / 趋势图），
  * 每条子路径都要在 `routes.tsx`（登记路由）与 `PatientDetailTabs.tsx`（派生高亮 + 跳转）各用一次。
  * 两处各写字面量，改一处忘另一处就会出现「Tab 高亮与实际内容不符」，
  * 或跳到不存在的路由 → 命中 `*` 兜底 → 用户莫名其妙被弹回血糖报告。
@@ -16,7 +16,7 @@ export const DETAIL_ROUTE_PATH = '/inpatient/patients/:id';
 export const DETAIL_PATH_PREFIX = '/inpatient/patients/';
 
 /** 主 Tab key（下划线高亮） */
-export type DetailMainTab = 'glucose' | 'basic' | 'admission';
+export type DetailMainTab = 'glucose' | 'target' | 'admission';
 
 /** 「血糖数据」下的子 Tab key（背景色高亮） */
 export type DetailGlucoseTab = 'report' | 'record' | 'trend';
@@ -24,9 +24,13 @@ export type DetailGlucoseTab = 'report' | 'record' | 'trend';
 /**
  * 子路径常量。均为**相对**父路由的 path（React Router 要求子路由 path 不以 `/` 开头）。
  * 血糖三子页用两段路径 `glucose/xxx`，这样 URL 层级与两层 Tab 的视觉层级一致。
+ *
+ * ⚠️ `target`（控糖目标）原名 `basic`（基本信息），2026-11-25 按裁定 M 改名并替换为正式页面。
+ * **不做旧路径重定向**（裁定 M：需求人已知悉并接受旧 `/basic` 链接失效）——
+ * 访问 `.../basic` 会命中 `*` 兜底路由重定向到默认页「血糖报告」，不会白屏。
  */
 export const DETAIL_TAB_PATH = {
-  basic: 'basic',
+  target: 'target',
   admission: 'admission',
   glucoseReport: 'glucose/report',
   glucoseRecord: 'glucose/record',
@@ -39,7 +43,7 @@ export const DETAIL_DEFAULT_TAB: string = DETAIL_TAB_PATH.glucoseReport;
 /** 主 Tab key → 该 Tab 的代表性子路径。「血糖数据」落到默认子页 report */
 export const MAIN_TAB_PATH: Record<DetailMainTab, string> = {
   glucose: DETAIL_TAB_PATH.glucoseReport,
-  basic: DETAIL_TAB_PATH.basic,
+  target: DETAIL_TAB_PATH.target,
   admission: DETAIL_TAB_PATH.admission,
 };
 
@@ -166,8 +170,8 @@ export function resolveDetailTab(pathname: string): DetailTabState {
   const sub = rest.slice(slash + 1).replace(/\/+$/, '');
 
   switch (sub) {
-    case DETAIL_TAB_PATH.basic:
-      return { main: 'basic', glucose: 'report' };
+    case DETAIL_TAB_PATH.target:
+      return { main: 'target', glucose: 'report' };
     case DETAIL_TAB_PATH.admission:
       return { main: 'admission', glucose: 'report' };
     case DETAIL_TAB_PATH.glucoseReport:

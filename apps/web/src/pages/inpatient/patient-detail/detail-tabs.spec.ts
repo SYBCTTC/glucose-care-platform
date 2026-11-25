@@ -26,7 +26,7 @@ describe('resolveDetailTab — 由 pathname 派生选中的 Tab', () => {
       main: 'glucose',
       glucose: 'trend',
     });
-    expect(resolveDetailTab(`${BASE}/basic`)).toEqual({ main: 'basic', glucose: 'report' });
+    expect(resolveDetailTab(`${BASE}/target`)).toEqual({ main: 'target', glucose: 'report' });
     expect(resolveDetailTab(`${BASE}/admission`)).toEqual({
       main: 'admission',
       glucose: 'report',
@@ -48,6 +48,10 @@ describe('resolveDetailTab — 由 pathname 派生选中的 Tab', () => {
       main: 'glucose',
       glucose: 'report',
     });
+    // 裁定 M：原「基本信息」子路径 /basic 已改名为 /target 且**刻意不做重定向**，
+    // 旧链接（收藏夹 / 聊天记录里的 URL）落到这里 → 回落默认页，与 `*` 兜底路由行为一致，
+    // 不会出现「Tab 栏在、内容区空白、无高亮」的空档
+    expect(resolveDetailTab(`${BASE}/basic`)).toEqual({ main: 'glucose', glucose: 'report' });
   });
 
   it('非详情页路径回落默认，不抛异常', () => {
@@ -59,7 +63,7 @@ describe('resolveDetailTab — 由 pathname 派生选中的 Tab', () => {
   });
 
   it('尾斜杠不影响匹配', () => {
-    expect(resolveDetailTab(`${BASE}/basic/`)).toEqual({ main: 'basic', glucose: 'report' });
+    expect(resolveDetailTab(`${BASE}/target/`)).toEqual({ main: 'target', glucose: 'report' });
     expect(resolveDetailTab(`${BASE}/glucose/trend/`)).toEqual({
       main: 'glucose',
       glucose: 'trend',
@@ -68,9 +72,7 @@ describe('resolveDetailTab — 由 pathname 派生选中的 Tab', () => {
 
   it('回落值与 DETAIL_DEFAULT_TAB 指向同一个页面', () => {
     expect(MAIN_TAB_PATH[resolveDetailTab(BASE).main]).toBe(DETAIL_DEFAULT_TAB);
-    expect(
-      GLUCOSE_TAB_PATH[resolveDetailTab(BASE).glucose],
-    ).toBe(DETAIL_TAB_PATH.glucoseReport);
+    expect(GLUCOSE_TAB_PATH[resolveDetailTab(BASE).glucose]).toBe(DETAIL_TAB_PATH.glucoseReport);
   });
 });
 
@@ -78,8 +80,8 @@ describe('buildDetailTabNavigation — Tab 跳转的两个硬约束', () => {
   const fromState = { from: '/inpatient/ward' };
 
   it('拼出指向子路径的绝对 URL', () => {
-    expect(buildDetailTabNavigation('p1', DETAIL_TAB_PATH.basic, fromState).to).toBe(
-      `${DETAIL_PATH_PREFIX}p1/basic`,
+    expect(buildDetailTabNavigation('p1', DETAIL_TAB_PATH.target, fromState).to).toBe(
+      `${DETAIL_PATH_PREFIX}p1/target`,
     );
     expect(buildDetailTabNavigation('p1', DETAIL_TAB_PATH.glucoseTrend, fromState).to).toBe(
       `${DETAIL_PATH_PREFIX}p1/glucose/trend`,
@@ -93,7 +95,7 @@ describe('buildDetailTabNavigation — Tab 跳转的两个硬约束', () => {
   });
 
   it('state 原样透传：丢了它 handleBack 会退化成兜底跳患者管理（风险 1）', () => {
-    expect(buildDetailTabNavigation('p1', DETAIL_TAB_PATH.basic, fromState).options.state).toBe(
+    expect(buildDetailTabNavigation('p1', DETAIL_TAB_PATH.target, fromState).options.state).toBe(
       fromState,
     );
     // 从虚拟病区进来时 from 必须保住，否则返回会去错页
@@ -102,7 +104,7 @@ describe('buildDetailTabNavigation — Tab 跳转的两个硬约束', () => {
       buildDetailTabNavigation('p1', DETAIL_TAB_PATH.glucoseRecord, wardState).options.state,
     ).toEqual(wardState);
     // 直接访问 URL 时 state 为 null，也要原样传（不能替换成 undefined 或 {}）
-    expect(buildDetailTabNavigation('p1', DETAIL_TAB_PATH.basic, null).options.state).toBeNull();
+    expect(buildDetailTabNavigation('p1', DETAIL_TAB_PATH.target, null).options.state).toBeNull();
   });
 });
 

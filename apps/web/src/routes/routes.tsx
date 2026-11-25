@@ -26,6 +26,7 @@ import DetailPlaceholder from '@/pages/inpatient/patient-detail/DetailPlaceholde
 import GlucoseRecordTab from '@/pages/inpatient/patient-detail/GlucoseRecordTab';
 import GlucoseReportTab from '@/pages/inpatient/patient-detail/GlucoseReportTab';
 import GlucoseTrendTab from '@/pages/inpatient/patient-detail/GlucoseTrendTab';
+import PatientGlucoseTargetTab from '@/pages/inpatient/patient-detail/PatientGlucoseTargetTab';
 import { DETAIL_ROUTE_PATH, DETAIL_TAB_PATH } from '@/pages/inpatient/patient-detail/detail-tabs';
 import type { AppRoute } from './menu';
 
@@ -83,7 +84,10 @@ export const APP_ROUTES: AppRoute[] = [
       // 裸详情 URL → 默认落「血糖数据 → 血糖报告」（需求 1）。
       // 正常入口不经过这里：两处 goDetail 直接跳 .../glucose/report，避开 replace 覆盖 history 的风险
       { index: true, element: <DetailFallbackRedirect /> },
-      { path: DETAIL_TAB_PATH.basic, element: <DetailPlaceholder label="基本信息" /> },
+      // 控糖目标（2026-11-25 裁定 M）：原「基本信息」占位替换为正式页面。
+      // 刻意**不做** /basic → /target 重定向（裁定 M：需求人已知悉并接受旧链接失效）；
+      // 旧 URL 会命中下面的 `*` 兜底重定向到默认页，不会白屏。
+      { path: DETAIL_TAB_PATH.target, element: <PatientGlucoseTargetTab /> },
       { path: DETAIL_TAB_PATH.admission, element: <DetailPlaceholder label="出入院记录" /> },
       { path: DETAIL_TAB_PATH.glucoseReport, element: <GlucoseReportTab /> },
       // 血糖记录（R27）+ 趋势图（P3-7）：占位均已替换为正式页面

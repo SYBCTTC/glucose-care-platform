@@ -143,9 +143,9 @@ describe('PatientDetailTabs — 双层 Tab 由 URL 驱动（R10）', () => {
 
   it('血糖子页：主 Tab 三项 + 血糖子 Tab 三项齐备', () => {
     const html = renderTabs(`${BASE}/glucose/report`);
-    // 主 Tab（下划线）
+    // 主 Tab（下划线）。第二项 2026-11-25 由「基本信息」改名为「控糖目标」（裁定 M）
     expect(html).toContain('血糖数据');
-    expect(html).toContain('基本信息');
+    expect(html).toContain('控糖目标');
     expect(html).toContain('出入院记录');
     // 子 Tab（背景色）
     expect(html).toContain('血糖报告');
@@ -159,11 +159,19 @@ describe('PatientDetailTabs — 双层 Tab 由 URL 驱动（R10）', () => {
     expect(html).toContain('趋势图');
   });
 
-  it('基本信息 Tab：不渲染血糖子 Tab（子 Tab 只属于「血糖数据」）', () => {
-    const html = renderTabs(`${BASE}/basic`);
-    expect(html).toContain('基本信息');
+  it('控糖目标 Tab：不渲染血糖子 Tab（子 Tab 只属于「血糖数据」）', () => {
+    const html = renderTabs(`${BASE}/target`);
+    expect(html).toContain('控糖目标');
     expect(html).not.toContain('血糖记录');
     expect(html).not.toContain('趋势图');
+  });
+
+  it('旧「基本信息」路径 /basic 已失效（裁定 M 刻意不做重定向）：回落默认页而非空白', () => {
+    const html = renderTabs(`${BASE}/basic`);
+    // 回落默认 = 血糖数据 / 血糖报告，因此会渲染血糖子 Tab（与 /target 的行为明显不同）
+    expect(html).toContain('血糖报告');
+    // 主 Tab 栏仍完整，不会出现「Tab 栏在、无高亮、内容区空白」的空档
+    expect(html).toContain('控糖目标');
   });
 
   it('出入院记录 Tab：同样不渲染血糖子 Tab', () => {
@@ -200,7 +208,7 @@ describe('PatientDetailTabs — 双层 Tab 由 URL 驱动（R10）', () => {
   });
 
   it('主 Tab 非血糖数据：同样不渲染展示项勾选（R22 规则 2）', () => {
-    expect(renderTabs(`${BASE}/basic`)).not.toContain('常规血糖');
+    expect(renderTabs(`${BASE}/target`)).not.toContain('常规血糖');
     expect(renderTabs(`${BASE}/admission`)).not.toContain('常规血糖');
   });
 });

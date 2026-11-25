@@ -15,10 +15,10 @@ import {
 } from './detail-tabs';
 import { useDetailTabNavigate } from './useDetailTabNavigate';
 
-/** 主 Tab（下划线高亮）。注意：此处"基本信息"是待实现的 Tab，与顶部基本信息区是两回事（决策 D4） */
+/** 主 Tab（下划线高亮）。注意：此处"控糖目标"是 Tab 内容页，与顶部基本信息区是两回事（决策 D4） */
 const MAIN_TABS: TabItem[] = [
   { key: 'glucose', label: '血糖数据' },
-  { key: 'basic', label: '基本信息' },
+  { key: 'target', label: '控糖目标' },
   { key: 'admission', label: '出入院记录' },
 ];
 
@@ -44,7 +44,7 @@ const REPORT_DISPLAY_OPTIONS: { label: string; value: keyof GlucoseReportDisplay
  * 详情页 Tabs 区（占满剩余空间）。
  *
  * **两层 Tab 均由 URL 驱动**（R10）：选中态从 `location.pathname` 派生、切换走路由，
- * 因此 5 个内容页（基本信息 / 出入院记录 / 血糖报告 / 血糖记录 / 趋势图）刷新后都停在原处。
+ * 因此 5 个内容页（控糖目标 / 出入院记录 / 血糖报告 / 血糖记录 / 趋势图）刷新后都停在原处。
  * 内容区由 `<Outlet/>` 渲染对应子路由；本组件不再持有 Tab 状态，
  * 也不再渲染占位 `Empty`——占位已下沉到各子路由的 `DetailPlaceholder`。
  *
