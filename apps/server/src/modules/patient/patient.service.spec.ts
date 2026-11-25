@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { ERROR_CODES, GENDER, PATIENT_STATUS, PERMISSION } from '@gc/shared';
 import type { UpdatePatientInput } from '@gc/shared';
 import { Prisma } from '@prisma/client';
@@ -122,8 +123,13 @@ function createService() {
       ? (arg as (tx: typeof prisma) => Promise<unknown>)(prisma)
       : Promise.resolve(arg),
   );
-  const service = new PatientService(prisma as never);
-  return { service, prisma };
+  // 第二个依赖是控糖目标 service（建档后写快照，规格 R9）。默认给一个不抛错的桩：
+  // 快照自身的逻辑（展示集合过滤、SystemConfig 缺失不阻断）在
+  // patient-glucose-target.service.spec.ts 覆盖，本文件只验证**调用时机**与
+  // 「快照失败不阻断建档」（后者在用例内用 mockRejectedValueOnce 临时翻成抛错）。
+  const glucoseTargets = { initSnapshot: vi.fn().mockResolvedValue(undefined) };
+  const service = new PatientService(prisma as never, glucoseTargets as never);
+  return { service, prisma, glucoseTargets };
 }
 
 describe('PatientService.update — 状态与存在性', () => {
@@ -558,6 +564,7 @@ describe('PatientService.admit — R24 住院记录双写', () => {
 describe('PatientService.create — R24 建档双写', () => {
   let service: PatientService;
   let prisma: ReturnType<typeof createService>['prisma'];
+  let glucoseTargets: ReturnType<typeof createService>['glucoseTargets'];
   const admissionAt = new Date('2026-11-01T08:00:00.000Z');
 
   function createInput() {
@@ -574,7 +581,7 @@ describe('PatientService.create — R24 建档双写', () => {
   }
 
   beforeEach(() => {
-    ({ service, prisma } = createService());
+    ({ service, prisma, glucoseTargets } = createService());
     prisma.user.findFirst.mockResolvedValue({ id: 'doc-1' });
     prisma.patient.findUnique.mockResolvedValue(null); // 住院号查重通过
     prisma.patient.create.mockResolvedValue({ id: 'p-new' });
@@ -598,6 +605,25 @@ describe('PatientService.create — R24 建档双写', () => {
     });
   });
 
+  it('建档成功后初始化控糖目标快照（R9 / 裁定 G 快照语义）', async () => {
+    await service.create(allUser, createInput() as never);
+
+    expect(glucoseTargets.initSnapshot).toHaveBeenCalledTimes(1);
+    expect(glucoseTargets.initSnapshot).toHaveBeenCalledWith(allUser, 'p-new');
+  });
+
+  it('快照初始化抛错 → 建档仍返回 id（裁定 Q 失败不阻断；调用点防御性 catch）', async () => {
+    glucoseTargets.initSnapshot.mockRejectedValueOnce(new Error('deadlock'));
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+    const result = await service.create(allUser, createInput() as never);
+
+    // 关键：患者已入库就必须返回成功，否则医护会重复提交并撞 P2002 报「住院号已存在」
+    expect(result.id).toBe('p-new');
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
   it('住院号重复 → 40002，且不创建住院记录（事务未开启）', async () => {
     prisma.patient.findUnique.mockResolvedValue({ id: 'p-existing' });
 
@@ -605,6 +631,8 @@ describe('PatientService.create — R24 建档双写', () => {
       code: ERROR_CODES.PATIENT_NO_DUPLICATE,
     });
     expect(prisma.admission.create).not.toHaveBeenCalled();
+    // 建档未成功就不该写快照，否则会留下无主的控糖目标行
+    expect(glucoseTargets.initSnapshot).not.toHaveBeenCalled();
   });
 });
 

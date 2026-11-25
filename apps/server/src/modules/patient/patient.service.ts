@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import {
   ERROR_CODES,
   formatDateOnly,
@@ -31,6 +31,7 @@ import { BusinessException } from '../../common/exceptions/business.exception';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import type { AuthenticatedUser } from '../../common/types';
 import { isUniqueConstraintViolation } from '../../common/utils/prisma-error';
+import { PatientGlucoseTargetService } from './patient-glucose-target.service';
 
 export interface PatientListResult {
   items: PatientListItem[];
@@ -144,7 +145,13 @@ const PATIENT_DETAIL_SELECT = Prisma.validator<Prisma.PatientSelect>()({
 
 @Injectable()
 export class PatientService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(PatientService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    /** 仅用于建档后写控糖目标快照（规格 R9）；依赖单向，无循环 */
+    private readonly glucoseTargets: PatientGlucoseTargetService,
+  ) {}
 
   /**
    * 患者建档（添加患者）。
@@ -228,6 +235,21 @@ export class PatientService {
         });
         return patient;
       });
+
+      // 控糖目标快照（规格 R9 / 裁定 G、Q）：在建档事务**提交之后**执行。
+      // 刻意不放进上面的 $transaction —— 若在事务内，初始化失败会连带回滚建档，
+      // 与裁定 Q「失败不阻断建档」直接冲突（Prisma 无 savepoint，做不到局部失败）。
+      // 这里的 .catch 是**防御性冗余**：initSnapshot 自身已吞异常并记 warn，
+      // 但万一将来该契约被破坏，异常会落到下面的 catch 被重新抛出 —— 那时患者已入库
+      // 却返回失败，医护会重复提交并撞 P2002 报「住院号已存在」，比阻断建档更难排查。
+      // 两条断言（建档后确实调用、抛错时仍返回 id）由 patient.service.spec 锁定。
+      await this.glucoseTargets.initSnapshot(user, created.id).catch((error) => {
+        this.logger.warn(
+          `[patient] 建档已成功但控糖目标快照初始化失败，患者 ${created.id} 的目标留空（不阻断）`,
+          error instanceof Error ? error.stack : String(error),
+        );
+      });
+
       return { id: created.id };
     } catch (error) {
       if (isUniqueConstraintViolation(error)) {
