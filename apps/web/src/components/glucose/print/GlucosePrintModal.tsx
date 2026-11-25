@@ -211,6 +211,8 @@ export default function GlucosePrintModal({
       // 宽度 = A4 页宽 + 预览留白 + Modal 内容内边距(48) + 纵向滚动条余量(48)：
       // 原 +48 恰好等于页宽+留白，纵向滚动条占宽后出现横向滚动（2026-11-25 修复）
       width={PRINT_PAGE_WIDTH_PX + PREVIEW_PADDING * 2 + 96}
+      // 上边距：antd 默认 100px 太高，需求人裁定改 20px（2026-11-25，作用于 .ant-modal）
+      style={{ top: 20 }}
       styles={{ body: { padding: 0 } }}
       footer={[
         <Button key="cancel" onClick={onClose}>
