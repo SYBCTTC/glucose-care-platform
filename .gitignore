@@ -24,6 +24,9 @@ Thumbs.db
 .devtools/
 *.local
 
+# 浏览器自动化工具产物（playwright-cli 的截图 / 页面快照 / console 日志），仅供本地 e2e 验证
+.playwright-cli/
+
 # 构建产物与缓存
 .cache/
 .vite/
