@@ -202,6 +202,29 @@ export default function PatientGlucoseTargetEditModal({
     color: token.colorTextSecondary,
   } as const;
 
+  /**
+   * 时段行「~」分隔符样式（**不可复用 `labelStyle`**）。
+   *
+   * `labelStyle` 的 `flex: 0 0 92px` 是为容纳「低血糖预警：」这类六字 label 预留的定宽；
+   * 套在只有一个字符的「~」上会白占 92px。时段行一行要塞「label + 下限 + ~ + 上限 + 单位」五段，
+   * 在 760 宽弹框的半栏（约 344px）里，这 92px 会把两个 `flex: 1` 的输入框各挤到约 47px ——
+   * 而 `InputNumber` 聚焦/悬停时右侧还要显示步进按钮（约 22px），加上左右内边距后
+   * 留给数字的宽度不足 25px，连「33.3」都会被裁切，这正是「聚焦后看不清数字」的成因。
+   *
+   * 改为 `flex: none`（宽度只取字符本身）+ **左右等值**内边距：容器 `gap` 两侧本就相同，
+   * 故「~」与左右输入框严格等距；腾出的约 76px 全部还给两个输入框（各约 85px，宽度近乎翻倍）。
+   * 预警值行一行只有一个输入框、不存在该挤压问题，故保持原样不动。
+   */
+  const separatorStyle = {
+    flex: 'none',
+    height: token.controlHeight,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: `0 ${token.marginXXS}px`,
+    color: token.colorTextSecondary,
+  } as const;
+
   const numberProps = {
     style: { width: '100%' },
     min: GLUCOSE_VALUE_MIN,
@@ -272,7 +295,7 @@ export default function PatientGlucoseTargetEditModal({
                 >
                   <InputNumber {...numberProps} aria-label={`${item.timeSlotName}目标下限`} />
                 </Form.Item>
-                <span style={labelStyle} aria-hidden>
+                <span style={separatorStyle} aria-hidden>
                   ~
                 </span>
                 <Form.Item
