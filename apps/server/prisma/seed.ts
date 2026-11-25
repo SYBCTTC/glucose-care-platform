@@ -71,7 +71,11 @@ async function main(): Promise<void> {
       // 重跑 seed 即重置演示状态：统一密码；默认未改密，便于反复演示首次强制改密。
       // phoneCipher 也必须刷新：它由 PATIENT_FIELD_KEY 加密，换密钥后旧密文解不开，
       // 若 update 分支不重加密，重灌 seed 也救不回账号手机号（患者侧同理，见下方 patient.upsert）。
-      update: { passwordHash, mustChangePassword: requireChangePassword, phoneCipher: cipher(phone) },
+      update: {
+        passwordHash,
+        mustChangePassword: requireChangePassword,
+        phoneCipher: cipher(phone),
+      },
       create: {
         username,
         name,
@@ -91,9 +95,22 @@ async function main(): Promise<void> {
   }
 
   // dr.wang 作为"已正常登录、无需强制改密"的演示账号（区别于其他需首次改密的账号）
-  const doctorWang = await ensureUser('dr.wang', '王医生', '13800000001', endocrinology.id, 'DOCTOR', false);
+  const doctorWang = await ensureUser(
+    'dr.wang',
+    '王医生',
+    '13800000001',
+    endocrinology.id,
+    'DOCTOR',
+    false,
+  );
   const nurseLi = await ensureUser('nurse.li', '李护士', '13800000002', endocrinology.id, 'NURSE');
-  const headNurse = await ensureUser('head.zhou', '周护士长', '13800000003', endocrinology.id, 'NURSE_HEAD');
+  const headNurse = await ensureUser(
+    'head.zhou',
+    '周护士长',
+    '13800000003',
+    endocrinology.id,
+    'NURSE_HEAD',
+  );
   // 其他科室账号：用于验证跨科室越权被拒
   const doctorChen = await ensureUser('dr.chen', '陈医生', '13800000004', cardiology.id, 'DOCTOR');
   // 最高权限演示账号：SYS_ADMIN，可查看/使用全部功能（系统管理、人员管理等均可见）
@@ -188,8 +205,44 @@ async function main(): Promise<void> {
   // ---------- 批量演示患者：3 条基础数据 + 997 条生成数据 = 1000 ----------
   const BULK_INPATIENT_COUNT = 698;
   const BULK_DISCHARGED_COUNT = 299;
-  const surnames = ['张', '王', '李', '赵', '刘', '陈', '杨', '黄', '周', '吴', '徐', '孙', '胡', '朱', '高', '林'];
-  const givenNames = ['伟', '芳', '娜', '敏', '静', '强', '磊', '军', '洋', '勇', '艳', '杰', '娟', '涛', '明', '超', '秀英', '桂英'];
+  const surnames = [
+    '张',
+    '王',
+    '李',
+    '赵',
+    '刘',
+    '陈',
+    '杨',
+    '黄',
+    '周',
+    '吴',
+    '徐',
+    '孙',
+    '胡',
+    '朱',
+    '高',
+    '林',
+  ];
+  const givenNames = [
+    '伟',
+    '芳',
+    '娜',
+    '敏',
+    '静',
+    '强',
+    '磊',
+    '军',
+    '洋',
+    '勇',
+    '艳',
+    '杰',
+    '娟',
+    '涛',
+    '明',
+    '超',
+    '秀英',
+    '桂英',
+  ];
 
   for (let index = 0; index < BULK_INPATIENT_COUNT + BULK_DISCHARGED_COUNT; index += 1) {
     const isInpatient = index < BULK_INPATIENT_COUNT;
@@ -197,16 +250,30 @@ async function main(): Promise<void> {
     const patientNo = `P2026${String(index + 4).padStart(6, '0')}`;
     const name = `${surnames[index % surnames.length]}${givenNames[index % givenNames.length]}`;
     const admissionAt = isInpatient
-      ? dayjs().subtract((index % 30) + 1, 'day').hour(8).minute(0).second(0)
-      : dayjs().subtract((index % 40) + 20, 'day').hour(8).minute(0).second(0);
+      ? dayjs()
+          .subtract((index % 30) + 1, 'day')
+          .hour(8)
+          .minute(0)
+          .second(0)
+      : dayjs()
+          .subtract((index % 40) + 20, 'day')
+          .hour(8)
+          .minute(0)
+          .second(0);
     const dischargeAt = isInpatient
       ? null
-      : dayjs().subtract((index % 15) + 1, 'day').hour(10).minute(0).second(0);
+      : dayjs()
+          .subtract((index % 15) + 1, 'day')
+          .hour(10)
+          .minute(0)
+          .second(0);
     const data = {
       nameCipher: cipher(name),
       nameMasked: maskName(name),
       gender: index % 2 === 0 ? 'MALE' : 'FEMALE',
-      birthDate: dayjs().subtract(20 + (index % 70), 'year').toDate(),
+      birthDate: dayjs()
+        .subtract(20 + (index % 70), 'year')
+        .toDate(),
       bedNo: `${isEndocrinology ? '12' : '15'}-${String((index % 60) + 1).padStart(2, '0')}`,
       departmentId: isEndocrinology ? endocrinology.id : cardiology.id,
       status: isInpatient ? ('INPATIENT' as const) : ('DISCHARGED' as const),
@@ -224,7 +291,14 @@ async function main(): Promise<void> {
   }
 
   // ---------- 最近血糖：每位患者 3~5 条，列表取 measuredAt 最新一条 ----------
-  const mealContexts = ['FASTING', 'BREAKFAST_POST', 'LUNCH_PRE', 'LUNCH_POST', 'DINNER_POST', 'BEDTIME'];
+  const mealContexts = [
+    'FASTING',
+    'BREAKFAST_POST',
+    'LUNCH_PRE',
+    'LUNCH_POST',
+    'DINNER_POST',
+    'BEDTIME',
+  ];
   const patientIds = patients.map((patient) => patient.id);
   await prisma.glucoseRecord.deleteMany({ where: { patientId: { in: patientIds } } });
   const glucoseRows: Array<{
@@ -240,7 +314,9 @@ async function main(): Promise<void> {
   patients.forEach((patient, patientIndex) => {
     const recordCount = 3 + (patientIndex % 3);
     for (let recordIndex = 0; recordIndex < recordCount; recordIndex += 1) {
-      const valueMmolL = Number((4.2 + ((patientIndex * 7 + recordIndex * 11) % 90) / 10).toFixed(1));
+      const valueMmolL = Number(
+        (4.2 + ((patientIndex * 7 + recordIndex * 11) % 90) / 10).toFixed(1),
+      );
       glucoseRows.push({
         patientId: patient.id,
         // 0 偏低 / 1 正常 / 2 偏高：与 UI-DESIGN-TOKENS 5.1 阈值一致
@@ -295,6 +371,13 @@ async function main(): Promise<void> {
   // ---------- 系统配置 ----------
   const configs = [
     { key: 'device.offline_hours', value: '24', description: '设备离线判定时长（小时）' },
+    // 血糖告警阈值（AGENTS.md §4.3）：SystemConfigService 读不到就抛 10000 拒绝写入、
+    // 不退回任何默认常量，故这两行必须由 seed 落库，否则新环境录入血糖直接 500。
+    // ⚠️ system-config.service.ts 的注释长期声称"表里已有的三行由 seed 写入"，
+    // 但 seed 里实际只有设备离线一行 —— 文档与实现不符，2026-11-25 补齐
+    // （规格 docs/specs/patient-glucose-target.md 裁定 X）。值与实库现状一致，upsert 幂等。
+    { key: 'glucose.low_threshold', value: '3.9', description: '低血糖告警阈值（mmol/L）' },
+    { key: 'glucose.high_threshold', value: '16.7', description: '高血糖告警阈值（mmol/L）' },
   ];
   for (const config of configs) {
     await prisma.systemConfig.upsert({
@@ -343,7 +426,9 @@ async function main(): Promise<void> {
     });
   }
 
-  console.warn('[seed] 完成。演示账号：dr.wang / nurse.li / head.zhou / dr.chen，密码均为 Gc@2026pass');
+  console.warn(
+    '[seed] 完成。演示账号：dr.wang / nurse.li / head.zhou / dr.chen，密码均为 Gc@2026pass',
+  );
 }
 
 main()

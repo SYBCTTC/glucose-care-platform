@@ -28,6 +28,7 @@
     "db:seed": "pnpm --filter @gc/server prisma db seed",
     "db:reencrypt": "pnpm --filter @gc/server db:reencrypt",
     "db:remask": "pnpm --filter @gc/server db:remask",
+    "db:backfill-targets": "pnpm --filter @gc/server db:backfill-targets",
     "prepare": "husky"
   },
   "devDependencies": {

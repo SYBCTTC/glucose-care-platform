@@ -14,7 +14,8 @@
     "prisma": "prisma",
     "db:seed": "tsx prisma/seed.ts",
     "db:reencrypt": "tsx prisma/reencrypt-patient-fields.ts",
-    "db:remask": "tsx prisma/remask-patient-fields.ts"
+    "db:remask": "tsx prisma/remask-patient-fields.ts",
+    "db:backfill-targets": "tsx prisma/backfill-glucose-targets.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
