@@ -1,6 +1,7 @@
 export * from './schema';
 export * from './date';
 export * from './patient/schema';
+export * from './patient/target-schema';
 export * from './glucose/schema';
 export * from './device/schema';
 export * from './auth/schema';
