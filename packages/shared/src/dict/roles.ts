@@ -38,6 +38,8 @@ export const PERMISSION = {
   GLUCOSE_UPDATE: 'glucose:update',
   /** 作废血糖（软删除，R25）；比编辑更敏感，仅护士长/系统管理员（2026-11-20 裁定 Q8） */
   GLUCOSE_DELETE: 'glucose:delete',
+  /** 血糖数据打印（R28）：打印按钮显隐 + 明文姓名接口 + 打印留痕接口共用（裁定 Q5/Q6） */
+  GLUCOSE_PRINT: 'glucose:print',
   DEVICE_VIEW: 'device:view',
   DEVICE_MANAGE: 'device:manage',
   AUDIT_VIEW: 'audit:view',
@@ -86,6 +88,8 @@ export const ROLE_PERMISSIONS: Record<RoleCode, PermissionCode[]> = {
     PERMISSION.GLUCOSE_CREATE,
     // R25 裁定 Q8：医生可编辑血糖（同 create 四角色）；**不授予** glucose:delete（删除属管理动作）
     PERMISSION.GLUCOSE_UPDATE,
+    // R28 裁定 Q5：医生可打印血糖数据（同 create 四角色）
+    PERMISSION.GLUCOSE_PRINT,
     PERMISSION.DEPARTMENT_VIEW,
     PERMISSION.OPERATOR_VIEW,
     PERMISSION.DICT_VIEW,
@@ -107,6 +111,8 @@ export const ROLE_PERMISSIONS: Record<RoleCode, PermissionCode[]> = {
     PERMISSION.GLUCOSE_CREATE,
     // R25 裁定 Q8：护士可编辑血糖；不授予 glucose:delete
     PERMISSION.GLUCOSE_UPDATE,
+    // R28 裁定 Q5：护士可打印血糖数据
+    PERMISSION.GLUCOSE_PRINT,
     PERMISSION.DICT_VIEW,
   ],
   NURSE_HEAD: [
@@ -130,6 +136,8 @@ export const ROLE_PERMISSIONS: Record<RoleCode, PermissionCode[]> = {
     // R25 裁定 Q8：护士长可编辑 + 可作废（删除属管理动作）
     PERMISSION.GLUCOSE_UPDATE,
     PERMISSION.GLUCOSE_DELETE,
+    // R28 裁定 Q5：护士长可打印血糖数据
+    PERMISSION.GLUCOSE_PRINT,
     PERMISSION.DICT_VIEW,
   ],
   DEVICE_ADMIN: [
@@ -170,6 +178,8 @@ export const ROLE_PERMISSIONS: Record<RoleCode, PermissionCode[]> = {
     // R25：SYS_ADMIN 不变式"含全部权限点"，新权限点必须同步加到这里
     PERMISSION.GLUCOSE_UPDATE,
     PERMISSION.GLUCOSE_DELETE,
+    // R28 裁定 Q5：SYS_ADMIN 不变式"含全部权限点"，同步授予打印
+    PERMISSION.GLUCOSE_PRINT,
     PERMISSION.DICT_VIEW,
   ],
 };
