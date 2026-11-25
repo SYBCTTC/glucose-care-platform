@@ -200,8 +200,9 @@ export function ReportCell({
                 导致「(时间) 独占一行时不居中」；gap 只作用于同行相邻项，wrap+justifyContent
                 保证每行真居中。值与时间段加 nowrap：`(06:30)` 成为不可拆整体（要么同排要么
                 整段换行），杜绝 td 的 overflow-wrap:break-word 把段内断出孤儿 `)`；
-                来源时段名段不加 nowrap（如 `(强化-下午)` ≈72px > 打印列内容宽 ≈56px，
-                加了会撑破格子），保留自然换行。 */}
+                来源时段名段同加 nowrap（2026-11-25 需求人裁定，`(强化-下午)` 保持不可拆整体）。
+                已知取舍：名段宽 ≈68-72px > 打印列内容宽 ≈56px，独占一行时会横向溢出格子
+                （flex nowrap 项不收缩），属该裁定的接受范围。 */}
             <div
               className="gc-num"
               style={{
@@ -213,7 +214,9 @@ export function ReportCell({
             >
               <span style={{ color: dict?.color ?? undefined, whiteSpace: 'nowrap' }}>{text}</span>
               {showTime ? <span style={{ whiteSpace: 'nowrap' }}>({entry.time})</span> : null}
-              {entry.sourceSlotName ? <span>({entry.sourceSlotName})</span> : null}
+              {entry.sourceSlotName ? (
+                <span style={{ whiteSpace: 'nowrap' }}>({entry.sourceSlotName})</span>
+              ) : null}
             </div>
             {display.operator ? (
               <div style={{ color: token.colorTextSecondary }}>{entry.nurseName ?? '-'}</div>

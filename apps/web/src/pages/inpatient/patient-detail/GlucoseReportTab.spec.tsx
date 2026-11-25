@@ -104,14 +104,14 @@ describe('ReportCell — 血糖报告单元格（R3/R4）', () => {
     expect(textOf(render([entry()]))).not.toContain('(08:30)(');
   });
 
-  it('有强化时段：三段由 flex columnGap 各留 6px 间距，时间段 nowrap 不可拆（2026-11-25 变更）', () => {
+  it('有强化时段：三段由 flex columnGap 各留 6px 间距，三段均 nowrap 不可拆（2026-11-25 变更）', () => {
     const html = render([
       entry({ sourceType: TIME_SLOT_CATEGORY.INTENSIVE, sourceSlotName: '强化-上午' }),
     ]);
 
     expect(html).toContain('display:flex;flex-wrap:wrap;justify-content:center;column-gap:6px');
     expect(html).toContain('<span style="white-space:nowrap">(08:30)</span>');
-    expect(html).toContain('<span>(强化-上午)</span>');
+    expect(html).toContain('<span style="white-space:nowrap">(强化-上午)</span>');
   });
 
   it('无强化时段：`值` 与 `(时间)` 之间 6px 间距（columnGap，2026-11-25 变更）', () => {
