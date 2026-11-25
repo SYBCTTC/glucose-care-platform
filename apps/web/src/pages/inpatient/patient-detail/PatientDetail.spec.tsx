@@ -130,6 +130,8 @@ function renderTabs(pathname: string): string {
           // R25：context 契约新增两项（本测试只渲染 Tabs 壳，给稳定空值即可）
           onGlucoseChanged: () => {},
           patient: { id: 'p1', nameMasked: '林*', status: 'INPATIENT' },
+          // R28：完整详情（打印头数据源）；本测试只渲染 Tabs 壳，最小占位即可
+          patientDetail: { id: 'p1', nameMasked: '林*', status: 'INPATIENT' } as PatientDetail,
         }}
       />
     </MemoryRouter>,

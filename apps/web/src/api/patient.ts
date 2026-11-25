@@ -5,6 +5,7 @@ import type {
   PatientAdmitResult,
   PatientDetail,
   PatientListItem,
+  PatientNamePlainResult,
   PatientStatus,
   PatientUpdateResult,
 } from '@gc/shared';
@@ -104,6 +105,16 @@ export function updatePatient(
 /** 患者详情（编辑弹窗回填）：属敏感查询，后端会写 PATIENT_VIEW 审计 */
 export function fetchPatientDetail(id: string): Promise<PatientDetail> {
   return http.get<PatientDetail>(`/patients/${id}`);
+}
+
+/**
+ * R28：明文姓名（打印头专用，docs/specs/glucose-print.md §3 接口 1）。
+ * 需 `glucose:print` 权限；**每次调用后端记一条 PATIENT_NAME_PLAIN_VIEW 审计**（访问即留痕），
+ * 因此只在打开打印预览时调用一次，不得轮询/缓存复用。
+ * `name: null` = 密文不可解（历史不可逆密文），调用方回退展示 nameMasked（规格 §4 规则 15）。
+ */
+export function fetchPatientNamePlain(id: string): Promise<PatientNamePlainResult> {
+  return http.get<PatientNamePlainResult>(`/patients/${id}/name-plain`);
 }
 
 /**

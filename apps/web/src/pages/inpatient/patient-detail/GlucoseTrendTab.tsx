@@ -4,7 +4,7 @@ import { DotChartOutlined, LineChartOutlined } from '@ant-design/icons';
 import { Alert, Button, Checkbox, Empty, Spin, message, theme } from 'antd';
 import { useOutletContext, useParams } from 'react-router-dom';
 import ReactECharts from 'echarts-for-react';
-import { DICT_TYPE } from '@gc/shared';
+import { DICT_TYPE, PERMISSION } from '@gc/shared';
 import type { DictItemOption } from '@gc/shared';
 import {
   FALLBACK_FORM_STATE,
@@ -15,7 +15,10 @@ import {
 } from '@/components/glucose/GlucoseQueryForm';
 import type { GlucoseQueryFormState } from '@/components/glucose/GlucoseQueryForm';
 import { GlucoseToolbar } from '@/components/glucose/GlucoseToolbar';
+import GlucosePrintModal from '@/components/glucose/print/GlucosePrintModal';
 import { useFullscreen } from '@/components/glucose/useFullscreen';
+import { PRINT_IMAGE_BACKGROUND } from '@/components/print/printConstants';
+import { useAuthStore } from '@/store/auth';
 import { useCommonDataStore } from '@/store/common-data';
 import { useThemeStore } from '@/store/theme';
 import { buildTrendOption } from '@/styles/chartTheme';
@@ -51,7 +54,8 @@ const EMPTY_RESULT_TYPES: DictItemOption[] = [];
 
 export default function GlucoseTrendTab() {
   const { id } = useParams<{ id: string }>();
-  const { glucoseVersion, onGlucoseChanged, patient } = useOutletContext<DetailChildContext>();
+  const { glucoseVersion, onGlucoseChanged, patient, patientDetail } =
+    useOutletContext<DetailChildContext>();
   const { token } = theme.useToken();
   const mode = useThemeStore((state) => state.mode);
   // R23/R26：全屏态走公共 hook；趋势图接 onResize → chart.resize()（glucose-domain 图表节：
@@ -105,6 +109,23 @@ export default function GlucoseTrendTab() {
   const [reviewRecordId, setReviewRecordId] = useState<string | null>(null);
   // 图表形态切换（P3-7 增补）：默认折线图；容器右上角按钮在折线↔散点间切换，按钮文案/图标显示**目标**形态
   const [chartType, setChartType] = useState<TrendChartType>('line');
+
+  // R28：打印门控（裁定 Q5/Q6/B3）——无 glucose:print 不传 onPrint（按钮不渲染，服务端接口兜底）；
+  // 无数值型点（不成图）时禁用。趋势打印不取数：打开预览瞬间把当前图表转成图片（裁定 C3
+  // 所见即所得——含当前时段过滤与折线/散点形态），pixelRatio 2 保证清晰度、白底（规格 §4 规则 14）
+  const hasPermission = useAuthStore((state) => state.hasPermission);
+  const canPrint = hasPermission(PERMISSION.GLUCOSE_PRINT);
+  const [printOpen, setPrintOpen] = useState(false);
+  const [chartImage, setChartImage] = useState<string | null>(null);
+  const handleOpenPrint = useCallback(() => {
+    const instance = chartRef.current?.getEchartsInstance();
+    setChartImage(
+      instance
+        ? instance.getDataURL({ pixelRatio: 2, backgroundColor: PRINT_IMAGE_BACKGROUND })
+        : null,
+    );
+    setPrintOpen(true);
+  }, []);
   // ECharts 点击事件：从数据点附带的 recordId 定位记录（buildTrendOption 已埋入）
   const handleChartClick = useCallback((params: unknown) => {
     const recordId = (params as { data?: { recordId?: string } })?.data?.recordId;
@@ -260,6 +281,8 @@ export default function GlucoseTrendTab() {
             onChange={setQueryForm}
             onSearch={handleSearch}
             onReset={handleReset}
+            onPrint={canPrint ? handleOpenPrint : undefined}
+            printDisabled={!data || data.points.length === 0}
           />
         }
         fullscreen={fullscreen}
@@ -357,6 +380,20 @@ export default function GlucoseTrendTab() {
         onClose={() => setReviewRecordId(null)}
         onChanged={onGlucoseChanged}
       />
+
+      {/* R28：打印预览（三 Tab 共用 Modal）——趋势图不取数，直接用打开时生成的图表图片；
+          单页不分页、无页脚（裁定 Q3/C3）。点「打印」先留痕（GLUCOSE_PRINT）再触发浏览器打印 */}
+      {canPrint ? (
+        <GlucosePrintModal
+          open={printOpen}
+          onClose={() => setPrintOpen(false)}
+          printType="trend"
+          patient={patientDetail}
+          range={appliedRange}
+          chartImage={chartImage}
+          auditCount={data?.stats.total ?? 0}
+        />
+      ) : null}
     </div>
   );
 }

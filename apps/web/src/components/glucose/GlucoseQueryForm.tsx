@@ -3,11 +3,7 @@ import { Button, DatePicker, Select, theme } from 'antd';
 import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
 import { PATIENT_STATUS } from '@gc/shared';
-import type {
-  AdmissionDepartmentOption,
-  AdmissionOption,
-  AdmissionsResponse,
-} from '@gc/shared';
+import type { AdmissionDepartmentOption, AdmissionOption, AdmissionsResponse } from '@gc/shared';
 
 /**
  * 血糖数据三页共用的**查询表单**（公共四项 + `extra` 扩展插槽）。
@@ -58,10 +54,7 @@ function findAdmission(data: AdmissionsResponse, admissionId: string): Admission
   return data.admissions.find((item) => item.id === admissionId) ?? null;
 }
 
-function findStay(
-  data: AdmissionsResponse,
-  stayId: string,
-): AdmissionDepartmentOption | null {
+function findStay(data: AdmissionsResponse, stayId: string): AdmissionDepartmentOption | null {
   for (const admission of data.admissions) {
     const stay = admission.departments.find((item) => item.id === stayId);
     if (stay) {
@@ -74,7 +67,11 @@ function findStay(
 /** 本次住院的默认科室 = 进行中停留（endedAt null）；历史住院 = 第一条（入院科室，裁定 Q9） */
 function defaultStayOf(admission: AdmissionOption): AdmissionDepartmentOption | null {
   if (admission.isCurrent) {
-    return admission.departments.find((stay) => stay.endedAt === null) ?? admission.departments[0] ?? null;
+    return (
+      admission.departments.find((stay) => stay.endedAt === null) ??
+      admission.departments[0] ??
+      null
+    );
   }
   return admission.departments[0] ?? null;
 }
@@ -312,6 +309,14 @@ export interface GlucoseQueryFormProps {
    * 特有部分各页自理；按钮恒在最右，视觉顺序一致。
    */
   extra?: ReactNode;
+  /**
+   * R28：打印入口。不传 = 不渲染打印按钮（权限门控在调用页：无 `glucose:print`
+   * 就不传，前端显隐只是体验，打印相关接口由服务端强制校验兜底，裁定 Q6）。
+   * 按钮排在「重置」之后，与「查询」同类型（type="primary"，需求第 1 条）。
+   */
+  onPrint?: () => void;
+  /** R28：已应用范围内无数据 → 打印按钮禁用（裁定 B3；数据门控由调用页判定） */
+  printDisabled?: boolean;
 }
 
 /**
@@ -326,13 +331,14 @@ export function GlucoseQueryForm({
   onSearch,
   onReset,
   extra,
+  onPrint,
+  printDisabled,
 }: GlucoseQueryFormProps) {
   const { token } = theme.useToken();
   const disabled = data === null || state === null;
 
   const admissionOptions = data ? buildAdmissionOptions(data) : [];
-  const departmentOptions =
-    data && state ? buildDepartmentOptions(data, state.admissionId) : [];
+  const departmentOptions = data && state ? buildDepartmentOptions(data, state.admissionId) : [];
   const bounds = data && state ? deriveTimeBounds(data, state) : { min: null, max: null };
 
   const disabledDate = (current: Dayjs) => {
@@ -438,6 +444,12 @@ export function GlucoseQueryForm({
       <Button disabled={disabled} onClick={onReset}>
         重置
       </Button>
+      {/* R28：打印按钮（重置之后、与查询同类型）；onPrint 未传 = 无权限，不渲染（裁定 Q6） */}
+      {onPrint ? (
+        <Button type="primary" disabled={disabled || printDisabled} onClick={onPrint}>
+          打印
+        </Button>
+      ) : null}
     </div>
   );
 }

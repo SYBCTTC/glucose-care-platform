@@ -27,6 +27,7 @@ import {
 } from '@/components/glucose/GlucoseQueryForm';
 import type { GlucoseQueryFormState } from '@/components/glucose/GlucoseQueryForm';
 import { GlucoseToolbar } from '@/components/glucose/GlucoseToolbar';
+import GlucosePrintModal from '@/components/glucose/print/GlucosePrintModal';
 import { useFullscreen } from '@/components/glucose/useFullscreen';
 import { useAuthStore } from '@/store/auth';
 import { useCommonDataStore } from '@/store/common-data';
@@ -162,7 +163,11 @@ export function ReportCell({
   // R25：有添加入口时空白格渲染为可点击填充块
   if (!cell?.entries.length) {
     return onEmptyClick ? (
-      <ClickableCellArea onClick={onEmptyClick} ariaLabel="添加血糖" minHeight={EMPTY_CELL_MIN_HEIGHT} />
+      <ClickableCellArea
+        onClick={onEmptyClick}
+        ariaLabel="添加血糖"
+        minHeight={EMPTY_CELL_MIN_HEIGHT}
+      />
     ) : null;
   }
 
@@ -179,7 +184,9 @@ export function ReportCell({
         // 判定"是否数值型"以 valueMmolL 为准，不在前端复制 VALUE_RESULT_CODES 码集
         // （否则与 LastGlucose.tsx 形成第二份实现，两处口径迟早漂移）
         const text =
-          entry.valueMmolL === null ? (dict?.label ?? entry.resultType) : entry.valueMmolL.toFixed(1);
+          entry.valueMmolL === null
+            ? (dict?.label ?? entry.resultType)
+            : entry.valueMmolL.toFixed(1);
         // 规则 6：特殊时段来源（含弃用的特殊时段、归组失败兜底）时间恒展示，不受「检测时间」勾选控制
         const showTime = display.time || entry.sourceType === TIME_SLOT_CATEGORY.SPECIAL;
 
@@ -207,7 +214,9 @@ export function ReportCell({
         return (
           <div key={entry.id} style={index > 0 ? separatorStyle : undefined}>
             {onEntryClick ? (
-              <ClickableCellArea onClick={() => onEntryClick(entry.id)}>{content}</ClickableCellArea>
+              <ClickableCellArea onClick={() => onEntryClick(entry.id)}>
+                {content}
+              </ClickableCellArea>
             ) : (
               content
             )}
@@ -284,7 +293,7 @@ export function buildAddPrefill(
  */
 export default function GlucoseReportTab() {
   const { id } = useParams<{ id: string }>();
-  const { glucoseVersion, reportDisplay, onGlucoseChanged, patient } =
+  const { glucoseVersion, reportDisplay, onGlucoseChanged, patient, patientDetail } =
     useOutletContext<DetailChildContext>();
   const { token } = theme.useToken();
   const [page, setPage] = useState(1);
@@ -324,6 +333,12 @@ export default function GlucoseReportTab() {
   const handleEmptyClick = useCallback((date: string, slotCode: string) => {
     setAddPrefill(buildAddPrefill(date, slotCode, dayjs()));
   }, []);
+
+  // R28：打印门控（裁定 Q5/Q6/B3）——无 glucose:print 不传 onPrint（按钮不渲染，
+  // 服务端接口兜底）；已应用范围内无日期（total=0）禁用。预览数据在 Modal 打开时
+  // 按范围全量拉取（裁定 B1），打印跟随展示勾选 reportDisplay（规格 §4 规则 6）
+  const canPrint = hasPermission(PERMISSION.GLUCOSE_PRINT);
+  const [printOpen, setPrintOpen] = useState(false);
 
   // 换患者时回到第 1 页、退出全屏并重置查询表单：同一路由不同 :id 不会重挂载组件，
   // state 需手动重置。表单置回 null（未就绪）→ 报表请求挂起，等新患者的住院记录到达
@@ -450,6 +465,8 @@ export default function GlucoseReportTab() {
             onChange={setQueryForm}
             onSearch={handleSearch}
             onReset={handleReset}
+            onPrint={canPrint ? () => setPrintOpen(true) : undefined}
+            printDisabled={!data || data.total === 0}
           />
         }
         fullscreen={fullscreen}
@@ -511,6 +528,19 @@ export default function GlucoseReportTab() {
         onClose={() => setReviewRecordId(null)}
         onChanged={onGlucoseChanged}
       />
+
+      {/* R28：打印预览（三 Tab 共用 Modal）——打开时拉明文姓名（访问即留痕）与
+          范围内全量报表；点「打印」先留痕（GLUCOSE_PRINT）再触发浏览器打印（裁定 Q11） */}
+      {canPrint ? (
+        <GlucosePrintModal
+          open={printOpen}
+          onClose={() => setPrintOpen(false)}
+          printType="report"
+          patient={patientDetail}
+          range={appliedRange}
+          reportDisplay={reportDisplay}
+        />
+      ) : null}
     </div>
   );
 }

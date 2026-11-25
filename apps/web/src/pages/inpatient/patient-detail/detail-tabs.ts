@@ -1,3 +1,5 @@
+import type { PatientDetail } from '@gc/shared';
+
 /**
  * 患者详情页的**子路径与 Tab 派生规则**——唯一来源。
  *
@@ -71,6 +73,12 @@ export interface DetailOutletContext {
   onGlucoseChanged: () => void;
   /** R25：患者摘要（壳层只在 data 已加载分支渲染 Outlet，故恒非空） */
   patient: { id: string; nameMasked: string; status: string };
+  /**
+   * R28：完整患者详情——打印头「患者信息」区的数据源（性别/年龄/床号/住院号/
+   * 科室/责任医护/出入院日期/状态）。壳层已为基本信息页拉过详情，直接透传，
+   * 打印不为它多发请求；姓名明文另走 name-plain 接口（访问即留痕）。
+   */
+  patientDetail: PatientDetail;
 }
 
 /**

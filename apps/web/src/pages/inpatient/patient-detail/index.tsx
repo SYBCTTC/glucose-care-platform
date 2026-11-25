@@ -107,6 +107,8 @@ export default function PatientDetailPage() {
               onGlucoseChanged: handleGlucoseChanged,
               // R25：子路由内血糖弹框所需的患者摘要（此分支 data 恒非空）
               patient: { id: data.id, nameMasked: data.nameMasked, status: data.status },
+              // R28：完整详情透传给打印头（此分支 data 恒非空；不为打印多发请求）
+              patientDetail: data,
             }}
           />
         </>

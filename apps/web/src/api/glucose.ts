@@ -148,3 +148,112 @@ export function updateGlucose(
 export function voidGlucose(patientId: string, recordId: string): Promise<GlucoseVoidResult> {
   return http.delete<GlucoseVoidResult>(`/patients/${patientId}/glucose/${recordId}`);
 }
+
+/* -------------------------------------------------------------------------- */
+/* R28：血糖数据打印（docs/specs/glucose-print.md §3）                           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 打印全量拉取的页大小：取查询契约上限（glucoseReportQuerySchema / glucoseRecordQuerySchema
+ * 的 pageSize max=100），不放宽服务端校验（裁定 Q12：全量拉取、不设总量上限）。
+ */
+const PRINT_FETCH_PAGE_SIZE = 100;
+
+/** 打印取数范围：与 R24 appliedRange 同形（秒粒度本地时间串，单侧可缺省） */
+export interface GlucosePrintRange {
+  startTime?: string;
+  endTime?: string;
+}
+
+/**
+ * R28：打印用**全量**血糖报告（裁定 B1：已应用范围内全部日期，不止当前分页页）。
+ * 报表按日期数服务端分页（total = 日期数）：先拉第 1 页拿 total，再并行拉余页合并 rows。
+ * stats/columns 是范围级口径（与页无关），沿用第 1 页响应的。
+ */
+export async function fetchAllGlucoseReport(
+  patientId: string,
+  range: GlucosePrintRange,
+): Promise<GlucoseReportResponse> {
+  const first = await fetchGlucoseReport(patientId, {
+    ...range,
+    page: 1,
+    pageSize: PRINT_FETCH_PAGE_SIZE,
+  });
+  const pageCount = Math.max(1, Math.ceil(first.total / PRINT_FETCH_PAGE_SIZE));
+  if (pageCount === 1) {
+    return first;
+  }
+  const rest = await Promise.all(
+    Array.from({ length: pageCount - 1 }, (_, index) =>
+      fetchGlucoseReport(patientId, {
+        ...range,
+        page: index + 2,
+        pageSize: PRINT_FETCH_PAGE_SIZE,
+      }),
+    ),
+  );
+  return { ...first, rows: [first.rows, ...rest.map((part) => part.rows)].flat() };
+}
+
+/**
+ * R28：打印用**全量**血糖记录（裁定 B1/Q12）。记录按条数服务端分页（total = 记录数），
+ * 循环拉页合并 items；stats 是范围级口径，沿用第 1 页响应的。
+ */
+export async function fetchAllGlucoseRecords(
+  patientId: string,
+  range: GlucosePrintRange,
+): Promise<GlucoseRecordListResponse> {
+  const first = await fetchGlucoseRecords(patientId, {
+    ...range,
+    page: 1,
+    pageSize: PRINT_FETCH_PAGE_SIZE,
+  });
+  const pageCount = Math.max(1, Math.ceil(first.total / PRINT_FETCH_PAGE_SIZE));
+  if (pageCount === 1) {
+    return first;
+  }
+  const rest = await Promise.all(
+    Array.from({ length: pageCount - 1 }, (_, index) =>
+      fetchGlucoseRecords(patientId, {
+        ...range,
+        page: index + 2,
+        pageSize: PRINT_FETCH_PAGE_SIZE,
+      }),
+    ),
+  );
+  return { ...first, items: [first.items, ...rest.map((part) => part.items)].flat() };
+}
+
+/**
+ * R28：打印留痕请求体（传输格式）。
+ * 不用 z.infer 的 GlucosePrintInput——那是服务端 transform 后的类型（startTime 已是 Date），
+ * 前端按契约传字符串（同 CreateGlucosePayload 的先例）。
+ */
+export interface GlucosePrintPayload {
+  printType: 'report' | 'record' | 'trend';
+  /** YYYY-MM-DD HH:mm:ss，本地时间；不传 = 该侧不限（与查询口径一致） */
+  startTime?: string;
+  endTime?: string;
+  /** 打印范围内 counted=true 记录数（stats.total 口径，裁定 17） */
+  count: number;
+}
+
+/** 打印留痕响应（回显审计 detail 字段） */
+export interface GlucosePrintResult {
+  printType: GlucosePrintPayload['printType'];
+  rangeFrom: string | null;
+  rangeTo: string | null;
+  count: number;
+}
+
+/**
+ * R28：打印留痕（裁定 Q10/Q11）。预览 Modal 点「打印」时调用，服务端记
+ * GLUCOSE_PRINT 审计（detail.printType/rangeFrom/rangeTo/count）；**成功后**调用方
+ * 才触发 window.print，失败则不打印（拦截器已 toast）。需 glucose:print 权限。
+ */
+export function reportGlucosePrint(
+  patientId: string,
+  payload: GlucosePrintPayload,
+): Promise<GlucosePrintResult> {
+  return http.post<GlucosePrintResult>(`/patients/${patientId}/glucose/print`, payload);
+}

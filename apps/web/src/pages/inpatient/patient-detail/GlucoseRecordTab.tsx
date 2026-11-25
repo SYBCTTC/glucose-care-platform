@@ -4,7 +4,7 @@ import { Alert, Button, Table, Tooltip, message, theme } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useOutletContext, useParams } from 'react-router-dom';
 import dayjs from 'dayjs';
-import { DICT_TYPE, GLUCOSE_RECORD_PAGE_SIZE, isGlucoseValueResult } from '@gc/shared';
+import { DICT_TYPE, GLUCOSE_RECORD_PAGE_SIZE, PERMISSION, isGlucoseValueResult } from '@gc/shared';
 import type { DictItemOption, GlucoseRecordListItem, TimeSlotOption } from '@gc/shared';
 import {
   FALLBACK_FORM_STATE,
@@ -15,7 +15,9 @@ import {
 } from '@/components/glucose/GlucoseQueryForm';
 import type { GlucoseQueryFormState } from '@/components/glucose/GlucoseQueryForm';
 import { GlucoseToolbar } from '@/components/glucose/GlucoseToolbar';
+import GlucosePrintModal from '@/components/glucose/print/GlucosePrintModal';
 import { useFullscreen } from '@/components/glucose/useFullscreen';
+import { useAuthStore } from '@/store/auth';
 import { useCommonDataStore } from '@/store/common-data';
 import type { DetailChildContext } from './detail-tabs';
 import GlucoseReviewModal from './GlucoseReviewModal';
@@ -49,7 +51,7 @@ const RECORD_TABLE_MIN_HEIGHT = 200;
  */
 const EMPTY_RESULT_TYPES: DictItemOption[] = [];
 
-/** 检测时间：契约串（YYYY-MM-DD HH:mm:ss 本地时刻）截到分钟；空/非法值防御性回退。导出仅为单测 */
+/** 检测时间：契约串（YYYY-MM-DD HH:mm:ss 本地时刻）截到分钟；空/非法值防御性回退。导出供单测与 R28 打印复用 */
 export function formatRecordTime(measuredAt: string): string {
   if (!measuredAt) {
     return '-';
@@ -60,7 +62,7 @@ export function formatRecordTime(measuredAt: string): string {
 
 /**
  * 检测时段：code → 动态时段名（含停用项回显），查不到回退 code，null → '-'。
- * 与复核弹窗 buildReviewFields 同一约定；**禁止按名称匹配**（code 才是契约）。导出仅为单测。
+ * 与复核弹窗 buildReviewFields 同一约定；**禁止按名称匹配**（code 才是契约）。导出供单测与 R28 打印复用。
  */
 export function formatMealContext(code: string | null, timeSlots: TimeSlotOption[]): string {
   if (!code) {
@@ -74,7 +76,7 @@ export function formatMealContext(code: string | null, timeSlots: TimeSlotOption
  *  - 数值型(0/1/2)：一位小数数值（valueMmolL 防御性为 null 时 '-'）；
  *  - 非数值型(3~9)：字典标签（Low/High/拒检/外出…），字典查不到回退 code；
  *  - 颜色一律取结果类型字典色。
- * 导出仅为单测。
+ * 导出供单测与 R28 打印复用（裁定 Q1：打印同样保留色+文双通道）。
  */
 export function buildRecordValue(
   item: Pick<GlucoseRecordListItem, 'resultType' | 'valueMmolL'>,
@@ -136,7 +138,8 @@ export function RecordValueCell({
 
 export default function GlucoseRecordTab() {
   const { id } = useParams<{ id: string }>();
-  const { glucoseVersion, onGlucoseChanged, patient } = useOutletContext<DetailChildContext>();
+  const { glucoseVersion, onGlucoseChanged, patient, patientDetail } =
+    useOutletContext<DetailChildContext>();
   const { token } = theme.useToken();
   const [page, setPage] = useState(1);
   // R23/R26：全屏态走公共 hook（ESC 退出、换患者重置、fixed 覆盖样式）
@@ -163,6 +166,13 @@ export default function GlucoseRecordTab() {
   const handleValueClick = useCallback((recordId: string) => {
     setReviewRecordId(recordId);
   }, []);
+
+  // R28：打印门控（裁定 Q5/Q6/B3）——无 glucose:print 不传 onPrint（按钮不渲染，
+  // 服务端接口兜底）；已应用范围内无记录（total=0）禁用。预览数据在 Modal 打开时
+  // 按范围全量拉取（裁定 B1/Q12：循环拉页不设上限），列与屏幕一致（规格 §4 规则 7）
+  const hasPermission = useAuthStore((state) => state.hasPermission);
+  const canPrint = hasPermission(PERMISSION.GLUCOSE_PRINT);
+  const [printOpen, setPrintOpen] = useState(false);
 
   // 换患者时回到第 1 页、退出全屏并重置查询表单：同一路由不同 :id 不会重挂载组件，
   // state 需手动重置。表单置回 null（未就绪）→ 列表请求挂起，等新患者的住院记录到达
@@ -299,6 +309,8 @@ export default function GlucoseRecordTab() {
             onChange={setQueryForm}
             onSearch={handleSearch}
             onReset={handleReset}
+            onPrint={canPrint ? () => setPrintOpen(true) : undefined}
+            printDisabled={!data || data.total === 0}
           />
         }
         fullscreen={fullscreen}
@@ -351,6 +363,18 @@ export default function GlucoseRecordTab() {
         onClose={() => setReviewRecordId(null)}
         onChanged={onGlucoseChanged}
       />
+
+      {/* R28：打印预览（三 Tab 共用 Modal）——打开时拉明文姓名（访问即留痕）与
+          范围内全量记录；点「打印」先留痕（GLUCOSE_PRINT）再触发浏览器打印（裁定 Q11） */}
+      {canPrint ? (
+        <GlucosePrintModal
+          open={printOpen}
+          onClose={() => setPrintOpen(false)}
+          printType="record"
+          patient={patientDetail}
+          range={appliedRange}
+        />
+      ) : null}
     </div>
   );
 }
