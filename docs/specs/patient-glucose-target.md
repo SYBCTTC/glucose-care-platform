@@ -511,7 +511,7 @@ Zod schema 放 `packages/shared`，前后端共用（同一套校验规则，避
 - `seed.ts`：把 `glucose.low_threshold=3.9` / `glucose.high_threshold=16.7` 补进 `configs` 数组（裁定 X）。
 - 单测覆盖 §8 后端项（除判定改造相关）。
 
-### ③ 前端 Tab（改名 + 展示 + 编辑弹框）— ✅ 已完成（2026-11-25）
+### ③ 前端 Tab（改名 + 展示 + 编辑弹框）— ✅ 已完成（2026-11-25，提交 `0bfe58b` 组件与单测 / `8e2ed62` Tab 改名与路由接入；`@gc/shared` 审计口径注释修正见 `39716a8`）
 
 - Tab label / 路由 key / 子路径常量改造（§6.1）：`basic` → `target`，改 `detail-tabs.ts`（`DetailMainTab` / `DETAIL_TAB_PATH` / `MAIN_TAB_PATH` / `resolveDetailTab`）、`PatientDetailTabs.tsx`（`MAIN_TABS` label 改「控糖目标」）、`routes.tsx`（子路由指向新组件）。
   **刻意不做 `/basic` → `/target` 重定向**（裁定 M）：旧 URL 命中 `*` 兜底回落默认页「血糖报告」，不白屏、不出现无高亮空档（已加回归断言）。`DetailPlaceholder` **保留**（「出入院记录」仍在用），仅更新其注释。
