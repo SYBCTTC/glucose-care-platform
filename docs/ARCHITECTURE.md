@@ -19,12 +19,12 @@ NestJS 单体服务 ──► PostgreSQL 16
 
 ## 2. 分层
 
-| 层 | 职责 | 约束 |
-|---|---|---|
-| Controller | 参数校验、鉴权标注、转发 | 不写业务逻辑 |
-| Service | 业务逻辑 + 数据权限校验 | 唯一业务归属 |
-| Prisma | 数据访问 | 禁止在 service 外实例化 |
-| Guard / Interceptor | 横切：鉴权、权限、审计 | 全局注册，顺序固定 |
+| 层                  | 职责                     | 约束                    |
+| ------------------- | ------------------------ | ----------------------- |
+| Controller          | 参数校验、鉴权标注、转发 | 不写业务逻辑            |
+| Service             | 业务逻辑 + 数据权限校验  | 唯一业务归属            |
+| Prisma              | 数据访问                 | 禁止在 service 外实例化 |
+| Guard / Interceptor | 横切：鉴权、权限、审计   | 全局注册，顺序固定      |
 
 请求处理链：
 `JwtAuthGuard → PermissionsGuard → ZodValidationPipe → Handler → AuditLogInterceptor → HttpExceptionFilter`
@@ -40,13 +40,13 @@ NestJS 单体服务 ──► PostgreSQL 16
 
 角色 → 数据范围与关键权限差异：
 
-| 角色 | 数据范围 | 权限要点 |
-|---|---|---|
-| 医生 `DOCTOR` | `DEPARTMENT` 本科室 | 可建档（2026-11-17 需求人决定），但**不含** `patient:update` / `patient:admit` |
-| 护士 `NURSE` | `DEPARTMENT` 本科室 | 含建档、编辑、办理住院 |
-| 护士长 `NURSE_HEAD` | `DEPARTMENT` 本科室 | 另含 `patient:manage`（归档）、`audit:view`、`quality:manage` |
-| 设备管理员 `DEVICE_ADMIN` | `NONE` 无患者数据 | 只有设备 / 质控 / 公共数据权限 |
-| 系统管理员 `SYS_ADMIN` | **`ALL` 全院** | **全部 23 个权限点**，含患者数据的查看 / 建档 / 编辑 / 归档 / 办理住院 |
+| 角色                      | 数据范围            | 权限要点                                                                          |
+| ------------------------- | ------------------- | --------------------------------------------------------------------------------- |
+| 医生 `DOCTOR`             | `DEPARTMENT` 本科室 | 可建档（2026-11-17 需求人决定），但**不含** `patient:update` / `patient:admit`    |
+| 护士 `NURSE`              | `DEPARTMENT` 本科室 | 含建档、编辑、办理住院                                                            |
+| 护士长 `NURSE_HEAD`       | `DEPARTMENT` 本科室 | 另含 `patient:manage`（归档）、`audit:view`、`quality:manage`                     |
+| 设备管理员 `DEVICE_ADMIN` | `NONE` 无患者数据   | 只有设备 / 质控 / 公共数据权限                                                    |
+| 系统管理员 `SYS_ADMIN`    | **`ALL` 全院**      | **全部 27 个权限点**，含患者数据的查看 / 建档 / 编辑 / 归档 / 办理住院 / 控糖目标 |
 
 > ⚠️ **系统管理员是全院数据范围，不是"仅系统管理"**。本节原表述"系统管理员 → 仅系统管理，
 > 不自动拥有患者数据查看权"与代码长期相反，2026-11-17 经需求人裁定：**文档错、代码对**，已按
@@ -96,6 +96,7 @@ PatientDeviceBinding / VirtualWardRecord / AuditLog / SystemConfig / DictItem / 
 患者敏感字段（姓名/身份证/手机号）加密存为 `*Cipher`，另存**落库**脱敏值 `*Masked`，见 `AGENTS.md` §5.3。
 
 **虚拟病区模型现状**：`VirtualWardRecord`（`modules/ward`）一条 = 一次进出，`leftAt` 为空表示当前在区。
+
 - 重复进出每次**新建记录、历史全留**；同一患者至多一条在区行，由**部分唯一索引**
   `virtual_ward_record_one_active`（`prisma/sql/ward_one_active.sql`，Prisma 不支持部分唯一索引故走手工 SQL）保证，
   并发撞 P2002 时服务端映射为 `44001`

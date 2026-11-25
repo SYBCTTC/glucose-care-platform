@@ -32,6 +32,13 @@ export const PERMISSION = {
   PATIENT_DISCHARGED_VIEW: 'patient:discharged:view',
   /** 办理住院：把出院患者重新转为住院（DISCHARGED → INPATIENT） */
   PATIENT_ADMIT: 'patient:admit',
+  /**
+   * 患者控糖目标编辑（各时段血糖上下限 + 低/高血糖预警值）。
+   * **不复用** PATIENT_UPDATE：改控糖目标会改变该患者后续所有血糖的 resultType 判定结果，
+   * 敏感度高于改床号/责任医生，需可单独授权与单独审计过滤（2026-11-25 裁定 H）。
+   * 查看沿用 PATIENT_VIEW，不另设查看权限点。规格：docs/specs/patient-glucose-target.md §5.1
+   */
+  PATIENT_TARGET_UPDATE: 'patient:target:update',
   /** 添加血糖（手工录入血糖记录）；与患者编辑分离，便于只授予录入权限 */
   GLUCOSE_CREATE: 'glucose:create',
   /** 编辑血糖（修改已有血糖记录，R25）；与 create 分离，便于单独收权 */
@@ -85,6 +92,9 @@ export const ROLE_PERMISSIONS: Record<RoleCode, PermissionCode[]> = {
     PERMISSION.WARD_MANAGE,
     PERMISSION.ALERT_VIEW,
     PERMISSION.QUALITY_VIEW,
+    // 患者控糖目标编辑（2026-11-25 裁定 H：医生/护士/护士长/系统管理员四角色均可）。
+    // 数据范围仍是 DEPARTMENT，只能改本科室患者；跨科室抛 30002 并记 DENIED 审计。
+    PERMISSION.PATIENT_TARGET_UPDATE,
     PERMISSION.GLUCOSE_CREATE,
     // R25 裁定 Q8：医生可编辑血糖（同 create 四角色）；**不授予** glucose:delete（删除属管理动作）
     PERMISSION.GLUCOSE_UPDATE,
@@ -108,6 +118,8 @@ export const ROLE_PERMISSIONS: Record<RoleCode, PermissionCode[]> = {
     PERMISSION.QUALITY_VIEW,
     PERMISSION.DEPARTMENT_VIEW,
     PERMISSION.OPERATOR_VIEW,
+    // 患者控糖目标编辑（2026-11-25 裁定 H）；数据范围 DEPARTMENT
+    PERMISSION.PATIENT_TARGET_UPDATE,
     PERMISSION.GLUCOSE_CREATE,
     // R25 裁定 Q8：护士可编辑血糖；不授予 glucose:delete
     PERMISSION.GLUCOSE_UPDATE,
@@ -132,6 +144,8 @@ export const ROLE_PERMISSIONS: Record<RoleCode, PermissionCode[]> = {
     PERMISSION.QUALITY_MANAGE,
     PERMISSION.DEPARTMENT_VIEW,
     PERMISSION.OPERATOR_VIEW,
+    // 患者控糖目标编辑（2026-11-25 裁定 H）；数据范围 DEPARTMENT
+    PERMISSION.PATIENT_TARGET_UPDATE,
     PERMISSION.GLUCOSE_CREATE,
     // R25 裁定 Q8：护士长可编辑 + 可作废（删除属管理动作）
     PERMISSION.GLUCOSE_UPDATE,
@@ -174,6 +188,8 @@ export const ROLE_PERMISSIONS: Record<RoleCode, PermissionCode[]> = {
     PERMISSION.ROLE_MANAGE,
     PERMISSION.DEPARTMENT_VIEW,
     PERMISSION.OPERATOR_VIEW,
+    // 患者控糖目标编辑（2026-11-25 裁定 H）；SYS_ADMIN 不变式"含全部权限点"，同步授予
+    PERMISSION.PATIENT_TARGET_UPDATE,
     PERMISSION.GLUCOSE_CREATE,
     // R25：SYS_ADMIN 不变式"含全部权限点"，新权限点必须同步加到这里
     PERMISSION.GLUCOSE_UPDATE,

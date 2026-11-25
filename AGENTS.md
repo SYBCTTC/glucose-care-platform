@@ -22,20 +22,21 @@
 
 ## 2. 技术栈（禁止随意更换，禁止升级大版本）
 
-| 层 | 技术 | 版本约束 |
-|---|---|---|
-| 语言 | TypeScript（strict 全开） | ^5.7 |
-| 前端 | Vite + React + Ant Design 5 + TanStack Query + Zustand | React 18.x |
-| 图表 | ECharts（echarts-for-react） | ^5.5 |
-| 后端 | **NestJS**（模块化 + 守卫 + 拦截器） | ^10.4 |
-| 数据库 | **PostgreSQL** | 16.x |
-| ORM | **Prisma** | ^5.22 |
-| 缓存 | Redis | 7.x |
-| 校验 | **Zod**（前后端共享，位于 `packages/shared`） | ^3.23 |
-| 包管理 | pnpm workspace monorepo | ^9 |
-| 部署 | Docker Compose（内网） | — |
+| 层     | 技术                                                   | 版本约束   |
+| ------ | ------------------------------------------------------ | ---------- |
+| 语言   | TypeScript（strict 全开）                              | ^5.7       |
+| 前端   | Vite + React + Ant Design 5 + TanStack Query + Zustand | React 18.x |
+| 图表   | ECharts（echarts-for-react）                           | ^5.5       |
+| 后端   | **NestJS**（模块化 + 守卫 + 拦截器）                   | ^10.4      |
+| 数据库 | **PostgreSQL**                                         | 16.x       |
+| ORM    | **Prisma**                                             | ^5.22      |
+| 缓存   | Redis                                                  | 7.x        |
+| 校验   | **Zod**（前后端共享，位于 `packages/shared`）          | ^3.23      |
+| 包管理 | pnpm workspace monorepo                                | ^9         |
+| 部署   | Docker Compose（内网）                                 | —          |
 
 **禁止事项**：
+
 - ❌ 不得引入新依赖，除非明确要求（新增依赖需人工批准并锁版本）
 - ❌ 不得把 React 18 升到 19、NestJS 10 升到 11 等大版本升级
 - ❌ 不得引入 Tailwind / shadcn / Material UI 等第二套 UI 体系（统一 Antd）
@@ -71,6 +72,7 @@ packages/
 ```
 
 **分层职责（后端）**：
+
 - `controller`：仅做参数校验、鉴权、转发，**不写业务逻辑**
 - `service`：业务逻辑唯一归属层
 - `prisma`：数据访问，禁止在 service 外直接 new PrismaClient
@@ -81,6 +83,7 @@ packages/
 ## 4. 血糖业务口径（AI 最容易搞错，必须逐条遵守）
 
 ### 4.1 单位
+
 - **数据库统一存储 `mmol/L`**（字段 `valueMmolL`，精度 1 位小数）
 - `rawValue` + `rawUnit`（原始值与单位）：**当前 schema 未实现**，恢复需走 schema 评审；接口只收 `mmol/L`
 - 换算：**1 mmol/L = 18 mg/dL**；`mg/dL → mmol/L` 除以 18
@@ -88,6 +91,7 @@ packages/
   需要支持 `mg/dL` 时先在此新建换算入口并走共享包流程，**禁止在别处硬编码 18**
 
 ### 4.2 时间
+
 - `measuredAt`：**血糖实际测量时间**（手工录入时由医护填写），业务主时间
 - `receivedAt`：服务器接收时间，仅用于排查（**当前 schema 无此字段**，排查用 `createdAt`）
 - 数据库统一存 **UTC**（`timestamptz`），前端用 dayjs 按本地时区展示
@@ -95,6 +99,7 @@ packages/
 - 内网服务器时间必须 NTP 同步（运维项）
 
 ### 4.3 取值范围与异常
+
 - 合法范围：**0.6 ~ 33.3 mmol/L**（含边界；与结果类型 `Low`(< 0.6) / `High`(> 33.3) 阈值对齐，边界值仍属合法读数）
 - 超范围**不入库**：由 `createGlucoseSchema`（`packages/shared/src/glucose/schema.ts`）直接拒绝（10001）；当前**无 `status` 字段**，无 `PENDING_REVIEW` 流程
 - 告警阈值**存 `SystemConfig` 表**（key `glucose.low_threshold` / `glucose.high_threshold`，seed 默认 `3.9` / `16.7 mmol/L`），
@@ -103,6 +108,7 @@ packages/
   配置缺失/非法/`low >= high` 时服务端抛 `10000` **拒绝写入**，不退回默认值：按错误阈值分类比拒绝录入更危险，结果类型直接进病历
 
 ### 4.4 录入上下文（BGM 必填）
+
 - `mealContext` **应用层必填**（`createGlucoseSchema` 强制），落库**时段码**（`TimeSlot.code`）：普通 `FASTING`/`BREAKFAST_PRE`/`BREAKFAST_POST`/`LUNCH_PRE`/`LUNCH_POST`/`DINNER_PRE`/`DINNER_POST`/`BEDTIME`，特殊 `RANDOM`/`RETEST`，强化 `INTENSIVE_AM`/`INTENSIVE_PM`/`INTENSIVE_NIGHT`
 - 库字段 `GlucoseRecord.mealContext` 为 `String?`（`schema.prisma:156`），是给设备上报/历史数据留位；**不得因库可空就放宽前端或接口校验**
 - 时段的**名称/起止时间/类型/控糖目标**是动态数据（表 `TimeSlot`，接口 `GET /time-slots`，前端 `useCommonDataStore().timeSlots`）；code 是契约，名称可改，**禁止按名称匹配**
@@ -112,6 +118,7 @@ packages/
 - 手工录入时 `operatorId` 必须记录当前医护 ID（**留痕**）
 
 ### 4.5 去重（唯一约束兜底，2026-10-28 落地，**2026-11-20 R25 改为部分唯一索引**）
+
 > 实现：**部分唯一索引** `glucose_record_active_unique` = `UNIQUE ("patientId", "measuredAt") WHERE "voidedAt" IS NULL`，
 > **只约束有效记录**。原全表 `@@unique([patientId, measuredAt])`（索引 `GlucoseRecord_patientId_measuredAt_key`）
 > 已由迁移 `20261120120000_add_glucose_void` **DROP**——否则作废行仍占用时间戳，同一检测时间无法补录。
@@ -129,6 +136,7 @@ packages/
 - 将来若要允许"同一时间点多来源各一条"（设备+手工），必须先改本约束，属契约变更
 
 ### 4.6 CGM 扩展（**当前未预留，属目标态**）
+
 > 现状（2026-10-22 重构后简化重建，见 `docs/ARCHITECTURE.md` §4；引用章节而非行号，避免行号漂移后指错）：`GlucoseRecord` 仅
 > `resultType / valueMmolL / mealContext / measuredAt / operatorId / testStrip / remark`
 > 加 `createdAt` 与 R25 软删除 `voidedAt / voidedById`（医疗记录不得物理删除，删除按作废实现；
@@ -145,12 +153,15 @@ packages/
 ## 5. 安全、权限与合规（最高优先级，人工把关）
 
 ### 5.1 权限（RBAC + 数据行级）
+
 - 角色（以 `@gc/shared` 的 `ROLE_CODE` 为准）：`DOCTOR` 医生 / `NURSE` 护士 / `NURSE_HEAD` 护士长（**不是 `HEAD_NURSE`**；shared 常量 key 为 `ROLE_CODE.HEAD_NURSE`，值是 `NURSE_HEAD`）/ `DEVICE_ADMIN` 设备管理员 / `SYS_ADMIN` 系统管理员
 - **数据范围按角色定档**（`ROLE_DATA_SCOPE`，唯一权威实现 `apps/server/src/common/data-scope/scope.util.ts`，
   四档语义表见 `docs/PERMISSION-DESIGN.md` §4）：医生 / 护士 / 护士长 → **本科室**（`DEPARTMENT`）；
   设备管理员 → 无患者数据（`NONE`）；系统管理员 → **全院**（`ALL`，2026-11-17 需求人裁定确认，
-  含全部 23 个权限点与患者数据的查看/建档/编辑/归档/办理住院；2026-11-18 虚拟病区上线后
-  新增 `ward:view` / `ward:manage`，医生/护士/护士长/系统管理员均授予，数据范围仍按 `DEPARTMENT` 收敛）
+  含全部 27 个权限点与患者数据的查看/建档/编辑/归档/办理住院/控糖目标；2026-11-18 虚拟病区上线后
+  新增 `ward:view` / `ward:manage`，医生/护士/护士长/系统管理员均授予，数据范围仍按 `DEPARTMENT` 收敛；
+  2026-11-25 新增 `patient:target:update`（患者控糖目标编辑，`docs/specs/patient-glucose-target.md`），
+  同授予医生/护士/护士长/系统管理员四角色，数据范围仍按 `DEPARTMENT` 收敛）
 - ⚠️ **医生看的是本科室全部患者，不是"自己管辖的患者"**：`DEPARTMENT` 档只按 `departmentId` 过滤。
   `Patient.doctorId`（责任医生）仅是列表的**可选筛选项**（`patient.service.ts` 的 `query.doctorId`），
   **不是数据权限边界**——不要据此实现按责任医生过滤，也不要以为医生看不到同科室其他医生的患者
@@ -159,6 +170,7 @@ packages/
 - 越权访问返回 `403` 并**记录审计日志**
 
 ### 5.2 审计日志（等保三级硬要求）
+
 - 记录：操作人 / 时间 / IP / 操作类型 / 对象（患者 ID）/ 变更前后的关键字段 / 结果
 - `result` 三值语义（2026-11-17 起真正生效）：`SUCCESS` / `DENIED` / `FAILED`。
   **`DENIED` 按错误码号段判定**（`3xxxx` = 授权与数据权限），不是按异常类型——
@@ -173,6 +185,7 @@ packages/
 - 留存 **≥ 180 天**，导出与删除操作同样留痕
 
 ### 5.3 个人信息保护
+
 - 患者姓名、身份证号、手机号：**加密存储**，列表接口默认返回**脱敏**值（`张**`、`138****1234`）
 - 脱敏**唯一实现是 `packages/shared/src/mask`**（`import { maskName, maskPhone, maskIdCard } from '@gc/shared'`）：
   姓名只保留姓氏（复姓保留前两字，`欧阳明`→`欧阳*`）、身份证保留前 3 后 4、手机号保留前 3 后 4。
@@ -206,6 +219,7 @@ packages/
 - 导出 Excel/PDF 必须：走审批流程（或至少记录导出人/时间/范围）、文件加患者信息时附水印
 
 ### 5.4 账号与会话
+
 - 密码：≥8 位，含大小写字母+数字，定期更换
 - 登录失败 5 次锁定 30 分钟
 - 会话 **30 分钟无操作自动登出**
@@ -213,6 +227,7 @@ packages/
 - 预留双因子（OTP）扩展位
 
 ### 5.5 AI 数据边界（写给 AI 自己）
+
 - ❌ **禁止把真实患者数据粘贴给 AI**，一律使用 `prisma/seed.ts` 生成的脱敏演示数据
 - ❌ AI 不得连接生产/内网数据库
 - ❌ AI 不得生成含真实密钥、密码、证书的代码
