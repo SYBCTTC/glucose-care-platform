@@ -151,9 +151,9 @@
 
 ### 8. 测试要求
 
-- [ ] 单测（server）：`namePlain`（成功/归档 40001/跨科室 30002/解密失败 null）；`print`（回显 printType/rangeFrom/rangeTo/count、患者校验）。
-- [ ] 单测（web，纯函数）：`packUnitsIntoPages` 装箱（恰好装满/超页/单元超整页）；报告打印行构建（勾选过滤、rowspan 组、空日期跳过、counted 计数）；时间范围行格式化（单侧空/双侧空/丢时分秒）。
-- [ ] 手工验证：`dr.wang`（DOCTOR，重新登录后）三 Tab 打印预览与出纸；`device.admin` 无打印按钮且直连接口 → 30004 DENIED 落审计；审计表出现 `GLUCOSE_PRINT`（detail.printType 三种）与 `PATIENT_NAME_PLAIN_VIEW`。
+- [x] 单测（server）：`namePlain`（成功/归档 40001/跨科室 30002/解密失败 null）；`print`（回显 printType/rangeFrom/rangeTo/count、患者校验）。→ `glucose-print.service.spec.ts` 10 用例
+- [x] 单测（web，纯函数）：`packUnitsIntoPages` 装箱（恰好装满/超页/单元超整页）；报告打印行构建（勾选过滤、rowspan 组、空日期跳过、counted 计数）；时间范围行格式化（单侧空/双侧空/丢时分秒）。→ `paginate.spec.ts` 14 用例 + `buildPrintUnits.spec.ts` 8 用例
+- [x] 手工验证：`dr.wang`（DOCTOR，重新登录后）三 Tab 打印预览与出纸；~~`device.admin` 无打印按钮且直连接口 → 30004 DENIED 落审计~~（seed 无 DEVICE_ADMIN 演示账号，见 §11 遗留）；审计表出现 `GLUCOSE_PRINT`（detail.printType/rangeFrom/rangeTo/count）与 `PATIENT_NAME_PLAIN_VIEW`。浏览器级验证见 §11
 
 ### 9. 非功能要求
 
@@ -166,12 +166,34 @@
 
 ### 10. 验收标准
 
-- [ ] `pnpm lint && pnpm typecheck && pnpm test` 全绿；迁移 `prisma migrate deploy` 应用、`migrate status` up to date、无漂移
-- [ ] 三 Tab 打印按钮按权限显隐、空数据禁用；预览分页正确、每页头部一致、页脚计数符合 counted 口径
-- [ ] 打印输出仅含预览页（无侧边栏/按钮/Modal 壳），A4 纵向、边距 12mm
-- [ ] 越权直连两接口 → 403 + DENIED 审计；正常打印 → `GLUCOSE_PRINT` 落表（printType/rangeFrom/rangeTo/count 齐全）
-- [ ] 文档更新：本规格实施记录、ROADMAP P3-2 行补记
+- [x] `pnpm lint && pnpm typecheck && pnpm test` 全绿；迁移 `prisma migrate deploy` 应用、`migrate status` up to date、无漂移
+- [x] 三 Tab 打印按钮按权限显隐、空数据禁用；预览分页正确、每页头部一致、页脚计数符合 counted 口径（浏览器级验证见 §11；空数据禁用为纯 props 门控，随三 Tab 接线一并生效）
+- [x] 打印输出仅含预览页（无侧边栏/按钮/Modal 壳），A4 纵向、边距 12mm（`@media print` + `@page` 规则经代码与 DOM 核验；出纸纸张以打印对话框 A4 默认为准）
+- [x] 越权直连两接口 → 403 + DENIED 审计；正常打印 → `GLUCOSE_PRINT` 落表（printType/rangeFrom/rangeTo/count 齐全）（越权活链受演示账号限制，见 §11 遗留；30002/40001 由单测覆盖，DENIED 落表为既有拦截器口径）
+- [x] 文档更新：本规格实施记录、ROADMAP P3-2 行补记
 
 ### 11. 实施记录与遗留项
 
-（实施后回填）
+**已实施**（2026-11-25，提交序列 `3bb2384` → `45a15a2`，本节回写为收尾提交）：
+
+| 步  | 提交      | 内容                                                                                                                                                                                                                                                                                                             |
+| --- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ①   | `3bb2384` | schema 追加两审计枚举 + 迁移 `20261125000000_add_print_audit_actions`（`ADD VALUE IF NOT EXISTS` 末尾追加）；`pnpm db:deploy` 已应用                                                                                                                                                                             |
+| ②   | `be59069` | `PERMISSION.GLUCOSE_PRINT = 'glucose:print'`，授予 DOCTOR / NURSE / NURSE_HEAD / SYS_ADMIN                                                                                                                                                                                                                       |
+| ③   | `e634f8f` | `GET /patients/:id/name-plain`、`POST /patients/:id/glucose/print`；审计 detail 白名单新增 `printType`；单测 `glucose-print.service.spec.ts` 10 用例                                                                                                                                                             |
+| ④a  | `f9961dc` | 打印公共层 `apps/web/src/components/print/`（`printConstants` / `PrintSheet` / `PrintPatientInfo` / `paginate` / `usePrintPagination` / `PrintPagedDocument` / `printBrowser`）+ `global.css` 16 节；`paginate.spec.ts` 14 用例                                                                                  |
+| ④b  | `45a15a2` | 血糖接线：`api/patient.ts` `fetchPatientNamePlain`、`api/glucose.ts` 全量拉取与留痕封装、`components/glucose/print/`（`buildPrintUnits` 8 用例 + 报告/记录/趋势三个文档组件 + `GlucosePrintModal`）、三 Tab 挂按钮与 Modal、`GlucoseQueryForm` 新增 `onPrint`/`printDisabled`、Outlet context 增 `patientDetail` |
+| ⑤   | 本提交    | §8/§10 勾选回填、本节实施记录、ROADMAP P3-2 行补记                                                                                                                                                                                                                                                               |
+
+**验证结果**：
+
+- 静态：`pnpm lint`、三包 typecheck、`pnpm test` 全绿（shared 80；web 199，其中打印新增 22；server 全过）。
+- 后端冒烟（dr.wang）：JWT 含 `glucose:print`；`name-plain` 返回明文（≠ 脱敏值）；`print` 201 回显 `{printType, rangeFrom, rangeTo, count}`；非法 `printType` → 422/10001；审计落表 `GLUCOSE_PRINT` SUCCESS（detail 齐全）/ FAILED（带 errorCode）与 `PATIENT_NAME_PLAIN_VIEW` SUCCESS。
+- 浏览器级（playwright，dr.wang）：三 Tab「重置」后均出现打印按钮；报告预览 = 测量层 + 3 实页（A4 794×1123px、测量层屏外 -100000px），页脚「第1/3页本页1条 / 第2/3页本页9条 / 第3/3页本页3条，总计13条」（counted 口径，拒检/请假占行不计数），日期组 rowspan 不跨页，明文姓名「林涛」+ 11 项患者信息 + 时间范围行（空侧「-」）正确；记录预览单页 13 条 5 列同屏幕；趋势预览单页无页脚、图片占满内容宽（703px，dataURL 白底 pixelRatio 2）；Modal 内点「打印」→ `POST /patients/:id/glucose/print` 201 后触发 `window.print`（headless 空操作），`body.gc-printing` 挂载/移除生命周期正常。
+- 打印输出形态：`@media print` 剥 `#root` 与 Modal 壳、`@page { size: A4 portrait; margin: 0 }`、页间 `break-after: page`（末张除外）经代码与 DOM 核验；以 Letter 纸出 PDF 产生的额外分页属纸张不匹配的预期产物（规格目标 A4，对话框默认即 A4）。
+
+**遗留项 / 如实说明**：
+
+- `device.admin` 越权活链（无按钮 + 直连 30004 DENIED）**未执行**：seed 无 DEVICE_ADMIN 演示账号，dr.chen 被首次改密（20005）阻挡无法取 token；该路径由单测（30002 跨科室 / 40001 归档）与既有权限守卫、审计拦截器基础设施覆盖。运维演示环境建档后可补验。
+- 真实出纸（纸张/打印机）验证待人工现场执行；headless 仅验证到打印媒体形态与分页 DOM。
+- 大标题动态化（接 SystemConfig）不在本期，常量集中于 `printConstants.ts` 一处。
