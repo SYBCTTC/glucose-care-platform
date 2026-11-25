@@ -478,13 +478,16 @@ body {
 
   /* 打印开关：triggerBrowserPrint 给 body 挂 .gc-printing 期间只输出预览页。
      Modal 挂在 body 下的独立 portal（不在 #root 内），故隐藏 #root 后
-     还需把 Modal 壳（mask/close/footer/定位/内边距）全部剥掉，只留页内容 */
+     还需把 Modal 壳（mask/close/header/footer/定位/内边距）全部剥掉，只留页内容。
+     header 必在清单内：漏掉时标题「打印预览」上纸占高，.gc-print-sheet 固定
+     297mm 零余量会被物理页高截断——页脚统计行切片独占下一页（2026-11-25 修复） */
   body.gc-printing #root {
     display: none !important;
   }
 
   body.gc-printing .ant-modal-mask,
   body.gc-printing .ant-modal-close,
+  body.gc-printing .ant-modal-header,
   body.gc-printing .ant-modal-footer {
     display: none !important;
   }
