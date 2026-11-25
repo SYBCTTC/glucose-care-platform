@@ -4,10 +4,13 @@ import type {
   Gender,
   PatientAdmitResult,
   PatientDetail,
+  PatientGlucoseTargetsResponse,
+  PatientGlucoseTargetsUpdateResult,
   PatientListItem,
   PatientNamePlainResult,
   PatientStatus,
   PatientUpdateResult,
+  UpdatePatientGlucoseTargetsInput,
 } from '@gc/shared';
 import { http } from './client';
 
@@ -141,4 +144,35 @@ export function fetchPatients(
 ): Promise<PatientListResult> {
   const path = status === 'INPATIENT' ? '/patients/inpatient' : '/patients/discharged';
   return http.get<PatientListResult>(path, params);
+}
+
+/**
+ * 患者控糖目标（GET /patients/:id/glucose-targets），规格 §3.1。
+ *
+ * ⚠️ 属敏感查询：后端**每次调用写一条 `PATIENT_TARGET_VIEW` 审计**（2026-11-25 裁定，
+ * 与 `PATIENT_VIEW` / `ADMISSION_QUERY` 同口径），故不得轮询、不得为同一视图重复调用；
+ * 调用方 hook 必须带 StrictMode 守卫，否则开发模式下会双写审计行。
+ *
+ * 返回的 `targets` 是**展示集合**（`enabled` && 普通时段 && 上下限非空，当前 8 个，动态跟随库）；
+ * `timeSlotName` 由后端下发，前端**禁止硬编码时段名**（`AGENTS.md` §4.4）。
+ * `alert.default*` 为全局 `SystemConfig` 值，供「恢复默认」用；读取失败时为 null（按钮置灰）。
+ */
+export function fetchPatientGlucoseTargets(id: string): Promise<PatientGlucoseTargetsResponse> {
+  return http.get<PatientGlucoseTargetsResponse>(`/patients/${id}/glucose-targets`);
+}
+
+/**
+ * 编辑患者控糖目标（PATCH /patients/:id/glucose-targets），规格 §3.2。
+ * 需 `patient:target:update` 权限 + 患者为住院中；后端写 `PATIENT_TARGET_UPDATE` 审计。
+ *
+ * **全量提交**展示集合内的时段（裁定 N）：后端与库中现有行 diff 出增 / 改 / 删，
+ * 前端不传操作类型。某时段两值都为 `null` = **删除**该目标行（裁定 V，库里不留 null 空壳行）。
+ * 校验失败返回 `10001` + `details`（字段级，`field` 形如 `targets[0].valueDown`），
+ * 由弹框映射到对应输入框；并发撞唯一索引返回 `10008`。
+ */
+export function updatePatientGlucoseTargets(
+  id: string,
+  payload: UpdatePatientGlucoseTargetsInput,
+): Promise<PatientGlucoseTargetsUpdateResult> {
+  return http.patch<PatientGlucoseTargetsUpdateResult>(`/patients/${id}/glucose-targets`, payload);
 }
