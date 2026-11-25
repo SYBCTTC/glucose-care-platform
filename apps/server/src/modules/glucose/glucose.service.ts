@@ -47,18 +47,22 @@ import { BusinessException } from '../../common/exceptions/business.exception';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import type { AuthenticatedUser } from '../../common/types';
 import { isUniqueConstraintViolation } from '../../common/utils/prisma-error';
+import { PatientGlucoseTargetService } from '../patient/patient-glucose-target.service';
 import { PATIENT_PUBLIC_SELECT, toListItem } from '../patient/patient.service';
 import type { GlucoseAlertThreshold } from '../system/system-config.service';
-import { SystemConfigService } from '../system/system-config.service';
 import { TimeSlotService } from '../time-slot/time-slot.service';
 
 /**
  * 按阈值判定数值型结果类型（0 偏低 / 1 正常 / 2 偏高）。
  *
- * 阈值来自 `SystemConfig`（`glucose.low_threshold` / `glucose.high_threshold`），
- * 由 `SystemConfigService` 读取并校验合法性；**禁止**在此硬编码，
- * 也禁止引入默认常量兜底（原 `@gc/shared` 的 `DEFAULT_ALERT_RANGE` 已删除）。
- * 区间口径：`value < low` → '0'，`low <= value <= high` → '1'，`value > high` → '2'。
+ * 阈值来源（R4 / 裁定 E，2026-11-25 起）：**患者该时段的控糖目标**
+ * （`PatientGlucoseTarget.valueDown` / `valueUp`），患者缺行时回退全局 `SystemConfig`
+ * （`glucose.low_threshold` / `glucose.high_threshold`）。解析统一走
+ * `PatientGlucoseTargetService.resolveResultTypeThreshold`，本函数只负责比大小。
+ * **禁止**在此硬编码阈值，也禁止引入默认常量兜底（原 `@gc/shared` 的 `DEFAULT_ALERT_RANGE` 已删除）；
+ * 全局配置缺失/非法时由 `SystemConfigService` 抛 10000 拒绝写入，不退回任何默认值。
+ * 区间口径**不变**（闭区间，裁定 J）：`value < low` → '0'，`low <= value <= high` → '1'，
+ * `value > high` → '2'，即读数恰等于上/下限算**正常**。
  */
 function resolveResultType(valueMmolL: number, threshold: GlucoseAlertThreshold): string {
   if (valueMmolL < threshold.low) {
@@ -91,7 +95,10 @@ export class GlucoseService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly timeSlots: TimeSlotService,
-    private readonly systemConfig: SystemConfigService,
+    // R4 / R8：判定阈值与趋势图阈值线均改为「患者级优先、缺失回退全局」，
+    // 解析逻辑归 `PatientGlucoseTargetService` 独有（含回退与告警日志），
+    // 故本 service 不再直接注入 `SystemConfigService`——避免两处各写一套回退口径。
+    private readonly targets: PatientGlucoseTargetService,
   ) {}
 
   /**
@@ -104,8 +111,9 @@ export class GlucoseService {
    *     操作人下拉是本科室医护（DY-OPERATOR），但系统管理员等账号不在其中，
    *     默认值（当前登录账号）不能因此被拒；审计日志仍记录真实操作人与记录者；
    *  4. 结果类型 0/1/2 一律由服务端判定，前端只能提交「检测」或 3~9；
-   *     判定阈值读 `SystemConfig`（`glucose.low_threshold` / `glucose.high_threshold`），
-   *     配置缺失或非法时抛 10000 拒绝写入，**不退回任何默认常量**；
+   *     判定阈值取**患者该时段的控糖目标**（R4 / 裁定 E），患者缺行时回退全局 `SystemConfig`
+   *     （`glucose.low_threshold` / `glucose.high_threshold`）；回退源配置缺失或非法时
+   *     抛 10000 拒绝写入，**不退回任何默认常量**；
    *  5. 检测时段是动态数据（表 TimeSlot），写库前查库校验 code 存在且启用，
    *     不通过按字段级校验错误返回（10001 + field=mealContext），**不落库**。
    */
@@ -122,9 +130,13 @@ export class GlucoseService {
     const isDetect = input.resultType === GLUCOSE_ENTRY_DETECT;
     // Zod 已保证「检测」时血糖值必填，其余类型血糖值/试纸为空
     const valueMmolL = isDetect ? (input.valueMmolL as number) : null;
-    // 只有「检测」需要按阈值分类；3~9 是人工选择的结果类型，不必读系统配置
+    // 只有「检测」需要按阈值分类；3~9 是人工选择的结果类型，不必读任何配置（省一次查询）
     const resultType = isDetect
-      ? resolveResultType(valueMmolL as number, await this.systemConfig.getGlucoseAlertThreshold())
+      ? resolveResultType(
+          valueMmolL as number,
+          // R4：按本次录入选择的时段码取患者目标；缺行由该方法内部回退全局
+          await this.targets.resolveResultTypeThreshold(patientId, input.mealContext),
+        )
       : input.resultType;
 
     const { record, skipped } = await this.createOrSkipDuplicate({
@@ -207,8 +219,10 @@ export class GlucoseService {
   /**
    * R25：编辑血糖（PATCH /patients/:id/glucose/:recordId）。
    *
-   * 校验口径与 create 一致（患者住院中、记录者在职、阈值重判 0/1/2、非检测类型清空值/试纸、
-   * 血糖范围由 Zod 拒绝），差异点（裁定 Q12/Q6/Q5）：
+   * 校验口径与 create 一致（患者住院中、记录者在职、非检测类型清空值/试纸、
+   * 血糖范围由 Zod 拒绝），差异点（裁定 Q12/Q6/Q5/I）：
+   *  - **重算条件收窄**（R5 / 裁定 I）：`resultType` 只在 `valueMmolL` 或 `mealContext`
+   *    实际变更时才按 R4 阈值重判，仅改备注/试纸/检测时间/记录者则**保持原值**；
    *  - **时段可用性豁免**：`mealContext` 与原值相同则跳过校验——否则弃用时段的历史记录
    *    永远无法编辑；改为其他 code 时照常校验存在且启用（10001 字段级）；
    *  - 检测时间撞上另一条**有效**记录 → 41003（字段级挂 measuredAt）。与添加的幂等
@@ -249,10 +263,28 @@ export class GlucoseService {
 
     const isDetect = input.resultType === GLUCOSE_ENTRY_DETECT;
     const valueMmolL = isDetect ? (input.valueMmolL as number) : null;
-    // 与 create 同口径：0/1/2 一律服务端按 SystemConfig 阈值重判，配置缺失/非法 → 10000 拒绝写入
-    const resultType = isDetect
-      ? resolveResultType(valueMmolL as number, await this.systemConfig.getGlucoseAlertThreshold())
-      : input.resultType;
+    const existingValue = existing.valueMmolL === null ? null : Number(existing.valueMmolL);
+    // R5 / 裁定 I：**仅当判定输入（读数 / 时段）实际变更**才重算 resultType。
+    // 只改 remark / testStrip / measuredAt / operatorId 时保持原值——否则护士改个备注就可能
+    // 把已入病历的结果类型静默翻转（裁定 C 意图）；判定输入变了则必须重算，以保证
+    // 「结果类型与读数 + 时段始终一致」。
+    // measuredAt 变更**不触发**重算：时段归属由 mealContext 显式携带，不由检测时间推导。
+    const judgeInputChanged =
+      valueMmolL !== existingValue || input.mealContext !== existing.mealContext;
+
+    let resultType: string;
+    if (!isDetect) {
+      // 3~9 是人工选择的结果类型，原样入库，不读任何配置（省一次查询）
+      resultType = input.resultType;
+    } else if (judgeInputChanged) {
+      // 阈值来源与 create 同口径（R4：患者时段目标 → 缺行回退全局；回退源缺失/非法 → 10000 拒绝写入）
+      resultType = resolveResultType(
+        valueMmolL as number,
+        await this.targets.resolveResultTypeThreshold(patientId, input.mealContext),
+      );
+    } else {
+      resultType = existing.resultType;
+    }
     const testStrip = isDetect ? (input.testStrip ?? null) : null;
     const remark = input.remark?.trim() ? input.remark.trim() : null;
     const measuredAt = input.measuredAt;
@@ -294,7 +326,8 @@ export class GlucoseService {
       throw new BusinessException(ERROR_CODES.CONCURRENT_CONFLICT);
     }
 
-    const existingValue = existing.valueMmolL === null ? null : Number(existing.valueMmolL);
+    // existingValue 已在上方 R5 判定处算出，此处复用（两处比较口径必须一致，
+    // 否则会出现「changedFields 记了 valueMmolL 却没重算 resultType」的自相矛盾）
     const changedFields = [
       ...(measuredAt.getTime() !== existing.measuredAt.getTime() ? ['measuredAt'] : []),
       ...(input.mealContext !== existing.mealContext ? ['mealContext'] : []),
@@ -498,8 +531,11 @@ export class GlucoseService {
    *  4. 排序 `measuredAt ASC, id ASC`（时间顺序，散点按时间铺开；id 第二键防同秒漂移）；
    *  5. **不分页**：返回范围内全部数值点，大数据量由前端 ECharts sampling 承接（glucose-domain 图表节）；
    *  6. 统计栏复用 buildReportStats（裁定：复用报表统计口径，同范围下与报表/记录 Tab 数字完全一致）；
-   *  7. 阈值经 SystemConfigService.getGlucoseAlertThreshold() 读取下发（裁定：沿用告警阈值、接口下发，
-   *     前端禁止硬编码）；配置缺失/非法抛 10000（与全系统口径一致，seed 保证有效配置）；
+   *  7. 阈值线 = **该患者的预警值**（R8 / 裁定 Y，2026-11-25 起）：经
+   *     `PatientGlucoseTargetService.resolveAlertThreshold` 解析，患者无预警行或该行读取失败
+   *     则回退全局 `SystemConfig`（仍是接口下发，前端禁止硬编码）；回退源配置缺失/非法抛 10000
+   *     （与全系统口径一致，seed 保证有效配置）。解析仍占 `Promise.all` 的一个位子，
+   *     命中患者行时查询次数与改造前相同（§9：不得增加额外串行查询）；
    *  8. `operatorName` 走关联 select（同报表 nurseName / 记录 operatorName 口径，tooltip 展示录入人）；
    *  9. 响应回显 rangeFrom/rangeTo/count，供 AuditLogInterceptor 按既有白名单落审计 detail，无需改白名单。
    */
@@ -532,7 +568,8 @@ export class GlucoseService {
         orderBy: [{ measuredAt: 'asc' }, { id: 'asc' }],
       }),
       this.buildReportStats(patientId, range.where, mealContextWhere),
-      this.systemConfig.getGlucoseAlertThreshold(),
+      // R8：患者预警值优先，缺行/读取失败由该方法内部回退全局并记 warn
+      this.targets.resolveAlertThreshold(patientId),
     ]);
 
     const points = rows.map((record) => ({

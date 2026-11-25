@@ -24,7 +24,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { BusinessException } from '../../common/exceptions/business.exception';
 import type { PrismaService } from '../../common/prisma/prisma.service';
 import type { AuthenticatedUser } from '../../common/types';
-import type { SystemConfigService } from '../system/system-config.service';
+import type { PatientGlucoseTargetService } from '../patient/patient-glucose-target.service';
 import type { TimeSlotService } from '../time-slot/time-slot.service';
 import { GlucoseService } from './glucose.service';
 
@@ -121,18 +121,31 @@ function createService() {
     // 报表用：一次查全（含停用），既生成表头又作归组依据；由报表用例各自 mockResolvedValue
     list: vi.fn(),
   };
-  // 阈值默认与 seed 一致（3.9 / 16.7）；单个用例可覆盖，用于验证"改配置即改判定"
+  // 全局阈值默认与 seed 一致（3.9 / 16.7）；单个用例可覆盖，用于验证"改配置即改判定"
   const systemConfig = {
     getGlucoseAlertThreshold: vi.fn().mockResolvedValue({ low: 3.9, high: 16.7 }),
+  };
+  // R4 / R8：判定阈值与趋势图阈值线改由 PatientGlucoseTargetService 解析（患者级 → 回退全局）。
+  // 默认让两个解析方法**委托给全局配置**，等价于「患者无目标行 / 无预警行」的回退分支：
+  // 既保持既有用例语义不变（含「3~9 不读阈值配置」的 not.toHaveBeenCalled 断言 ——
+  // 不解析阈值就不会触发委托），也让患者级路径的用例只需 mockResolvedValue 覆盖即可。
+  const targets = {
+    resolveResultTypeThreshold: vi
+      .fn()
+      .mockImplementation(() => systemConfig.getGlucoseAlertThreshold()),
+    resolveAlertThreshold: vi
+      .fn()
+      .mockImplementation(() => systemConfig.getGlucoseAlertThreshold()),
   };
   return {
     prisma,
     timeSlots,
     systemConfig,
+    targets,
     service: new GlucoseService(
       prisma as unknown as PrismaService,
       timeSlots as unknown as TimeSlotService,
-      systemConfig as unknown as SystemConfigService,
+      targets as unknown as PatientGlucoseTargetService,
     ),
   };
 }
@@ -142,9 +155,10 @@ describe('GlucoseService.create — 添加血糖', () => {
   let prisma: ReturnType<typeof createService>['prisma'];
   let timeSlots: ReturnType<typeof createService>['timeSlots'];
   let systemConfig: ReturnType<typeof createService>['systemConfig'];
+  let targets: ReturnType<typeof createService>['targets'];
 
   beforeEach(() => {
-    ({ service, prisma, timeSlots, systemConfig } = createService());
+    ({ service, prisma, timeSlots, systemConfig, targets } = createService());
     // 同一方法被查两次：先查状态/科室，再查列表项；按 select 形状区分
     prisma.patient.findUnique.mockImplementation(
       (args: { select?: Record<string, unknown> } | undefined) =>
@@ -162,8 +176,10 @@ describe('GlucoseService.create — 添加血糖', () => {
     });
   });
 
-  it('「检测」按 SystemConfig 阈值判定：< low 偏低，low~high 正常，> high 偏高（含边界）', async () => {
-    // 阈值取自 systemConfig 模拟（3.9 / 16.7，与 seed 一致），不是代码里的常量
+  it('「检测」按判定阈值分类：< low 偏低，low~high 正常，> high 偏高（含边界）', async () => {
+    // 本组走「患者缺行 → 回退全局」分支（targets 桩默认委托 systemConfig），
+    // 阈值取自 mock 的 3.9 / 16.7（与 seed 一致），不是代码里的常量；
+    // 患者目标分支见下方 R4 用例
     for (const [value, expected] of [
       [0.6, '0'],
       [3.9, '1'],
@@ -185,7 +201,7 @@ describe('GlucoseService.create — 添加血糖', () => {
     }
   });
 
-  it('改配置即改判定：阈值调成 5.0/12.0 后，同一个 8.9 仍正常，但 4.5 变偏低、13.0 变偏高', async () => {
+  it('改全局配置即改判定（患者缺行的回退分支）：阈值调成 5.0/12.0 后，同一个 8.9 仍正常，但 4.5 变偏低、13.0 变偏高', async () => {
     systemConfig.getGlucoseAlertThreshold.mockResolvedValue({ low: 5.0, high: 12.0 });
 
     for (const [value, expected] of [
@@ -207,7 +223,7 @@ describe('GlucoseService.create — 添加血糖', () => {
     }
   });
 
-  it('阈值读取失败（配置缺失/非法）时拒绝写入，不退回任何默认常量', async () => {
+  it('回退源（全局配置）读取失败时拒绝写入，不退回任何默认常量', async () => {
     systemConfig.getGlucoseAlertThreshold.mockRejectedValueOnce(
       new BusinessException(ERROR_CODES.INTERNAL_ERROR),
     );
@@ -218,7 +234,51 @@ describe('GlucoseService.create — 添加血糖', () => {
     expect(prisma.glucoseRecord.create).not.toHaveBeenCalled();
   });
 
-  it('选择 3~9 时不读系统配置（无需阈值判定，省一次查询）', async () => {
+  it('R4：患者有该时段目标行 → 按**患者目标**判定（4.4-7.0），且不读全局配置', async () => {
+    // 空腹目标 4.4-7.0 比全局 3.9/16.7 窄得多：4.2 在旧口径下是「正常」，新口径必须判「偏低」
+    targets.resolveResultTypeThreshold.mockResolvedValue({ low: 4.4, high: 7.0 });
+
+    for (const [value, expected] of [
+      [4.2, '0'],
+      [4.4, '1'], // 闭区间：恰等于下限算正常（裁定 J）
+      [7.0, '1'], // 闭区间：恰等于上限算正常
+      [7.1, '2'],
+    ] as const) {
+      prisma.glucoseRecord.create.mockResolvedValueOnce({
+        id: 'g-1',
+        resultType: expected,
+        valueMmolL: new Prisma.Decimal(value.toFixed(1)),
+        measuredAt,
+      });
+      await service.create(deptUser, 'p-1', createInput({ valueMmolL: value }));
+      const calls = prisma.glucoseRecord.create.mock.calls;
+      expect(calls[calls.length - 1][0].data.resultType).toBe(expected);
+    }
+
+    expect(systemConfig.getGlucoseAlertThreshold).not.toHaveBeenCalled();
+  });
+
+  it('R4：判定阈值按 (patientId, **本次录入的时段码**) 解析，时段不同则阈值不同', async () => {
+    // 选「随机」（不在展示集合、库中必然无目标行）→ 传 RANDOM，由解析方法回退全局。
+    // 钉住「时段码取自 input.mealContext，不是由 measuredAt 推导」——
+    // 本例检测时间 02:30 UTC（本地 10:30）按时间会落到 LUNCH_PRE，若实现改成按时间推导即失败
+    await service.create(deptUser, 'p-1', createInput({ mealContext: 'RANDOM' }));
+
+    expect(targets.resolveResultTypeThreshold).toHaveBeenCalledWith('p-1', 'RANDOM');
+  });
+
+  it('R4：患者目标解析抛错（回退源也缺失）→ 拒绝写入，不落库', async () => {
+    targets.resolveResultTypeThreshold.mockRejectedValueOnce(
+      new BusinessException(ERROR_CODES.INTERNAL_ERROR),
+    );
+
+    await expect(service.create(deptUser, 'p-1', createInput())).rejects.toMatchObject({
+      code: ERROR_CODES.INTERNAL_ERROR,
+    });
+    expect(prisma.glucoseRecord.create).not.toHaveBeenCalled();
+  });
+
+  it('选择 3~9 时不解析任何阈值（无需判定，省一次查询）', async () => {
     prisma.glucoseRecord.create.mockResolvedValueOnce({
       id: 'g-3',
       resultType: '5',
@@ -232,6 +292,8 @@ describe('GlucoseService.create — 添加血糖', () => {
       createInput({ resultType: '5', valueMmolL: null, testStrip: null }),
     );
 
+    // R4 表第四行：3~9 是人工选择的结果类型，既不查患者目标行也不读全局配置
+    expect(targets.resolveResultTypeThreshold).not.toHaveBeenCalled();
     expect(systemConfig.getGlucoseAlertThreshold).not.toHaveBeenCalled();
   });
 
@@ -1140,8 +1202,77 @@ describe('GlucoseService.update — R25 编辑血糖', () => {
     expect(result.changedFields).toEqual([]);
   });
 
-  it('改成非检测类型（3~9）→ 值与试纸强制清空，不读阈值配置', async () => {
-    const { service, prisma, systemConfig } = setupUpdate();
+  // ---- R5 / 裁定 I：重算条件收窄（任务 ④）----
+  // 以下三例的既有 resultType 故意设成 '0'，而读数 8.9 按全局 3.9/16.7 本该判 '1'：
+  // 若实现仍在「isDetect 就无条件重算」，原值会被静默翻转成 '1'，断言立即失败。
+  // 这正是裁定 C/I 要防的事——护士改个备注不该改动已入病历的结果类型。
+
+  it('R5：仅改备注 → resultType 保持原值，且不解析阈值', async () => {
+    const { service, targets } = setupUpdate(existingRecord({ resultType: '0' }));
+
+    const result = await service.update(
+      deptUser,
+      'p-1',
+      'g-1',
+      createInput({ remark: ' 改成别的备注 ' }),
+    );
+
+    expect(result.resultType).toBe('0');
+    expect(result.changedFields).toEqual(['remark']);
+    expect(targets.resolveResultTypeThreshold).not.toHaveBeenCalled();
+  });
+
+  it('R5：仅改检测时间 → 不重算（时段归属由 mealContext 显式携带，不由时间推导）', async () => {
+    const { service, targets } = setupUpdate(existingRecord({ resultType: '0' }));
+    const moved = new Date(measuredAt.getTime() + 3_600_000);
+
+    const result = await service.update(deptUser, 'p-1', 'g-1', createInput({ measuredAt: moved }));
+
+    expect(result.resultType).toBe('0');
+    expect(result.changedFields).toEqual(['measuredAt']);
+    expect(targets.resolveResultTypeThreshold).not.toHaveBeenCalled();
+  });
+
+  it('R5：仅改试纸批号 → 不重算', async () => {
+    const { service, targets } = setupUpdate(existingRecord({ resultType: '0' }));
+
+    const result = await service.update(deptUser, 'p-1', 'g-1', createInput({ testStrip: 9 }));
+
+    expect(result.resultType).toBe('0');
+    expect(result.changedFields).toEqual(['testStrip']);
+    expect(targets.resolveResultTypeThreshold).not.toHaveBeenCalled();
+  });
+
+  it('R5 + R4：改读数 → 按患者时段目标重算（4.2 在 4.4-7.0 下判偏低）', async () => {
+    const { service, targets } = setupUpdate();
+    targets.resolveResultTypeThreshold.mockResolvedValue({ low: 4.4, high: 7.0 });
+
+    const result = await service.update(deptUser, 'p-1', 'g-1', createInput({ valueMmolL: 4.2 }));
+
+    expect(result.resultType).toBe('0');
+    expect(result.changedFields).toEqual(['valueMmolL', 'resultType']);
+    expect(targets.resolveResultTypeThreshold).toHaveBeenCalledWith('p-1', 'FASTING');
+  });
+
+  it('R5 + R4：改时段 → 按**新时段**的目标重算（读数 8.9 未变，上限 7.0 使其由正常翻成偏高）', async () => {
+    const { service, targets } = setupUpdate();
+    targets.resolveResultTypeThreshold.mockResolvedValue({ low: 4.4, high: 7.0 });
+
+    const result = await service.update(
+      deptUser,
+      'p-1',
+      'g-1',
+      createInput({ mealContext: 'LUNCH_POST' }),
+    );
+
+    expect(result.resultType).toBe('2');
+    expect(result.changedFields).toEqual(['mealContext', 'resultType']);
+    // 阈值必须按**新**时段码解析，否则会用旧时段的目标判新时段的读数
+    expect(targets.resolveResultTypeThreshold).toHaveBeenCalledWith('p-1', 'LUNCH_POST');
+  });
+
+  it('改成非检测类型（3~9）→ 值与试纸强制清空，不解析任何阈值', async () => {
+    const { service, prisma, systemConfig, targets } = setupUpdate();
 
     const result = await service.update(
       deptUser,
@@ -1156,6 +1287,8 @@ describe('GlucoseService.update — R25 编辑血糖', () => {
       valueMmolL: null,
       testStrip: null,
     });
+    // R4 表第四行对 update 同样成立：3~9 原样入库，患者目标行与全局配置都不查
+    expect(targets.resolveResultTypeThreshold).not.toHaveBeenCalled();
     expect(systemConfig.getGlucoseAlertThreshold).not.toHaveBeenCalled();
   });
 
@@ -1649,7 +1782,7 @@ describe('GlucoseService.trend — P3-7 血糖趋势（原始测量点）', () =
     expect(result.rangeTo).toBeNull();
   });
 
-  it('thresholds 经 getGlucoseAlertThreshold 下发；stats 复用报表口径（总计只计 counted 码集）', async () => {
+  it('thresholds：患者无预警行时回退全局 getGlucoseAlertThreshold 下发；stats 复用报表口径（总计只计 counted 码集）', async () => {
     const { service, prisma, systemConfig } = createTrendService([lrec(19, 9, 0)]);
     systemConfig.getGlucoseAlertThreshold.mockResolvedValue({ low: 4.0, high: 15.0 });
     // 分组含 '1'×3 与 '5'×2；dictItem 默认 0~4 counted → 总计只数 '1' 的 3 条，'5' 不计入
@@ -1663,6 +1796,19 @@ describe('GlucoseService.trend — P3-7 血糖趋势（原始测量点）', () =
     expect(result.thresholds).toEqual({ low: 4.0, high: 15.0 });
     expect(result.stats.total).toBe(3);
     expect(result.stats.qualified).toBe(3);
+  });
+
+  it('R8：thresholds 走 resolveAlertThreshold（患者预警值优先），并按 patientId 解析', async () => {
+    const { service, systemConfig, targets } = createTrendService([lrec(19, 9, 0)]);
+    // 患者预警值刻意与全局（3.9/16.7）不同：若实现仍直读全局，这里会拿到旧值
+    targets.resolveAlertThreshold.mockResolvedValue({ low: 4.5, high: 13.0 });
+
+    const result = await service.trend(deptUser, 'p-1', trendQuery());
+
+    expect(result.thresholds).toEqual({ low: 4.5, high: 13.0 });
+    expect(targets.resolveAlertThreshold).toHaveBeenCalledWith('p-1');
+    // 命中患者行时不再读全局（§9：改造不得增加额外串行查询）
+    expect(systemConfig.getGlucoseAlertThreshold).not.toHaveBeenCalled();
   });
 
   it('operator 为空 → operatorName null（tooltip 显示 -）', async () => {
