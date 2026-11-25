@@ -349,3 +349,198 @@ body {
     font-size: 12px;
   }
 }
+
+/* ---------- R28 血糖数据打印（16 节，docs/specs/glucose-print.md） ----------
+   打印件恒为「白底黑字、固定字号」（规格 §4 规则 14）：不随主题/暗色模式/字号档变化。
+   本节的 #fff/#000/#333 等是**打印输出常量**（同 15 节先例），不是主题色，
+   不适用 ui-design-tokens 语义色规则；屏幕上的预览容器仍走 token（见 GlucosePrintModal）。 */
+
+/* 一张 A4 页：210×297mm、边距 12mm（裁定 C4）、固定高度 + overflow hidden（分页由
+   usePrintPagination 实测切分，不靠内容自然溢出）；flex 纵向：头部自然高、内容区占余 */
+.gc-print-sheet {
+  width: 210mm;
+  height: 297mm;
+  padding: 12mm;
+  box-sizing: border-box;
+  background: #fff;
+  color: #000;
+  font-size: 12px;
+  line-height: 1.5;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 大标题/小标题（需求第 2 条：居中、加粗、加大；打印固定字号，不随字号档） */
+.gc-print-main-title {
+  text-align: center;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.gc-print-sub-title {
+  text-align: center;
+  font-size: 16px;
+  font-weight: 600;
+  margin-top: 4px;
+}
+
+/* 患者信息（规格 §4 规则 2）：横向 4 组一行；label 等宽右对齐使「：」纵向对齐 */
+.gc-print-patient-info {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px 12px;
+  margin-top: 10px;
+}
+
+.gc-print-patient-item {
+  display: flex;
+  min-width: 0;
+}
+
+.gc-print-patient-label {
+  flex-shrink: 0;
+  width: 4.5em;
+  text-align: right;
+}
+
+.gc-print-patient-colon {
+  flex-shrink: 0;
+}
+
+.gc-print-patient-value {
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
+/* 时间范围行（需求第 3 条）：紧贴内容区右上 */
+.gc-print-range {
+  display: flex;
+  justify-content: flex-end;
+  margin: 8px 0 4px;
+}
+
+/* 内容区：占余下全部高度；data-print-content-slot 即分页可用高度的测量锚点 */
+.gc-print-content {
+  flex: 1;
+  min-height: 0;
+}
+
+/* 页脚（裁定 Q3/Q4）：紧贴内容区左下 */
+.gc-print-page-footer {
+  margin-top: 6px;
+  text-align: left;
+}
+
+/* 打印数据表（报告/记录共用）：全宽、细黑框、居中；表头不加底色（省墨、恒清晰） */
+.gc-print-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.gc-print-table th,
+.gc-print-table td {
+  border: 1px solid #333;
+  padding: 4px 6px;
+  font-size: 12px;
+  text-align: center;
+  vertical-align: middle;
+  overflow-wrap: break-word;
+}
+
+.gc-print-table thead th {
+  font-weight: 600;
+}
+
+/* 隐藏测量层：屏外渲染但保留布局（visibility hidden 仍可量高）；打印时彻底移除 */
+.gc-print-measure {
+  position: fixed;
+  left: -100000px;
+  top: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* 预览容器（Modal body 内）：屏幕上看分页效果；打印时全部还原为无装饰 */
+.gc-print-preview .gc-print-sheet {
+  margin: 0 auto 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+@media print {
+  /* A4 纵向、零页边距（边距由 .gc-print-sheet 的 padding 承担，裁定 C4）；
+     不用浏览器自带页眉页脚页码（页码在 .gc-print-page-footer，裁定 Q4/C4） */
+  @page {
+    size: A4 portrait;
+    margin: 0;
+  }
+
+  /* 打印开关：triggerBrowserPrint 给 body 挂 .gc-printing 期间只输出预览页。
+     Modal 挂在 body 下的独立 portal（不在 #root 内），故隐藏 #root 后
+     还需把 Modal 壳（mask/close/footer/定位/内边距）全部剥掉，只留页内容 */
+  body.gc-printing #root {
+    display: none !important;
+  }
+
+  body.gc-printing .ant-modal-mask,
+  body.gc-printing .ant-modal-close,
+  body.gc-printing .ant-modal-footer {
+    display: none !important;
+  }
+
+  body.gc-printing .ant-modal-wrap {
+    position: static !important;
+    overflow: visible !important;
+  }
+
+  body.gc-printing .ant-modal {
+    position: static !important;
+    top: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    max-width: none !important;
+    width: auto !important;
+  }
+
+  body.gc-printing .ant-modal-content {
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    background: #fff !important;
+    padding: 0 !important;
+  }
+
+  body.gc-printing .ant-modal-body {
+    padding: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  body.gc-printing .gc-print-preview {
+    background: #fff !important;
+    padding: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  /* 测量层与预览装饰（阴影/页间距）不上纸 */
+  body.gc-printing .gc-print-measure {
+    display: none !important;
+  }
+
+  body.gc-printing .gc-print-preview .gc-print-sheet {
+    margin: 0 !important;
+    box-shadow: none !important;
+  }
+
+  /* 页间切分：每张 sheet 一页；最后一张不再追加分页符（避免尾部空白页） */
+  .gc-print-sheet {
+    break-after: page;
+    page-break-after: always;
+  }
+
+  .gc-print-sheet:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+}
