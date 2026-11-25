@@ -389,6 +389,12 @@ enum AuditAction {
   /// 血糖趋势查询（GET /patients/:id/glucose/trend，P3-7），detail 记 rangeFrom / rangeTo / count / mealContexts。
   /// ⚠️ 枚举值必须追加在末尾（PG ALTER TYPE ADD VALUE 只能加到 pg_enum 末尾，见 DB-MIGRATION-NOTES.md §2.3）
   GLUCOSE_TREND_VIEW
+  /// 患者姓名明文访问（GET /patients/:id/name-plain，R28 打印头），每次调用即留痕（AGENTS.md §5.3「访问即留痕」）。
+  /// ⚠️ 枚举值必须追加在末尾（PG ALTER TYPE ADD VALUE 只能加到 pg_enum 末尾，见 DB-MIGRATION-NOTES.md §2.3）
+  PATIENT_NAME_PLAIN_VIEW
+  /// 血糖数据打印（POST /patients/:id/glucose/print，R28），detail 记 printType / rangeFrom / rangeTo / count。
+  /// ⚠️ 枚举值必须追加在末尾（PG ALTER TYPE ADD VALUE 只能加到 pg_enum 末尾，见 DB-MIGRATION-NOTES.md §2.3）
+  GLUCOSE_PRINT
 }
 
 /// 审计日志：只增不改不删，留存 >= 180 天（等保三级要求）
