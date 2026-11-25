@@ -146,7 +146,9 @@ export interface PatientGlucoseTargetsResponse {
  * 时段级变更用复合名精确定位：`FASTING.valueDown`、`FASTING.valueUp`、
  * `FASTING`（整行新增或删除）、`alert.lowThreshold`、`alert.highThreshold`。
  *
- * 空数组 = 提交值与库中完全一致，此时**不写审计行**（裁定 L，避免噪声）。
+ * 空数组 = 提交值与库中完全一致。此时**仍写一行 `SUCCESS` 审计**：`audit-log.interceptor.ts`
+ * 命中 `@Audit` 即无条件写入，架构上不支持按业务结果跳过，与 `PATIENT_UPDATE` / `GLUCOSE_UPDATE`
+ * 同口径；「不产生噪声」的正确含义是空数组可被审计查询过滤，而不是不写行（规格 §5.2）。
  * 扁平结构（而非嵌套 `item`）是为了让审计拦截器能从响应信封 `data` 顶层直接提取该字段。
  */
 export interface PatientGlucoseTargetsUpdateResult extends PatientGlucoseTargetsResponse {
