@@ -1,0 +1,22 @@
+-- ============================================================
+-- 患者控糖目标：AuditAction 新增 PATIENT_TARGET_VIEW
+--
+-- 规格：docs/specs/patient-glucose-target.md §5.2（2026-11-25 需求人复核裁定：
+-- 推翻原裁定 L「查看不留痕」，改为 GET 也留痕）。
+--
+-- 为什么改：既有单患者 GET 一律留痕（PATIENT_VIEW / ADMISSION_QUERY /
+-- PATIENT_NAME_PLAIN_VIEW），控糖目标 GET 不留痕会导致越权「查看」在审计表
+-- 筛不出（而越权「编辑」有 PATIENT_TARGET_UPDATE 留痕），口径不一致，
+-- 等保三级下敏感数据越权尝试应可追溯。
+--
+-- ⚠️ 枚举值**追加在 AuditAction 末尾**（PostgreSQL ALTER TYPE ADD VALUE 只能加到
+--    pg_enum 末尾，Prisma 漂移检测对枚举顺序敏感，见 DB-MIGRATION-NOTES.md §2.3）。
+--    本迁移不插入审计数据，不受「同一事务内不得使用新枚举值」的限制（同 20261124000000 先例）。
+--
+-- 用 IF NOT EXISTS：幂等，若该值已被手工加入也不报错（PG12+ 支持，可在事务块内）。
+--
+-- 无新表、无新列、无存量回填；PG 枚举值不可删，回滚 = 不回滚（留存无害）。
+-- ============================================================
+
+-- AlterEnum
+ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'PATIENT_TARGET_VIEW';
