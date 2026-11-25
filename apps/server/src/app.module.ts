@@ -9,6 +9,7 @@ import { DepartmentModule } from './modules/department/department.module';
 import { StaffModule } from './modules/staff/staff.module';
 import { DeviceModule } from './modules/device/device.module';
 import { PatientModule } from './modules/patient/patient.module';
+import { PatientGlucoseTargetModule } from './modules/patient/patient-glucose-target.module';
 import { DictModule } from './modules/dict/dict.module';
 import { GlucoseModule } from './modules/glucose/glucose.module';
 import { TimeSlotModule } from './modules/time-slot/time-slot.module';
@@ -31,6 +32,9 @@ import { PrismaModule } from './common/prisma/prisma.module';
     StaffModule,
     DeviceModule,
     PatientModule,
+    // 患者控糖目标：与 PatientModule 同前缀（patients/:id/glucose-targets），
+    // 独立成模块是因为它依赖 TimeSlotModule + SystemModule，而 PatientModule 不需要
+    PatientGlucoseTargetModule,
     DictModule,
     GlucoseModule,
     TimeSlotModule,
