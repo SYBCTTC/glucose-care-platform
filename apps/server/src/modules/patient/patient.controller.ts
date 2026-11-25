@@ -104,6 +104,27 @@ export class PatientController {
     return ok(result);
   }
 
+  /**
+   * 明文姓名（R28 打印头，裁定 A1(b)/Q7）：仅姓名一个明文字段。
+   * 独立权限点 `glucose:print`（不占用 patient:view/update，便于单独收权）；
+   * **访问即留痕**——每次调用记一条 PATIENT_NAME_PLAIN_VIEW（含 DENIED），
+   * 满足 AGENTS.md §5.3「详情页才展示完整信息，且访问即留痕」。
+   */
+  @Get(':id/name-plain')
+  @RequirePermissions(PERMISSION.GLUCOSE_PRINT)
+  @RequireDataScope(RESOURCE.PATIENT)
+  @Audit('PATIENT_NAME_PLAIN_VIEW', { targetType: 'PATIENT' })
+  async namePlain(
+    @Req() request: Request,
+    @Param(new ZodValidationPipe(patientIdSchema)) params: { id: string },
+  ) {
+    const result = await this.patientService.namePlain(
+      request.user as AuthenticatedUser,
+      params.id,
+    );
+    return ok(result);
+  }
+
   /** 患者信息编辑：出院校验与数据范围校验都在 service，controller 只做鉴权与转发 */
   @Patch(':id')
   @RequirePermissions(PERMISSION.PATIENT_UPDATE)

@@ -19,12 +19,13 @@ import type {
   PatientDetail,
   PatientListItem,
   PatientListQuery,
+  PatientNamePlainResult,
   PatientStatus,
   PatientUpdateResult,
   UpdatePatientInput,
 } from '@gc/shared';
 import { Prisma } from '@prisma/client';
-import { encryptDeterministic } from '../../common/crypto/field-crypto';
+import { decryptField, encryptDeterministic } from '../../common/crypto/field-crypto';
 import { assertInScope, buildScopeWhere } from '../../common/data-scope/scope.util';
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -352,6 +353,27 @@ export class PatientService {
       hba1c: row.hba1c === null ? null : Number(row.hba1c),
       devices: row.bindings.map((binding) => binding.device),
     };
+  }
+
+  /**
+   * 明文姓名（R28 打印头，裁定 A1(b)/Q7）。
+   * 安全约定：
+   *  1. 仅暴露 `name` 一个明文字段（打印头其余字段均非加密字段，详情接口已有）；
+   *  2. 独立权限点 `glucose:print`（controller 层）+ 数据范围 assertInScope，跨科室 → 30002；
+   *  3. **访问即留痕**：controller 挂 @Audit('PATIENT_NAME_PLAIN_VIEW')，每次调用一条（含 DENIED）；
+   *  4. 解密失败（历史 `enc:hmac:` 不可逆密文等）返回 `name: null`，前端回退 nameMasked，
+   *     不抛错（规格 §4 规则 15：不是错误，无对应错误码）。
+   */
+  async namePlain(user: AuthenticatedUser, id: string): Promise<PatientNamePlainResult> {
+    const row = await this.prisma.patient.findUnique({
+      where: { id },
+      select: { nameCipher: true, departmentId: true, archivedAt: true },
+    });
+    if (!row || row.archivedAt) {
+      throw new BusinessException(ERROR_CODES.PATIENT_NOT_FOUND);
+    }
+    assertInScope(user, RESOURCE.PATIENT, { departmentId: row.departmentId });
+    return { name: decryptField(row.nameCipher) };
   }
 
   /**

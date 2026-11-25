@@ -12,6 +12,7 @@ import {
 } from '@gc/shared';
 import type {
   CreateGlucoseInput,
+  GlucosePrintInput,
   GlucoseRecordQuery,
   GlucoseReportQuery,
   GlucoseReportResponse,
@@ -1790,5 +1791,86 @@ describe('GlucoseService.trend — P3-7 血糖趋势（原始测量点）', () =
     ).where;
     expect(findManyWhere.mealContext).toBeUndefined();
     expect(result.mealContexts).toBeNull();
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* GlucoseService.print — R28 打印留痕（纯留痕端点）                              */
+/* -------------------------------------------------------------------------- */
+
+function printInput(overrides: Partial<GlucosePrintInput> = {}): GlucosePrintInput {
+  return { printType: 'report', count: 12, ...overrides };
+}
+
+describe('GlucoseService.print — R28 打印留痕', () => {
+  it('回显审计 detail 字段：printType/rangeFrom/rangeTo/count，且不查血糖数据', async () => {
+    const { service, prisma } = createTrendService([]);
+    const startTime = new Date(2026, 10, 18, 10, 0, 0);
+    const endTime = new Date(2026, 10, 20, 23, 59, 59);
+
+    const result = await service.print(
+      deptUser,
+      'p-1',
+      printInput({ printType: 'record', startTime, endTime, count: 7 }),
+    );
+
+    expect(result).toEqual({
+      printType: 'record',
+      rangeFrom: formatDateTime(startTime),
+      rangeTo: formatDateTime(endTime),
+      count: 7,
+    });
+    // 纯留痕：不发任何血糖查询（打印数据由前端走既有 report/records 接口）
+    expect(prisma.glucoseRecord.findMany).not.toHaveBeenCalled();
+    expect(prisma.glucoseRecord.groupBy).not.toHaveBeenCalled();
+  });
+
+  it('不传时间 → rangeFrom/rangeTo 为 null（该侧不限，同报表口径）', async () => {
+    const { service } = createTrendService([]);
+
+    const result = await service.print(deptUser, 'p-1', printInput({ printType: 'trend' }));
+
+    expect(result.rangeFrom).toBeNull();
+    expect(result.rangeTo).toBeNull();
+    expect(result.printType).toBe('trend');
+  });
+
+  it('startTime > endTime → 10001（resolveTimeRange 兜底，同报表/记录/趋势）', async () => {
+    const { service } = createTrendService([]);
+
+    await expect(
+      service.print(
+        deptUser,
+        'p-1',
+        printInput({
+          startTime: new Date(2026, 10, 20, 0, 0, 0),
+          endTime: new Date(2026, 10, 18, 0, 0, 0),
+        }),
+      ),
+    ).rejects.toMatchObject({ code: ERROR_CODES.VALIDATION_FAILED });
+  });
+
+  it('跨科室 → 30002；NONE 档 → 30006；不存在/归档 → 40001', async () => {
+    const crossDept = createTrendService([]);
+    crossDept.prisma.patient.findUnique.mockResolvedValue({
+      departmentId: 'd-cardio',
+      archivedAt: null,
+    });
+    await expect(crossDept.service.print(deptUser, 'p-1', printInput())).rejects.toMatchObject({
+      code: ERROR_CODES.CROSS_DEPARTMENT_DENIED,
+    });
+
+    const noneScope = createTrendService([]);
+    await expect(noneScope.service.print(noneUser, 'p-1', printInput())).rejects.toMatchObject({
+      code: ERROR_CODES.NO_PATIENT_DATA_SCOPE,
+    });
+
+    for (const patient of [null, { departmentId: 'd-endo', archivedAt: new Date() }]) {
+      const ctx = createTrendService([]);
+      ctx.prisma.patient.findUnique.mockResolvedValue(patient);
+      await expect(ctx.service.print(deptUser, 'p-1', printInput())).rejects.toMatchObject({
+        code: ERROR_CODES.PATIENT_NOT_FOUND,
+      });
+    }
   });
 });

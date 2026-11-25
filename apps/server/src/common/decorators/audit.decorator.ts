@@ -84,4 +84,9 @@ export const AUDIT_DETAIL_ALLOW_LIST = [
    * 但一个患者有多条血糖记录，只靠 targetId + action 无法定位作废的是哪一条（同 wardRecordId 先例）。
    */
   'glucoseRecordId',
+  /**
+   * 打印类型（枚举码 report / record / trend，不含患者信息）：血糖数据打印（GLUCOSE_PRINT，R28）留痕。
+   * 裁定 Q10：单一审计动作，以 detail.printType 区分三种打印，避免枚举膨胀。
+   */
+  'printType',
 ] as const;

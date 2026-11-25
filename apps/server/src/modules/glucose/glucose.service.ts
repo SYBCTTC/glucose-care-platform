@@ -21,6 +21,8 @@ import type {
   CreateGlucoseInput,
   FieldError,
   GlucoseCreateResult,
+  GlucosePrintInput,
+  GlucosePrintResult,
   GlucoseRecordDetail,
   GlucoseRecordListResponse,
   GlucoseRecordQuery,
@@ -551,6 +553,30 @@ export class GlucoseService {
       count: points.length,
       // 回显实际生效的时段过滤（null = 未过滤/「全部」）：供审计 detail，使 count 随过滤变化可解释
       mealContexts: mealContexts.length > 0 ? mealContexts : null,
+    };
+  }
+
+  /**
+   * R28：打印留痕（纯留痕端点，docs/specs/glucose-print.md §3）。
+   *
+   * 校验患者可读（存在、未归档、数据范围内）后回显审计 detail 字段；
+   * **不查血糖数据、不生成文件**——打印数据由前端走既有 report/records 接口拉取，
+   * 本方法的意义是「谁在何时打印了哪个范围、多少条」落审计（裁定 Q10/Q11）。
+   * `count` 由前端透传（各 Tab 既有接口 `stats.total` 的 counted 口径，规格 §4 裁定 17），
+   * 服务端不重算：留痕口径与数据接口一致即可，重算需再查一遍库、无增益。
+   */
+  async print(
+    user: AuthenticatedUser,
+    patientId: string,
+    input: GlucosePrintInput,
+  ): Promise<GlucosePrintResult> {
+    await this.assertPatientReadable(user, patientId);
+    const range = this.resolveTimeRange(input);
+    return {
+      printType: input.printType,
+      rangeFrom: range.from,
+      rangeTo: range.to,
+      count: input.count,
     };
   }
 

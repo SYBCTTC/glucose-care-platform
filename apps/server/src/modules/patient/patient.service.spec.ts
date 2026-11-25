@@ -2,8 +2,16 @@ import { ERROR_CODES, GENDER, PATIENT_STATUS, PERMISSION } from '@gc/shared';
 import type { UpdatePatientInput } from '@gc/shared';
 import { Prisma } from '@prisma/client';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { decryptField } from '../../common/crypto/field-crypto';
 import type { AuthenticatedUser } from '../../common/types';
 import { PatientService } from './patient.service';
+
+// R28 namePlain：decryptField 真实实现依赖 PATIENT_FIELD_KEY（测试环境未配置，恒返回 null），
+// mock 掉以控制解密结果；encryptDeterministic 等其余导出保留真实实现（create/update 用例在用）。
+vi.mock('../../common/crypto/field-crypto', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../common/crypto/field-crypto')>();
+  return { ...actual, decryptField: vi.fn() };
+});
 
 const PATIENT_ID = 'p-0001';
 
@@ -339,6 +347,70 @@ describe('PatientService.detail', () => {
 
     expect(detail.nurseId).toBeNull();
     expect(detail.nurseName).toBeNull();
+  });
+});
+
+describe('PatientService.namePlain — R28 明文姓名（打印头）', () => {
+  let service: PatientService;
+  let prisma: ReturnType<typeof createService>['prisma'];
+
+  beforeEach(() => {
+    ({ service, prisma } = createService());
+    prisma.patient.findUnique.mockResolvedValue({
+      nameCipher: 'cipher-name',
+      departmentId: 'd-endo',
+      archivedAt: null,
+    });
+    // spy 调用记录跨用例累计（vitest 未开 clearMocks），先清再设返回值，
+    // 否则「越权不解密」用例的 not.toHaveBeenCalled 会被前面用例的调用污染
+    vi.mocked(decryptField).mockReset();
+    vi.mocked(decryptField).mockReturnValue('张三分');
+  });
+
+  it('本科室 → 返回解密后的明文姓名', async () => {
+    await expect(service.namePlain(deptUser, PATIENT_ID)).resolves.toEqual({ name: '张三分' });
+    expect(decryptField).toHaveBeenCalledWith('cipher-name');
+  });
+
+  it('解密失败（历史不可逆密文）→ name 为 null，不抛错（前端回退 nameMasked）', async () => {
+    vi.mocked(decryptField).mockReturnValue(null);
+
+    await expect(service.namePlain(deptUser, PATIENT_ID)).resolves.toEqual({ name: null });
+  });
+
+  it('跨科室 → 30002，且不解密（先鉴权后碰密文）', async () => {
+    prisma.patient.findUnique.mockResolvedValue({
+      nameCipher: 'cipher-name',
+      departmentId: 'd-cardio',
+      archivedAt: null,
+    });
+
+    await expect(service.namePlain(deptUser, PATIENT_ID)).rejects.toMatchObject({
+      code: ERROR_CODES.CROSS_DEPARTMENT_DENIED,
+    });
+    expect(decryptField).not.toHaveBeenCalled();
+  });
+
+  it('NONE 档 → 30006（设备管理员无患者数据）', async () => {
+    const noneUser = { ...deptUser, dataScope: 'NONE' } as unknown as AuthenticatedUser;
+
+    await expect(service.namePlain(noneUser, PATIENT_ID)).rejects.toMatchObject({
+      code: ERROR_CODES.NO_PATIENT_DATA_SCOPE,
+    });
+    expect(decryptField).not.toHaveBeenCalled();
+  });
+
+  it('不存在 / 已归档 → 40001', async () => {
+    for (const row of [
+      null,
+      { nameCipher: 'cipher-name', departmentId: 'd-endo', archivedAt: new Date() },
+    ]) {
+      prisma.patient.findUnique.mockResolvedValue(row);
+
+      await expect(service.namePlain(deptUser, PATIENT_ID)).rejects.toMatchObject({
+        code: ERROR_CODES.PATIENT_NOT_FOUND,
+      });
+    }
   });
 });
 

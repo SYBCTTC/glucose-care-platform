@@ -523,3 +523,47 @@ export interface GlucoseTrendResponse {
    */
   mealContexts: string[] | null;
 }
+
+/* -------------------------------------------------------------------------- */
+/* 血糖数据打印留痕（POST /patients/:id/glucose/print，R28）                      */
+/* -------------------------------------------------------------------------- */
+
+/** 打印类型（R28 裁定 Q10：单一审计枚举 GLUCOSE_PRINT，以 detail.printType 区分三种打印） */
+export const GLUCOSE_PRINT_TYPES = ['report', 'record', 'trend'] as const;
+export type GlucosePrintType = (typeof GLUCOSE_PRINT_TYPES)[number];
+
+/**
+ * 打印留痕入参（R28，裁定 Q11）。**纯留痕端点**：不生成文件、不返回血糖数据；
+ * 前端在预览 Modal 点「打印」时调用，成功后才触发 `window.print`。
+ *
+ * 时间口径与报表/记录契约一致（秒粒度本地时间，回显实际生效区间供审计 detail）；
+ * `count` = 打印范围内 counted=true 记录数（各 Tab 既有接口 `stats.total` 同口径，
+ * 服务端算、前端透传，规格 §4 裁定 17）。
+ */
+export const glucosePrintSchema = z.object({
+  printType: z.enum(GLUCOSE_PRINT_TYPES, {
+    errorMap: () => ({ message: '打印类型不合法' }),
+  }),
+  /** YYYY-MM-DD HH:mm:ss，本地时间；不传则不限起点（同 R24 契约） */
+  startTime: dateTimeStringSchema.optional(),
+  /** YYYY-MM-DD HH:mm:ss，本地时间；不传则不限终点 */
+  endTime: dateTimeStringSchema.optional(),
+  /** 打印范围内 counted=true 血糖记录数（审计 detail 用） */
+  count: z
+    .number({ invalid_type_error: '打印条数不合法' })
+    .int('打印条数必须为整数')
+    .min(0, '打印条数不能为负')
+    .max(10_000_000, '打印条数不合法'),
+});
+export type GlucosePrintInput = z.infer<typeof glucosePrintSchema>;
+
+/**
+ * 打印留痕响应：回显审计 detail 字段。
+ * `rangeFrom`/`rangeTo`/`count` 走既有白名单；`printType` 需登记 `AUDIT_DETAIL_ALLOW_LIST`（先例 `mealContexts`）。
+ */
+export interface GlucosePrintResult {
+  printType: GlucosePrintType;
+  rangeFrom: string | null;
+  rangeTo: string | null;
+  count: number;
+}

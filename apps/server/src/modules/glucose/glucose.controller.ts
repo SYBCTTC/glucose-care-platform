@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req } from '@
 import type { Request } from 'express';
 import {
   createGlucoseSchema,
+  glucosePrintSchema,
   glucoseRecordParamsSchema,
   glucoseRecordQuerySchema,
   glucoseReportQuerySchema,
@@ -12,6 +13,7 @@ import {
 } from '@gc/shared';
 import type {
   CreateGlucoseInput,
+  GlucosePrintInput,
   GlucoseRecordQuery,
   GlucoseReportQuery,
   GlucoseTrendQuery,
@@ -125,6 +127,32 @@ export class GlucoseController {
       request.user as AuthenticatedUser,
       params.id,
       query,
+    );
+    return ok(result);
+  }
+
+  /**
+   * R28：血糖数据打印留痕（POST，纯留痕端点，docs/specs/glucose-print.md）。
+   *
+   * 前端在预览 Modal 点「打印」时调用，成功后才触发 `window.print`（裁定 Q11：
+   * 浏览器无法感知是否实际出纸，以点击为准；打开预览不记）。不生成文件、不返回血糖数据。
+   * 权限 `glucose:print`（裁定 Q5/A3，独立权限点）；审计 GLUCOSE_PRINT（裁定 Q10：
+   * 单一动作，detail.printType 区分 report/record/trend），`rangeFrom`/`rangeTo`/`count`
+   * 走既有白名单，`printType` 需登记 AUDIT_DETAIL_ALLOW_LIST（先例 mealContexts）。
+   */
+  @Post(':id/glucose/print')
+  @RequirePermissions(PERMISSION.GLUCOSE_PRINT)
+  @RequireDataScope(RESOURCE.PATIENT)
+  @Audit('GLUCOSE_PRINT', { targetType: 'PATIENT' })
+  async print(
+    @Req() request: Request,
+    @Param(new ZodValidationPipe(patientIdSchema)) params: { id: string },
+    @Body(new ZodValidationPipe(glucosePrintSchema)) body: GlucosePrintInput,
+  ) {
+    const result = await this.glucoseService.print(
+      request.user as AuthenticatedUser,
+      params.id,
+      body,
     );
     return ok(result);
   }

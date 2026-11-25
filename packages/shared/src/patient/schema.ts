@@ -255,6 +255,18 @@ export interface PatientAdmitResult {
   item: PatientListItem;
 }
 
+/**
+ * 明文姓名响应（GET /patients/:id/name-plain，R28 打印头，裁定 A1(b)/Q7）。
+ *
+ * 仅姓名一个明文字段；接口受独立权限点 `glucose:print` + 数据范围保护，
+ * 每次调用即记 `PATIENT_NAME_PLAIN_VIEW` 审计（AGENTS.md §5.3「访问即留痕」）。
+ * `name: null` = 密文不可解（历史 `enc:hmac:` 不可逆密文等），前端回退展示
+ * `nameMasked`，**不是错误**（规格 §4 规则 15）。
+ */
+export interface PatientNamePlainResult {
+  name: string | null;
+}
+
 /* -------------------------------------------------------------------------- */
 /* 住院记录（R24，GET /patients/:id/admissions）                                 */
 /* -------------------------------------------------------------------------- */
