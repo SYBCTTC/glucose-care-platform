@@ -3,13 +3,17 @@ import { ERROR_CODES, PATIENT_STATUS, PERMISSION, TIME_SLOT_CATEGORY } from '@gc
 import type { UpdatePatientGlucoseTargetsInput } from '@gc/shared';
 import { Prisma } from '@prisma/client';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { BusinessException } from '../../common/exceptions/business.exception';
 import type { AuthenticatedUser } from '../../common/types';
 import { PatientGlucoseTargetService } from './patient-glucose-target.service';
 
 /**
  * 患者控糖目标 service 单测。规格 `docs/specs/patient-glucose-target.md` §8 后端项。
  *
- * 判定改造（R4 / `resolveResultType`）属任务 ④，不在本文件覆盖范围。
+ * 任务 ④（判定改造）在本文件覆盖两个阈值解析方法：`resolveResultTypeThreshold`（R4）
+ * 与 `resolveAlertThreshold`（R8）。判定结果的比大小逻辑（`resolveResultType`）与
+ * R5 重算条件在 `glucose.service.spec.ts` 覆盖 —— 那边把本 service 当桩，
+ * 两边各自钉住自己的职责，避免同一断言写两遍。
  */
 
 const PATIENT_ID = 'p-0001';
@@ -107,6 +111,8 @@ function createService() {
     patient: { findUnique: vi.fn() },
     patientGlucoseTarget: {
       findMany: vi.fn(),
+      // R4：判定阈值按 (patientId, timeSlotCode) 单行查，不走 findMany
+      findUnique: vi.fn(),
       createMany: vi.fn(),
       deleteMany: vi.fn(),
       update: vi.fn(),
@@ -138,6 +144,8 @@ beforeEach(() => {
   systemConfig.getGlucoseAlertThreshold.mockResolvedValue({ low: 3.9, high: 16.7 });
   prisma.patient.findUnique.mockResolvedValue(patientRow());
   prisma.patientGlucoseTarget.findMany.mockResolvedValue([]);
+  // R4：默认「患者无该时段目标行」→ 判定阈值回退全局；有行的场景由对应用例单独覆盖
+  prisma.patientGlucoseTarget.findUnique.mockResolvedValue(null);
   // 默认让预警行存在、且值与 updateInput() 的默认 alert 一致：这样「只改时段目标」的用例
   // 不会额外产生 alert.* 变更，changedFields 断言才干净。
   // 预警行缺失的场景由对应用例单独 mockResolvedValue(null) 覆盖。
@@ -549,5 +557,160 @@ describe('initSnapshot — 建档快照（R9 / 裁定 G、Q）', () => {
 
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
+  });
+});
+
+describe('resolveResultTypeThreshold — R4 判定阈值解析（裁定 E，任务 ④）', () => {
+  it('患者有该时段目标行 → 用患者的 valueDown/valueUp，Decimal 转 number', async () => {
+    prisma.patientGlucoseTarget.findUnique.mockResolvedValue({
+      valueDown: new Prisma.Decimal('4.4'),
+      valueUp: new Prisma.Decimal('7.0'),
+    });
+
+    await expect(service.resolveResultTypeThreshold(PATIENT_ID, 'FASTING')).resolves.toEqual({
+      low: 4.4,
+      high: 7.0,
+    });
+    // 复合唯一键查单行，不是 findMany 全捞再内存过滤（§9 非功能要求）
+    expect(prisma.patientGlucoseTarget.findUnique).toHaveBeenCalledWith({
+      where: { patientId_timeSlotCode: { patientId: PATIENT_ID, timeSlotCode: 'FASTING' } },
+      select: { valueDown: true, valueUp: true },
+    });
+  });
+
+  it('有患者行时不读全局配置（省一次查询）', async () => {
+    prisma.patientGlucoseTarget.findUnique.mockResolvedValue({
+      valueDown: new Prisma.Decimal('5.0'),
+      valueUp: new Prisma.Decimal('8.3'),
+    });
+
+    await service.resolveResultTypeThreshold(PATIENT_ID, 'BEDTIME');
+
+    expect(systemConfig.getGlucoseAlertThreshold).not.toHaveBeenCalled();
+  });
+
+  it('患者缺行（未设置）→ 回退全局 3.9/16.7（R4 第二行，裁定 K 新增时段不补行同此路径）', async () => {
+    prisma.patientGlucoseTarget.findUnique.mockResolvedValue(null);
+
+    await expect(service.resolveResultTypeThreshold(PATIENT_ID, 'FASTING')).resolves.toEqual({
+      low: 3.9,
+      high: 16.7,
+    });
+    expect(systemConfig.getGlucoseAlertThreshold).toHaveBeenCalledTimes(1);
+  });
+
+  it('强化 / 随机 / 复测时段 → 必然缺行 → 回退全局（R4 第三行，裁定 A）', async () => {
+    // R3 禁止给展示集合外的时段写目标行，故库里查不到 → 回退。
+    // 用 RANDOM 与 INTENSIVE_AM 各验一次，钉住实现「不按 code 特判、只看有没有行」
+    prisma.patientGlucoseTarget.findUnique.mockResolvedValue(null);
+
+    await expect(service.resolveResultTypeThreshold(PATIENT_ID, 'RANDOM')).resolves.toEqual({
+      low: 3.9,
+      high: 16.7,
+    });
+    await expect(service.resolveResultTypeThreshold(PATIENT_ID, 'INTENSIVE_AM')).resolves.toEqual({
+      low: 3.9,
+      high: 16.7,
+    });
+  });
+
+  it('时段已停用但目标行保留 → 仍用患者值，且**不查展示集合**（R10：历史判定仍可用）', async () => {
+    // 停用时段不满足 R1 的 enabled 条件；若实现叠加了 loadDisplaySet 过滤，
+    // 这里会退化成全局 3.9/16.7 —— 本用例即钉住该偏差不得发生
+    timeSlots.list.mockResolvedValue([
+      { ...DISPLAY_SLOTS[0], enabled: false },
+      ...DISPLAY_SLOTS.slice(1),
+      ...EXCLUDED_SLOTS,
+    ]);
+    prisma.patientGlucoseTarget.findUnique.mockResolvedValue({
+      valueDown: new Prisma.Decimal('4.4'),
+      valueUp: new Prisma.Decimal('7.0'),
+    });
+
+    await expect(service.resolveResultTypeThreshold(PATIENT_ID, 'FASTING')).resolves.toEqual({
+      low: 4.4,
+      high: 7.0,
+    });
+    expect(timeSlots.list).not.toHaveBeenCalled();
+  });
+
+  it('缺行且全局配置缺失/非法 → 原样抛 10000，不退回任何默认常量（AGENTS.md §4.3）', async () => {
+    prisma.patientGlucoseTarget.findUnique.mockResolvedValue(null);
+    systemConfig.getGlucoseAlertThreshold.mockRejectedValue(
+      new BusinessException(ERROR_CODES.INTERNAL_ERROR),
+    );
+
+    await expect(service.resolveResultTypeThreshold(PATIENT_ID, 'FASTING')).rejects.toMatchObject({
+      code: ERROR_CODES.INTERNAL_ERROR,
+    });
+  });
+});
+
+describe('resolveAlertThreshold — R8 趋势图阈值线（裁定 Y，任务 ④）', () => {
+  it('患者有预警行 → 用患者值（Decimal 转 number），不读全局', async () => {
+    prisma.patientAlertThreshold.findUnique.mockResolvedValue({
+      lowThreshold: new Prisma.Decimal('4.0'),
+      highThreshold: new Prisma.Decimal('15.0'),
+    });
+
+    await expect(service.resolveAlertThreshold(PATIENT_ID)).resolves.toEqual({
+      low: 4.0,
+      high: 15.0,
+    });
+    expect(prisma.patientAlertThreshold.findUnique).toHaveBeenCalledWith({
+      where: { patientId: PATIENT_ID },
+      select: { lowThreshold: true, highThreshold: true },
+    });
+    expect(systemConfig.getGlucoseAlertThreshold).not.toHaveBeenCalled();
+  });
+
+  it('患者无预警行 → 回退全局 3.9/16.7（R9 建档快照初始化失败后的路径）', async () => {
+    prisma.patientAlertThreshold.findUnique.mockResolvedValue(null);
+
+    await expect(service.resolveAlertThreshold(PATIENT_ID)).resolves.toEqual({
+      low: 3.9,
+      high: 16.7,
+    });
+  });
+
+  it('患者行读取异常 → 记 warn 并回退全局（趋势图是只读展示，不整页失败）', async () => {
+    prisma.patientAlertThreshold.findUnique.mockRejectedValue(new Error('connection closed'));
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+    await expect(service.resolveAlertThreshold(PATIENT_ID)).resolves.toEqual({
+      low: 3.9,
+      high: 16.7,
+    });
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('患者行缺失且全局也读不到 → 抛 10000（与改造前 trend() 行为一致，不新增兜底）', async () => {
+    prisma.patientAlertThreshold.findUnique.mockResolvedValue(null);
+    systemConfig.getGlucoseAlertThreshold.mockRejectedValue(
+      new BusinessException(ERROR_CODES.INTERNAL_ERROR),
+    );
+
+    await expect(service.resolveAlertThreshold(PATIENT_ID)).rejects.toMatchObject({
+      code: ERROR_CODES.INTERNAL_ERROR,
+    });
+  });
+
+  it('读的是预警值而非时段目标：两者是独立机制（R7 / 裁定 E）', async () => {
+    // 目标行设成与预警行明显不同的值，确认趋势图阈值线不受时段目标影响
+    prisma.patientGlucoseTarget.findUnique.mockResolvedValue({
+      valueDown: new Prisma.Decimal('4.4'),
+      valueUp: new Prisma.Decimal('7.0'),
+    });
+    prisma.patientAlertThreshold.findUnique.mockResolvedValue({
+      lowThreshold: new Prisma.Decimal('3.9'),
+      highThreshold: new Prisma.Decimal('16.7'),
+    });
+
+    await expect(service.resolveAlertThreshold(PATIENT_ID)).resolves.toEqual({
+      low: 3.9,
+      high: 16.7,
+    });
+    expect(prisma.patientGlucoseTarget.findUnique).not.toHaveBeenCalled();
   });
 });

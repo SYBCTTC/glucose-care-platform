@@ -13,6 +13,7 @@ import { BusinessException } from '../../common/exceptions/business.exception';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import type { AuthenticatedUser } from '../../common/types';
 import { isUniqueConstraintViolation } from '../../common/utils/prisma-error';
+import type { GlucoseAlertThreshold } from '../system/system-config.service';
 import { SystemConfigService } from '../system/system-config.service';
 import { TimeSlotService } from '../time-slot/time-slot.service';
 
@@ -184,6 +185,76 @@ export class PatientGlucoseTargetService {
         error instanceof Error ? error.stack : String(error),
       );
     }
+  }
+
+  /**
+   * R4 / 裁定 E：解析 `resultType`（0 偏低 / 1 正常 / 2 偏高）的**判定阈值**。
+   * 供 `GlucoseService.create` / `update` 调用，是判定阈值的唯一解析入口。
+   *
+   * 口径：**患者有该时段的目标行就用患者值，缺行则回退全局 `SystemConfig`**。
+   * 这里刻意**不叠加展示集合过滤**（不查 `loadDisplaySet`）——「有没有行」已能覆盖 R4 表的
+   * 全部分支，且叠加过滤反而会与 R10 冲突：
+   *  - 强化 / 随机 / 复测时段：R3 禁止为其写目标行 → 必然缺行 → 回退全局（= R4 第三行）；
+   *  - 在展示集合内但医护未设置（含新增时段不补行，裁定 K）：缺行 → 回退全局（= R4 第二行）；
+   *  - 在展示集合内且已设置：有行 → 用患者的 `valueDown` / `valueUp`（= R4 第一行）；
+   *  - 时段被**停用**或默认值被**清空**：目标行按 R10「保留不删」，且 R10 明确
+   *    「历史记录判定时仍可用」→ 有行即用。若在此按 `enabled` 过滤，编辑该时段的历史血糖
+   *    会退化成全局阈值，直接违背 R10。
+   * 附带收益：录入/编辑路径不必多查一次 `TimeSlot` 全表（§9 非功能要求）。
+   *
+   * 全局阈值读取失败**原样抛出 10000**，不做任何兜底（`AGENTS.md` §4.3：按错误阈值分类
+   * 比拒绝录入更危险，结果类型直接进病历）。患者行的 `valueDown < valueUp` 由 R3 写入校验
+   * 与 Zod 契约保证，故此处不再复检；`Decimal(4,1)` 出参统一 `Number()`（同 `buildResponse`）。
+   *
+   * ⚠️ **模块内部方法，不做权限/数据范围校验**（与 `resolveAlertThreshold` 同）：
+   * 调用方（`GlucoseService.create` / `update`）已先过 `assertPatientWritable`
+   * （存在 + 未归档 + 住院中 + `assertInScope`），此处再查一遍属重复开销。
+   * **新增调用方必须自行完成患者级鉴权**，否则会成为绕过数据权限的读路径。
+   */
+  async resolveResultTypeThreshold(
+    patientId: string,
+    timeSlotCode: string,
+  ): Promise<GlucoseAlertThreshold> {
+    const row = await this.prisma.patientGlucoseTarget.findUnique({
+      where: { patientId_timeSlotCode: { patientId, timeSlotCode } },
+      select: { valueDown: true, valueUp: true },
+    });
+    if (row) {
+      return { low: Number(row.valueDown), high: Number(row.valueUp) };
+    }
+    return this.systemConfig.getGlucoseAlertThreshold();
+  }
+
+  /**
+   * R8 / 裁定 Y：趋势图阈值线 = **该患者的预警值**，缺行或读取失败回退全局 `SystemConfig`。
+   *
+   * 与 `resolveResultTypeThreshold` 的区别：这里读 `PatientAlertThreshold`（预警值），
+   * **不是**时段目标 —— 两者是独立机制（R7），预警值**不参与** `resultType` 判定（裁定 E）。
+   *
+   * 患者行读取异常时回退全局并记 `warn`：趋势图是只读展示，不该因辅助配置查不到就整页失败
+   * （与 R9「失败不阻断建档」同一取向）。全局也读不到则原样抛 10000 —— 与改造前 `trend()`
+   * 直接调 `getGlucoseAlertThreshold()` 的行为一致，不引入新兜底。
+   *
+   * ⚠️ 已知限制（§11 待确认项 2，需求人 2026-11-25 已接受）：预警值默认 3.9/16.7 比时段目标
+   * 下限（空腹 4.4）宽，故会出现「判为偏低的红点落在趋势图目标带内部」。
+   */
+  async resolveAlertThreshold(patientId: string): Promise<GlucoseAlertThreshold> {
+    try {
+      const row = await this.prisma.patientAlertThreshold.findUnique({
+        where: { patientId },
+        select: { lowThreshold: true, highThreshold: true },
+      });
+      if (row) {
+        return { low: Number(row.lowThreshold), high: Number(row.highThreshold) };
+      }
+    } catch (error) {
+      // 只记患者 ID 与错误摘要，不记阈值明细（日志不承载业务数据，同 initSnapshot 口径）
+      this.logger.warn(
+        `[glucose-target] 患者预警值读取失败，趋势图阈值线回退全局配置（患者 ${patientId}）`,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+    return this.systemConfig.getGlucoseAlertThreshold();
   }
 
   /**
