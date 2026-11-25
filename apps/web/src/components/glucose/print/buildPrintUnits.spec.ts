@@ -105,14 +105,36 @@ describe('buildReportPrintUnits — 报表打印单元（裁定 C1 + 规格 §4 
 
     const units = buildReportPrintUnits(data, ALL_ON, countedCodeSet(RESULT_TYPES));
 
-    expect(units).toHaveLength(1);
-    expect(units[0].key).toBe('2026-11-20');
-    // 列序优先：FASTING(0) 的两条在前（保持时间升序），BREAKFAST_POST(1) 的一条在后
-    expect(units[0].rows.map((row) => [row.slotIndex, row.entry.id])).toEqual([
-      [0, 'e1'],
-      [0, 'e2'],
-      [1, 'e3'],
+    // 行级单元：每条记录一个单元，key = 记录 id；列序优先（同列内保持时间升序）
+    expect(units.map((unit) => [unit.slotIndex, unit.key, unit.date])).toEqual([
+      [0, 'e1', '2026-11-20'],
+      [0, 'e2', '2026-11-20'],
+      [1, 'e3', '2026-11-20'],
     ]);
+  });
+
+  it('多日期按日期升序摊平为行级单元序列（行级装箱、日期组可跨页的前提）', () => {
+    const data = report({
+      rows: [
+        { date: '2026-11-20', cells: [{ slotCode: 'FASTING', entries: [entry({ id: 'a1' })] }] },
+        {
+          date: '2026-11-21',
+          cells: [
+            { slotCode: 'BREAKFAST_POST', entries: [entry({ id: 'b1' }), entry({ id: 'b2' })] },
+          ],
+        },
+      ],
+    });
+
+    const units = buildReportPrintUnits(data, ALL_ON, countedCodeSet(RESULT_TYPES));
+
+    expect(units.map((unit) => [unit.date, unit.key])).toEqual([
+      ['2026-11-20', 'a1'],
+      ['2026-11-21', 'b1'],
+      ['2026-11-21', 'b2'],
+    ]);
+    // 页脚计数：行级 0/1
+    expect(units.map((unit) => unit.counted)).toEqual([1, 1, 1]);
   });
 
   it('无可见记录的日期整组跳过（裁定 16：勾选过滤后为空的日期不占行）', () => {
@@ -138,7 +160,7 @@ describe('buildReportPrintUnits — 报表打印单元（裁定 C1 + 规格 §4 
       countedCodeSet(RESULT_TYPES),
     );
 
-    expect(units.map((unit) => unit.key)).toEqual(['2026-11-21']);
+    expect(units.map((unit) => unit.date)).toEqual(['2026-11-21']);
   });
 
   it('counted 计数：只数 counted=true 的记录（拒检等 5~9 不计入）', () => {
@@ -158,8 +180,8 @@ describe('buildReportPrintUnits — 报表打印单元（裁定 C1 + 规格 §4 
 
     const units = buildReportPrintUnits(data, ALL_ON, countedCodeSet(RESULT_TYPES));
 
-    expect(units[0].rows).toHaveLength(2); // 拒检记录仍占一行（可见），只是不计数
-    expect(units[0].counted).toBe(1);
+    expect(units).toHaveLength(2); // 拒检记录仍占一行（可见），只是不计数
+    expect(units.map((unit) => unit.counted)).toEqual([1, 0]);
   });
 
   it('列集合外的格防御性跳过（columns 与 cells 同源，正常不发生）', () => {

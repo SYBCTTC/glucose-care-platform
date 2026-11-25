@@ -13,20 +13,20 @@ import { filterReportRows } from '@/pages/inpatient/patient-detail/GlucoseReport
  * 全部可单测（buildPrintUnits.spec.ts）；DOM 测量/渲染在文档组件里。
  */
 
-/** 报表打印的一个分页单元 = 一个日期组（rowspan 合格，组是原子的、不跨页拆，裁定 C1） */
-export interface ReportPrintRow {
+/**
+ * 报表打印的一个分页单元 = **单条记录行**（2026-11-25 需求人变更裁定：行级装箱）。
+ * 原「日期组原子、不跨页拆」会让装不下的下一组整体推去新页、首页大量留白；
+ * 改为逐行装箱后日期组可跨页，日期列由 PrintReportDocument 按
+ * 「页内连续同日期片段」合并 rowspan（同日期跨两页时两页各自合并自己的片段）。
+ */
+export interface ReportPrintUnit {
+  /** 单元键 = 记录 id（GlucoseRecord.id），与行上的 data-print-unit-key 一致 */
+  key: string;
+  date: string;
   /** 该条记录落在 data.columns 的第几个时段列 */
   slotIndex: number;
   entry: GlucoseReportEntry;
-}
-
-export interface ReportPrintUnit {
-  /** 单元键 = 日期（YYYY-MM-DD），与行上的 data-print-unit-key 一致 */
-  key: string;
-  date: string;
-  /** 该日期下全部可见记录，按列序（columns 顺序）排列；同列内保持服务端升序 */
-  rows: ReportPrintRow[];
-  /** 该组内 counted=true 的记录数（页脚「本页 X 条」累加用） */
+  /** 该行是否 counted=true（0/1，页脚「本页 X 条」累加用） */
   counted: number;
 }
 
@@ -46,7 +46,9 @@ export function countedCodeSet(resultTypes: DictItemOption[]): Set<string> {
  *   （裁定 C1，与屏幕「同格多条挤一个 td」不同）；
  * - 行按列序排列（Array.sort 稳定，同列内保持 entries 的时间升序）；
  * - **无可见记录的日期整组跳过**（规格 §4 裁定 16：屏幕保留空行是为分页 total
- *   口径，打印无此约束，空行只是噪音）。
+ *   口径，打印无此约束，空行只是噪音）；
+ * - 输出为**行级单元**序列（日期升序 → 组内列序），分页装箱逐行进行，
+ *   装满判定为 DOM 实测高度自适应（2026-11-25 变更裁定，不硬编码每页行数）。
  */
 export function buildReportPrintUnits(
   data: GlucoseReportResponse,
@@ -57,7 +59,7 @@ export function buildReportPrintUnits(
   const units: ReportPrintUnit[] = [];
 
   for (const row of filterReportRows(data.rows, display)) {
-    const rows: ReportPrintRow[] = [];
+    const rows: { slotIndex: number; entry: GlucoseReportEntry }[] = [];
     row.cells.forEach((cell) => {
       const slotIndex = slotIndexOf.get(cell.slotCode);
       if (slotIndex === undefined) {
@@ -71,12 +73,15 @@ export function buildReportPrintUnits(
       continue;
     }
     rows.sort((a, b) => a.slotIndex - b.slotIndex);
-    units.push({
-      key: row.date,
-      date: row.date,
-      rows,
-      counted: rows.filter((row_) => counted.has(row_.entry.resultType)).length,
-    });
+    for (const item of rows) {
+      units.push({
+        key: item.entry.id,
+        date: row.date,
+        slotIndex: item.slotIndex,
+        entry: item.entry,
+        counted: counted.has(item.entry.resultType) ? 1 : 0,
+      });
+    }
   }
   return units;
 }

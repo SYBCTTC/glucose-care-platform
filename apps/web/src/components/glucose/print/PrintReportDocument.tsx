@@ -15,7 +15,8 @@ import { ReportCell } from '@/pages/inpatient/patient-detail/GlucoseReportTab';
  *
  * 与屏幕的差异（裁定 C1）：同一日期同一时段的多条记录**每条独占一行**，
  * 日期列 rowspan 跨行合并；记录落对应时段列、其余列留空；不含统计栏。
- * 分页单元 = 日期组（原子，不跨页拆组，否则 rowspan 断裂）。
+ * 分页单元 = 单记录行（2026-11-25 变更裁定：行级装箱、实测高度自适应装满）；
+ * 日期组可跨页，日期列按「页内连续同日期片段」合并——同日期跨两页时两页各自合并。
  */
 
 /** 日期列宽（px）：容纳 YYYY-MM-DD（12px 字号）+ 单元格内边距；时段列均分余宽 */
@@ -48,29 +49,40 @@ export default function PrintReportDocument({
   const unitByKey = useMemo(() => new Map(units.map((unit) => [unit.key, unit])), [units]);
 
   /** 测量层与真实页共用同一渲染（量到的高度 = 实际打印高度） */
-  const renderTable = (pageUnits: ReportPrintUnit[]) => (
-    <table className="gc-print-table">
-      <colgroup>
-        <col style={{ width: DATE_COL_WIDTH }} />
-        {data.columns.map((column) => (
-          <col key={column.code} />
-        ))}
-      </colgroup>
-      <thead>
-        <tr>
-          <th>日期</th>
+  const renderTable = (pageRows: ReportPrintUnit[]) => {
+    // 日期列：页内连续同日期行合并；同日期被拆到两页时两页各自合并自己的片段
+    const spans = pageRows.map(() => 0);
+    pageRows.forEach((row, index) => {
+      if (index === 0 || row.date !== pageRows[index - 1].date) {
+        let length = 1;
+        while (index + length < pageRows.length && pageRows[index + length].date === row.date) {
+          length += 1;
+        }
+        spans[index] = length;
+      }
+    });
+    return (
+      <table className="gc-print-table">
+        <colgroup>
+          <col style={{ width: DATE_COL_WIDTH }} />
           {data.columns.map((column) => (
-            <th key={column.code}>{column.name}</th>
+            <col key={column.code} />
           ))}
-        </tr>
-      </thead>
-      <tbody>
-        {pageUnits.map((unit) =>
-          unit.rows.map((row, rowIndex) => (
-            <tr key={`${unit.key}-${rowIndex}`} data-print-unit="" data-print-unit-key={unit.key}>
-              {rowIndex === 0 ? (
-                <td rowSpan={unit.rows.length} className="gc-num">
-                  {unit.date}
+        </colgroup>
+        <thead>
+          <tr>
+            <th>日期</th>
+            {data.columns.map((column) => (
+              <th key={column.code}>{column.name}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {pageRows.map((row, index) => (
+            <tr key={row.key} data-print-unit="" data-print-unit-key={row.key}>
+              {spans[index] > 0 ? (
+                <td rowSpan={spans[index]} className="gc-num">
+                  {row.date}
                 </td>
               ) : null}
               {data.columns.map((column, columnIndex) => (
@@ -85,11 +97,11 @@ export default function PrintReportDocument({
                 </td>
               ))}
             </tr>
-          )),
-        )}
-      </tbody>
-    </table>
-  );
+          ))}
+        </tbody>
+      </table>
+    );
+  };
 
   return (
     <PrintPagedDocument
