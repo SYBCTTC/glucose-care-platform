@@ -437,33 +437,36 @@ Zod schema 放 `packages/shared`，前后端共用（同一套校验规则，避
 ## 10. 验收标准（可勾选）
 
 - [ ] 患者详情 Tab 显示「控糖目标」，路由为 `/target`，旧 `/basic` 不再可达
-- [ ] 展示区按 R1 展示 8 个时段，一行三个，`label：value` 格式，数值补 1 位小数
-- [ ] 8 个时段后另起展示「低血糖预警」「高血糖预警」
-- [ ] 缺行时段显示「未设置」
-- [ ] 右上角「编辑」按钮仅在 `INPATIENT` + 有 `patient:target:update` 时可见
-- [ ] 编辑弹框两个一行，末尾另起一行两个预警值输入框
-- [ ] 「恢复默认」重置表单为当前 `TimeSlot` + `SystemConfig` 值，需点保存才落库
-- [ ] 有未保存改动时取消 → 二次确认
-- [ ] 清空某时段两个框并保存 → 该行被删除，展示变「未设置」
-- [ ] 只清空一个框 → 字段级报错，不提交
-- [ ] 下限 ≥ 上限 / 超 0.6~33.3 / 超 1 位小数 → 字段级报错
-- [ ] 出院/归档患者：可看不可改，后端同样拒绝（出院 `40004`、归档 `40001`）
-- [ ] `DEVICE_ADMIN` 与跨科室用户：后端拒绝（`30004` / `30002`）并记 `DENIED` 审计
-- [ ] 新建患者后自动有 8 行目标 + 1 行预警（值等于当时 `TimeSlot` / `SystemConfig`）
-- [ ] 管理员改 `TimeSlot` 默认值后，存量患者目标**不变**
-- [ ] `SystemConfig` 阈值行缺失时建档**仍成功**，目标行缺失，服务端有 `warn` 日志
-- [ ] 回填脚本试运行只输出统计；`--apply` 后存量患者全部有目标行；重跑不产生重复
+- [x] 展示区按 R1 展示 8 个时段，一行三个，`label：value` 格式，数值补 1 位小数（③ e2e 实测：`空腹：4.4-7.0 mmol/L`、`睡前：5.0-8.3 mmol/L`，时段名由接口下发）
+- [x] 8 个时段后另起展示「低血糖预警」「高血糖预警」（③ e2e 实测 3.9 / 16.7）
+- [x] 缺行时段显示「未设置」（③ e2e 实测：删行后展示区变「睡前：未设置」；半配置分支由单测覆盖）
+- [x] 右上角「编辑」按钮仅在 `INPATIENT` + 有 `patient:target:update` 时可见（③ e2e 实测：住院患者 1 个按钮；出院患者 0 个，且与既有「添加血糖」按钮同为 0，证明门控同口径）
+- [x] 编辑弹框两个一行，末尾另起一行两个预警值输入框（③ e2e 可访问性快照实测：8 时段 × 2 个 spinbutton + 2 个预警值输入框，均带 aria-label）
+- [x] 「恢复默认」重置表单为当前 `TimeSlot` + `SystemConfig` 值，需点保存才落库（③ e2e 实测：库中 4.0 → 表单 4.4，点「确定离开」后页面仍显示 4.0，证明未落库）
+- [x] 有未保存改动时取消 → 二次确认（③ e2e 实测弹出「修改尚未保存，确定离开？」，点「继续编辑」后输入值 9.9 保留；**无改动时取消不弹**，不打扰医护）
+- [x] 清空某时段两个框并保存 → 该行被删除，展示变「未设置」（③ e2e 实测；重新打开弹框该时段两个输入框为空、可再填）
+- [x] 只清空一个框 → 字段级报错，不提交（③ e2e 实测：`aria-invalid` 标记 1 处、弹框保持打开、文案「上下限需同时填写或同时清空」）
+- [x] 下限 ≥ 上限 / 超 0.6~33.3 / 超 1 位小数 → 字段级报错（下限>上限 ③ e2e 实测红字「上限必须大于下限」挂在**上限**框；范围与小数位由 shared 契约 23 项单测覆盖）
+- [x] 出院/归档患者：可看不可改，后端同样拒绝（出院 `40004`、归档 `40001`）（前端 ③ e2e + 后端 ② 冒烟均已验证）
+- [x] `DEVICE_ADMIN` 与跨科室用户：后端拒绝（`30004` / `30002`）并记 `DENIED` 审计（② 冒烟实测，审计表有 `DENIED` 行、`errorCode=30002`）
+- [x] 新建患者后自动有 8 行目标 + 1 行预警（值等于当时 `TimeSlot` / `SystemConfig`）（② 单测 + 冒烟实测）
+- [ ] 管理员改 `TimeSlot` 默认值后，存量患者目标**不变**（快照语义已由 ② 单测覆盖；**未做端到端实测**——需管理员账号改时段默认值后复查存量患者，留待 ④ 或验收阶段补）
+- [x] `SystemConfig` 阈值行缺失时建档**仍成功**，目标行缺失，服务端有 `warn` 日志（② 单测覆盖；调用点另有防御性 `.catch`，见 R9）
+- [x] 回填脚本试运行只输出统计；`--apply` 后存量患者全部有目标行；重跑不产生重复（2026-11-25 实测：DRY-RUN 统计 8000 目标行 / 1000 预警行且两表仍 0 行 → `--apply` 写入 7999 + 999 → 查库核验 7 项全过（每患者恰好 8 行、值等于 `TimeSlot` 默认）→ 重跑 DRY-RUN「需补 0 / 已齐全 1000 / 新建 0」）
+
+> ⬇️ **以下 7 项属任务 ④（判定改造），截至 2026-11-25 尚未实施**：`resultType` 目前仍按**全局** `SystemConfig` 3.9/16.7 判定，患者级目标行虽已由回填补齐但**尚未参与判定**。交付 ③ 时须向医护说明「能配置、暂不影响分类」，避免被当成 bug。
+
 - [ ] 录入血糖选「空腹」、患者空腹目标 4.4-7.0 → 读数 4.2 判**偏低**、4.4 判**正常**、7.0 判**正常**、7.1 判**偏高**
 - [ ] 录入血糖选「随机」（不在展示集合）→ 仍按全局 3.9/16.7 判定
 - [ ] 患者缺该时段目标行 → 按全局 3.9/16.7 判定
 - [ ] 编辑历史血糖仅改备注 → `resultType` **不变**
 - [ ] 编辑历史血糖改读数或时段 → `resultType` 按新口径重算
 - [ ] 历史已有记录的 `resultType` 未被任何脚本改写
-- [ ] 趋势图阈值线：有患者预警行时画患者值，无则画全局 3.9/16.7
-- [ ] 每次成功编辑产生 1 行 `PATIENT_TARGET_UPDATE` 审计，`detail.changedFields` 只含实际变更项，含 `requestId`
-- [ ] 无实际变更的提交产生 1 行 `SUCCESS`，`detail.changedFields` 为**空数组**（2026-11-25 修正：拦截器命中 `@Audit` 即无条件写行，原稿「不产生审计行」不可实现，见 §5.2）
-- [ ] 每次 GET 产生 1 行 `PATIENT_TARGET_VIEW`；**越权 GET 产生 `DENIED` 行**（2026-11-25 复核裁定推翻原裁定 L，见 §5.2）
-- [ ] `pnpm sync:shared` 后三包 typecheck 通过、server 单测全绿、web build 通过
+- [ ] 趋势图阈值线：有患者预警行时画患者值，无则画全局 3.9/16.7（口径已由 §11 待确认项 2 于 2026-11-25 裁定确认，实现留待 ④）
+- [x] 每次成功编辑产生 1 行 `PATIENT_TARGET_UPDATE` 审计，`detail.changedFields` 只含实际变更项，含 `requestId`（② 查库实测：`detail={"path","requestId","changedFields":["FASTING.valueDown"]}`）
+- [x] 无实际变更的提交产生 1 行 `SUCCESS`，`detail.changedFields` 为**空数组**（2026-11-25 修正：拦截器命中 `@Audit` 即无条件写行，原稿「不产生审计行」不可实现，见 §5.2）（② 冒烟实测）
+- [x] 每次 GET 产生 1 行 `PATIENT_TARGET_VIEW`；**越权 GET 产生 `DENIED` 行**（2026-11-25 复核裁定推翻原裁定 L，见 §5.2）（② 查库实测 `DENIED` + `errorCode=30002`；③ e2e 实测**单次页面访问审计总数 41 → 42、增量恰为 1**，证明前端 hook 的 StrictMode 守卫生效、开发模式下未双写）
+- [x] `pnpm sync:shared` 后三包 typecheck 通过、server 单测全绿、web build 通过（2026-11-25 ③ 完成后：typecheck / lint / test 三包 exit=0，web **20 files / 247 tests**、server 325、shared 103，`pnpm --filter @gc/web build` ✓ 19.61s）
 
 ## 11. 待确认项
 
@@ -471,14 +474,16 @@ Zod schema 放 `packages/shared`，前后端共用（同一套校验规则，避
    裁定 V 只定义了**时段目标**的清空语义（删行），未提预警值。本规格暂按**必填不可清空**处理（§3.2 `alert` 两字段为 `number` 非 `number | null`），理由：预警值是全局阈值的患者级快照，空值无医学意义，且裁定 Y 已让趋势图依赖它。
    → 若需求人希望与时段目标同语义（两个都清空 = 删 `PatientAlertThreshold` 行 → 趋势图回退全局），请指出，改动仅限 Zod schema 与 `alert` 的 delete 分支。
 
-2. **趋势图「红点落在正常带内」的视觉矛盾**（裁定 Y 未消除，待需求人确认）
-   如 R8 所述：患者预警值默认 = 全局 3.9/16.7，而时段目标下限更窄（空腹 4.4）。默认配置下，空腹读数 4.2 会被判**偏低**（红点），但落在趋势图目标带（3.9~16.7）**内部**，医护可能认为系统判错。
-   AI 建议的最小改动方案：在趋势图数据点 tooltip 里补一行「该时段目标：4.4-7.0 mmol/L」（只改 `buildTrendOption` 的 tooltip formatter，不碰后端）。
-   → **待需求人裁定**：① 采纳 tooltip 增补（并入任务 ④）；② 不处理，仅在本节记为已知限制。
+2. **趋势图「红点落在正常带内」的视觉矛盾** — ✅ **已裁定（2026-11-25，需求人）：确认沿用 R8 口径，不做 tooltip 增补**
+   需求人裁定原文：「趋势图的阈值范围要取值患者的预警范围，患者的预警范围默认使用全局的（3.9-16.7），如果存量患者没有该值，则使用全局的（3.9-16.7）」。
+   即：趋势图阈值线 = **患者级 `PatientAlertThreshold`**，缺失时回退全局 `SystemConfig` 3.9/16.7 —— 与 R8 / 裁定 Y 完全一致，**任务 ④ 按 R8 实现即可，无需增补 tooltip**。
+   补充事实（裁定时未提及，实施时确认）：存量 1000 名未归档患者已由 `pnpm db:backfill-targets -- --apply`（2026-11-25 执行）补齐预警行，值均为全局 3.9/16.7，故「回退全局」实际只在**新建患者快照初始化失败**（R9 失败不阻断路径）时触发。
+   ⚠️ **视觉矛盾作为已知限制保留**：患者预警值（3.9/16.7）比时段目标下限（空腹 4.4）宽，故空腹读数 4.2 仍会被判**偏低**（红点）却落在趋势图目标带**内部**。需求人已知悉此现象并接受；若日后医护反馈造成误判，再单独开需求处理（届时可考虑 tooltip 增补或阈值线改画时段目标）。
 
-3. **`Patient.diabetesType` / `hba1c` / `remark` 永久无展示位**（既有缺陷，非本次引入）
-   这三个字段建档时可填、库中有数据，但全系统无任何展示入口——因为「基本信息」Tab 一直是空占位页。本次将其改为「控糖目标」后，缺口固化。
-   → 是否另开独立需求处理，待需求人决定。
+3. **`Patient.diabetesType` / `hba1c` / `remark` 永久无展示位**（既有缺陷，非本次引入）— ⚠️ **缺口已于 2026-11-25 任务 ③ 落地后固化**
+   这三个字段建档时可填、库中有数据，但全系统无任何展示入口——原「基本信息」Tab 一直是空占位页（`DetailPlaceholder`）。
+   任务 ③ 已把该 Tab 改为「控糖目标」正式页面（裁定 M），`DetailPlaceholder` 现仅剩「出入院记录」一条子路由在用，故这三个字段**确认无展示位**。
+   → 是否另开独立需求处理（可选方案：在详情页顶部摘要区 `PatientBasicInfo` 补展示，或新增独立 Tab），待需求人决定。本次未擅自扩大范围。
 
 4. **`AGENTS.md` / `COMMON-DATA.md` 的同步时机**
    裁定 X 已定三项文档同步。AI 建议：`AGENTS.md §4.3` 与 `COMMON-DATA.md §92-97` 的改动**放在任务 ④ 完成之后**再落笔——口径真正生效是在 ④，文档先于实现会造成中间态自相矛盾。`seed.ts` 补阈值行可随任务 ② 一起（只影响新环境初始化）。
@@ -488,7 +493,7 @@ Zod schema 放 `packages/shared`，前后端共用（同一套校验规则，避
 
 每步独立提交、独立验证；`prisma schema/migration` 与「鉴权/权限过滤/审计逻辑」各自**单独成一次提交并标注敏感**（`.codebuddy/rules/git-commit.md`）。
 
-### ① schema + 迁移（敏感，需人工评审）
+### ① schema + 迁移（敏感，需人工评审）— ✅ 已完成（2026-11-25，提交 `8679345`；`PATIENT_TARGET_VIEW` 枚举补于 `335b7e0`）
 
 - `apps/server/prisma/schema.prisma`：新增 §2.1 / §2.2 两个 model；`Patient` 加 2 个反向关系字段；`AuditAction` **末尾**追加 `PATIENT_TARGET_UPDATE`。
 - 新建迁移目录 `apps/server/prisma/migrations/<ts>_add_patient_glucose_target/migration.sql`：2 张 `CREATE TABLE` + 索引 + 外键 + `ALTER TYPE ... ADD VALUE IF NOT EXISTS`。**不含回填**。
@@ -496,7 +501,7 @@ Zod schema 放 `packages/shared`，前后端共用（同一套校验规则，避
 - 应用：`pnpm db:deploy` + `prisma generate`；验证 `migrate status` up-to-date、`migrate diff` 无漂移、`pg_enum` 中 `AuditAction` 新值位于末尾。
 - ⚠️ 仅本地开发库；`migrate dev` 禁用（`DB-MIGRATION-NOTES.md §3`）。
 
-### ② 后端接口 + 建档快照 + 回填脚本
+### ② 后端接口 + 建档快照 + 回填脚本 — ✅ 已完成（2026-11-25，提交 `e3132d9` / `46eebe9` / `4b66f75` / `79d7f1b`；回填 `--apply` 已执行并核验）
 
 - `packages/shared`：新增 Zod schema（GET 响应 / PATCH 请求）与 TS 类型 → `pnpm sync:shared`。
 - 新建 `PatientGlucoseTargetModule`（service + controller）：`GET` / `PATCH`，含展示集合过滤、diff、事务、`changedFields`、`@Audit`、`@RequirePermissions`、`@RequireDataScope`、`INPATIENT` 校验。
@@ -506,12 +511,16 @@ Zod schema 放 `packages/shared`，前后端共用（同一套校验规则，避
 - `seed.ts`：把 `glucose.low_threshold=3.9` / `glucose.high_threshold=16.7` 补进 `configs` 数组（裁定 X）。
 - 单测覆盖 §8 后端项（除判定改造相关）。
 
-### ③ 前端 Tab（改名 + 展示 + 编辑弹框）
+### ③ 前端 Tab（改名 + 展示 + 编辑弹框）— ✅ 已完成（2026-11-25）
 
-- Tab label / 路由 key / 子路径常量改造（§6.1），删除该 Tab 对 `DetailPlaceholder` 的引用。
-- 新建 `PatientGlucoseTarget` 组件：展示区（§6.2）+ 编辑弹框（§6.3）+ API 封装。
-- 前端单测覆盖 §8 前端项。
-- **本步不改任何判定逻辑**，可独立上线演示。
+- Tab label / 路由 key / 子路径常量改造（§6.1）：`basic` → `target`，改 `detail-tabs.ts`（`DetailMainTab` / `DETAIL_TAB_PATH` / `MAIN_TAB_PATH` / `resolveDetailTab`）、`PatientDetailTabs.tsx`（`MAIN_TABS` label 改「控糖目标」）、`routes.tsx`（子路由指向新组件）。
+  **刻意不做 `/basic` → `/target` 重定向**（裁定 M）：旧 URL 命中 `*` 兜底回落默认页「血糖报告」，不白屏、不出现无高亮空档（已加回归断言）。`DetailPlaceholder` **保留**（「出入院记录」仍在用），仅更新其注释。
+- 新建文件：`PatientGlucoseTargetTab.tsx`（展示区，§6.2）、`PatientGlucoseTargetEditModal.tsx`（编辑弹框，§6.3）、`usePatientGlucoseTargets.ts`（数据 hook）、`glucose-target-view.ts`（纯函数：格式化 / 表单值转换 / 编辑门控 / 字段路径解析）；API 封装加在既有 `api/patient.ts`。
+- 前端单测：`glucose-target-view.spec.ts`（纯函数，钉住裁定 K / N / Q / R / S / V / W）+ `PatientGlucoseTargetTab.spec.tsx`（展示组件走 `renderToStaticMarkup`，web 测试为 node 环境无 jsdom）；同步修正 `detail-tabs.spec.ts` / `PatientDetail.spec.tsx` 中受改名影响的既有断言。web 测试 201 → **247**。
+- **本步未改任何判定逻辑**，可独立上线演示。
+- ⚠️ **交付时必须向医护说明**：本 Tab 只能查看与配置，血糖的「偏低 / 正常 / 偏高」分类**仍按全局 3.9/16.7 判定**，患者级目标要等任务 ④ 才生效——否则「改了不生效」会被当成 bug 报障。
+- hook 带 **StrictMode 守卫**：GET 每次写一条 `PATIENT_TARGET_VIEW` 审计，React 18 开发模式下 effect 跑两次会造成审计成对重复（同 `usePatientDetail` 踩过的 `PATIENT_VIEW` 问题）。守卫 key 用 `${patientId}#${nonce}` 而非仅 `patientId`，以便 `reload()` 能穿透守卫。e2e 实测单次访问审计总数 41 → 42、增量恰为 1。
+- 实现期修正的两处 antd 兼容问题：`FormInstance` 未暴露 `clearValidate`（改用 `resetFields` + `setFieldsValue` 清校验态，同时消除 rc-field-form 的 `circular references` 警告）；`InputNumber` 的 `addonAfter` 已弃用（改用独立单位 span，与时段行写法统一）。
 
 ### ④ 判定改造（风险最高，可单独评审）
 
@@ -519,7 +528,7 @@ Zod schema 放 `packages/shared`，前后端共用（同一套校验规则，避
 - `GlucoseService.update`：重算条件改为 R5（仅 `valueMmolL` / `mealContext` 变更）。
 - `GlucoseService.trend`：阈值线改为 R8（患者预警值 → 回退全局）。
 - 调整 `glucose.service.spec.ts` 中受影响的既有断言，补齐 §8 新增用例。
-- （待 §11 待确认项 2 裁定）可能增补趋势图 tooltip。
+- ~~（待 §11 待确认项 2 裁定）可能增补趋势图 tooltip~~ → **已裁定不做**（2026-11-25，见 §11 待确认项 2）：趋势图阈值线按 R8 取患者预警值、缺失回退全局 3.9/16.7 即可，「红点落在正常带内」的视觉矛盾作为已知限制保留，④ 无需改前端。
 - 完成后落笔 `AGENTS.md §4.3` 与 `COMMON-DATA.md §92-97` 的文档同步（裁定 X），并在 §13 填入**口径变更日期**。
 
 ## 13. 裁定记录（2026-11-25，6 轮共 25 项）
