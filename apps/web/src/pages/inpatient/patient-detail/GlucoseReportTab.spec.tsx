@@ -81,7 +81,9 @@ describe('ReportCell — 血糖报告单元格（R3/R4）', () => {
   });
 
   it('括号一律英文半角、紧邻无空格', () => {
-    const text = textOf(render([entry({ sourceType: TIME_SLOT_CATEGORY.INTENSIVE, sourceSlotName: '强化-上午' })]));
+    const text = textOf(
+      render([entry({ sourceType: TIME_SLOT_CATEGORY.INTENSIVE, sourceSlotName: '强化-上午' })]),
+    );
 
     expect(text).not.toContain('（');
     expect(text).not.toContain('）');
@@ -91,26 +93,32 @@ describe('ReportCell — 血糖报告单元格（R3/R4）', () => {
   });
 
   it('强化时段：时间后再追加一个半角括号包裹的强化时段名（R3 变更后的位置）', () => {
-    expect(textOf(render([entry({ sourceType: TIME_SLOT_CATEGORY.INTENSIVE, sourceSlotName: '强化-上午' })]))).toContain(
-      '6.8(08:30)(强化-上午)',
-    );
+    expect(
+      textOf(
+        render([entry({ sourceType: TIME_SLOT_CATEGORY.INTENSIVE, sourceSlotName: '强化-上午' })]),
+      ),
+    ).toContain('6.8(08:30)(强化-上午)');
   });
 
   it('非强化记录不出现第二个括号', () => {
     expect(textOf(render([entry()]))).not.toContain('(08:30)(');
   });
 
-  it('有强化时段：`值`/`(时间)`/`(强化名)` 三段之间各 6px 间距（2026-11-19 三次调整）', () => {
-    const html = render([entry({ sourceType: TIME_SLOT_CATEGORY.INTENSIVE, sourceSlotName: '强化-上午' })]);
+  it('有强化时段：三段由 flex columnGap 各留 6px 间距，时间段 nowrap 不可拆（2026-11-25 变更）', () => {
+    const html = render([
+      entry({ sourceType: TIME_SLOT_CATEGORY.INTENSIVE, sourceSlotName: '强化-上午' }),
+    ]);
 
-    expect(html).toContain('<span style="margin-left:6px">(08:30)</span>');
-    expect(html).toContain('<span style="margin-left:6px">(强化-上午)</span>');
+    expect(html).toContain('display:flex;flex-wrap:wrap;justify-content:center;column-gap:6px');
+    expect(html).toContain('<span style="white-space:nowrap">(08:30)</span>');
+    expect(html).toContain('<span>(强化-上午)</span>');
   });
 
-  it('无强化时段：`值` 与 `(时间)` 之间 6px 间距（2026-11-19 三次调整）', () => {
+  it('无强化时段：`值` 与 `(时间)` 之间 6px 间距（columnGap，2026-11-25 变更）', () => {
     const html = render([entry()]);
 
-    expect(html).toContain('<span style="margin-left:6px">(08:30)</span>');
+    expect(html).toContain('<span style="white-space:nowrap">(08:30)</span>');
+    expect(html).toContain('column-gap:6px');
     expect(html).not.toContain('强化');
   });
 
