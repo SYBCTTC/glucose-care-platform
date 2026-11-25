@@ -211,8 +211,18 @@ export function getThemeConfig(mode: ThemeMode, fontScale: FontScale): ThemeConf
 
 export type GlucoseLevel = 'LOW' | 'NORMAL' | 'HIGH';
 
-/** 血糖区间判定：阈值必须来自后端系统配置，禁止硬编码 3.9 / 16.7 */
-export function getGlucoseLevel(value: number, thresholds: { low: number; high: number }): GlucoseLevel {
+/**
+ * 血糖区间判定：阈值必须由后端下发，禁止硬编码 3.9 / 16.7。
+ *
+ * ⚠️ 2026-11-25 起后端判定阈值取**患者该时段的控糖目标**（缺行回退全局 SystemConfig），
+ * 已不是单一全局值；`resultType` 一律由服务端算好下发，前端**不应**再用本函数自行比大小
+ * （否则会与库里的 resultType 打架）。保留本函数只为「后端已下发一组阈值、需在前端做同口径
+ * 着色」的场景，例如趋势图用接口返回的 `thresholds`。当前仓库暂无调用方。
+ */
+export function getGlucoseLevel(
+  value: number,
+  thresholds: { low: number; high: number },
+): GlucoseLevel {
   if (value < thresholds.low) return 'LOW';
   if (value > thresholds.high) return 'HIGH';
   return 'NORMAL';
