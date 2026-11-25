@@ -6,13 +6,13 @@
 
 ## 0. 元信息
 
-| 项     | 内容                                                                                                                                                                                                                                         |
-| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 阶段号 | P3-7 血糖趋势图（见 `docs/ROADMAP.md`）                                                                                                                                                                                                      |
-| 模块   | glucose                                                                                                                                                                                                                                      |
-| 优先级 | P1                                                                                                                                                                                                                                           |
-| 依赖   | R24 查询表单联动（`GlucoseQueryForm`）、R26 公共件（`GlucoseToolbar`/`useFullscreen`）、R20 报表统计口径（`buildReportStats`/`buildReportStatsItems`）、R25 复核弹窗（`GlucoseReviewModal`）、`SystemConfigService.getGlucoseAlertThreshold` |
-| 需求人 | （2026-11-24 对话裁定）                                                                                                                                                                                                                      |
+| 项     | 内容                                                                                                                                                                                                                                                                                                                    |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 阶段号 | P3-7 血糖趋势图（见 `docs/ROADMAP.md`）                                                                                                                                                                                                                                                                                 |
+| 模块   | glucose                                                                                                                                                                                                                                                                                                                 |
+| 优先级 | P1                                                                                                                                                                                                                                                                                                                      |
+| 依赖   | R24 查询表单联动（`GlucoseQueryForm`）、R26 公共件（`GlucoseToolbar`/`useFullscreen`）、R20 报表统计口径（`buildReportStats`/`buildReportStatsItems`）、R25 复核弹窗（`GlucoseReviewModal`）、`PatientGlucoseTargetService.resolveAlertThreshold`（2026-11-25 起，原为 `SystemConfigService.getGlucoseAlertThreshold`） |
+| 需求人 | （2026-11-24 对话裁定）                                                                                                                                                                                                                                                                                                 |
 
 ## 1. 目标与用户故事
 
@@ -64,7 +64,7 @@
 ```ts
 {
   points: GlucoseTrendPoint[];        // 数值型(0/1/2)有效记录，按 measuredAt 升序
-  thresholds: { low: number; high: number }; // SystemConfig 告警阈值，前端画阈值线/目标带
+  thresholds: { low: number; high: number }; // 患者预警值（缺行回退 SystemConfig 全局阈值），前端画阈值线/目标带
   stats: GlucoseReportStats;          // 复用报表统计类型与口径（同范围与报表/记录数字一致）
   rangeFrom: string | null;           // 实际生效区间回显（审计 detail 同源，白名单零改动）
   rangeTo: string | null;
@@ -90,7 +90,14 @@
 4. **时段过滤**（2026-11-24 增补）：`mealContexts` 非空 → 按记录 `mealContext` 码收窄（`mealContext IN (...)`）；缺省/空数组 = **不过滤**（「全部」，含停用时段 mealContext 的历史记录，与无此参数时完全一致）。**points 与 stats 叠加同一 `mealContextWhere`**——取消勾选某时段，图表与统计栏一起排除（需求 #2），保证「所见即所滤」。只做格式拆分（逗号串 → 数组）、**不做白名单校验**：code 是否存在/启用同 `mealContext`（动态时段，读路径不查库——停用时段的历史记录在「全部」/勾选时仍应可见）。
 5. **排序**：`measuredAt ASC`（时间顺序，散点/折线按时间铺开）；同秒按 `id ASC` 稳定。
 6. **统计栏**：复用 `buildReportStats(patientId, range.where, mealContextWhere)`（第 3 参为时段过滤，2026-11-24 增补；报表/记录不传 → 默认 `{}` 不受影响），与分页无关、按范围 + 时段收窄全量（裁定：复用报表口径，同范围同时段下与报表/记录 Tab 数字完全一致）。
-7. **阈值**：经 `SystemConfigService.getGlucoseAlertThreshold()` 读取 `glucose.low_threshold`/`glucose.high_threshold`，随响应下发；**禁止前端硬编码**。配置缺失/非法/`low >= high` → 抛 `10000`（与全系统口径一致，seed 保证有效配置）。
+7. **阈值**：~~经 `SystemConfigService.getGlucoseAlertThreshold()` 读取 `glucose.low_threshold`/`glucose.high_threshold`~~
+   **（2026-11-25 修订，任务 ④ / R8）**：改为经 `PatientGlucoseTargetService.resolveAlertThreshold(patientId)` 解析 ——
+   **患者预警值（`PatientAlertThreshold`）优先**，患者缺行或该行读取失败则回退全局 `SystemConfig`
+   （`glucose.low_threshold`/`glucose.high_threshold`）。仍随响应下发、**禁止前端硬编码**；
+   回退源配置缺失/非法/`low >= high` → 抛 `10000`（与全系统口径一致，seed 保证有效配置）。
+   解析仍占 `Promise.all` 的一个位子，命中患者行时查询次数与改造前相同。
+   ⚠️ 预警值**不参与** `resultType` 判定（R7），判定阈值是患者时段目标（R4），两者不同源，
+   故可能出现「判为偏低的点落在目标带内部」（`patient-glucose-target.md` §11 待确认项 2，需求人已接受）。
 8. **不分页**：返回范围内全部数值点。BGM 手工录入量级有限 + 查询表单按住院收敛；大数据量由前端 ECharts `sampling:'lttb'` + `large:true` 承接（`glucose-domain` 图表节）。
 9. **患者校验**：`assertPatientReadable`（存在、未归档、数据范围内；**不要求住院中**——出院患者历史趋势同样可查）。
 
@@ -182,7 +189,7 @@
 
 **服务端（apps/server）**
 
-- `src/modules/glucose/glucose.service.ts`：新增 `trend(user, patientId, query)`——`assertPatientReadable` → `resolveTimeRange` → `Promise.all([findMany(numericRecordWhere, orderBy measuredAt asc+id asc, select id/measuredAt/valueMmolL/resultType/operator.name), buildReportStats, getGlucoseAlertThreshold])` → 映射 points（`formatDateTime` + `Number(valueMmolL)` + `operator?.name`）。
+- `src/modules/glucose/glucose.service.ts`：新增 `trend(user, patientId, query)`——`assertPatientReadable` → `resolveTimeRange` → `Promise.all([findMany(numericRecordWhere, orderBy measuredAt asc+id asc, select id/measuredAt/valueMmolL/resultType/operator.name), buildReportStats, resolveAlertThreshold(patientId)])`（第三项 2026-11-25 起由 `getGlucoseAlertThreshold()` 换成患者预警值解析，见 R7 修订） → 映射 points（`formatDateTime` + `Number(valueMmolL)` + `operator?.name`）。
 - `src/modules/glucose/glucose.controller.ts`：新增 `@Get(':id/glucose/trend')`（声明在 `:recordId` 之前），`@RequirePermissions(PATIENT_VIEW)` + `@RequireDataScope(RESOURCE.PATIENT)` + `@Audit('GLUCOSE_TREND_VIEW', { targetType: 'PATIENT' })`。
 - `src/modules/glucose/glucose.service.spec.ts`：新增 `createTrendService`/`trendQuery` 夹具 + `GlucoseService.trend` describe（8 用例：排序映射、where 口径+不分页、不限时间、阈值/统计、operator 空、空范围、时间倒挂 10001、越权 30002/30006/40001）。
 

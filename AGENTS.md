@@ -102,10 +102,19 @@ packages/
 
 - 合法范围：**0.6 ~ 33.3 mmol/L**（含边界；与结果类型 `Low`(< 0.6) / `High`(> 33.3) 阈值对齐，边界值仍属合法读数）
 - 超范围**不入库**：由 `createGlucoseSchema`（`packages/shared/src/glucose/schema.ts`）直接拒绝（10001）；当前**无 `status` 字段**，无 `PENDING_REVIEW` 流程
-- 告警阈值**存 `SystemConfig` 表**（key `glucose.low_threshold` / `glucose.high_threshold`，seed 默认 `3.9` / `16.7 mmol/L`），
-  由 `SystemConfigService.getGlucoseAlertThreshold()` 读取（2026-11-17 落地）。
+- **判定阈值（`resultType` 0/1/2）优先取患者该时段的控糖目标**（2026-11-25 落地，规格 `docs/specs/patient-glucose-target.md` R4）：
+  唯一解析入口是 `PatientGlucoseTargetService.resolveResultTypeThreshold(patientId, mealContext)`，
+  口径为**有目标行就用患者的 `valueDown`/`valueUp`，缺行回退全局**。
+  强化/随机/复测时段按 R3 不可能有目标行 → 天然回退全局；时段被停用或默认值被清空时目标行**保留不删**，判定仍可用（R10）。
+  ⚠️ 解析时**不查展示集合**（不按 `enabled` 过滤），否则编辑停用时段的历史血糖会退化成全局阈值，违背 R10
+- 全局阈值**存 `SystemConfig` 表**（key `glucose.low_threshold` / `glucose.high_threshold`，seed 默认 `3.9` / `16.7 mmol/L`），
+  由 `SystemConfigService.getGlucoseAlertThreshold()` 读取（2026-11-17 落地），现降级为**回退源 + 新患者建档快照来源**。
   **禁止硬编码，也禁止引入默认常量兜底**——原 `@gc/shared` 的 `DEFAULT_ALERT_RANGE` 已删除，不要重新加回来。
-  配置缺失/非法/`low >= high` 时服务端抛 `10000` **拒绝写入**，不退回默认值：按错误阈值分类比拒绝录入更危险，结果类型直接进病历
+  回退源配置缺失/非法/`low >= high` 时服务端抛 `10000` **拒绝写入**，不退回默认值：按错误阈值分类比拒绝录入更危险，结果类型直接进病历
+- **趋势图阈值线取患者预警值**（表 `PatientAlertThreshold`，R8，解析入口 `resolveAlertThreshold`），缺行/读取失败回退全局；
+  预警值**不参与** `resultType` 判定（R7：时段目标与预警值是两套独立机制）
+- **编辑血糖时只在 `valueMmolL` 或 `mealContext` 实际变更才重算 `resultType`**（R5）：仅改备注/试纸/检测时间/记录者保持原值，
+  否则护士改个备注就可能把已入病历的结果类型静默翻转
 
 ### 4.4 录入上下文（BGM 必填）
 
