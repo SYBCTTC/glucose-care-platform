@@ -59,11 +59,32 @@ export function formatPrintDay(value?: string | null): string {
 }
 
 /**
- * 时间范围行文案（需求第 3 条 + 裁定 B2）：`时间：<起>~<止>`。
- * 取**已应用查询范围**；单侧未限定该侧展示 '-'。
+ * 时间范围行文案（2026-11-25 变更裁定）：`时间：<起>~<止>`，**依据打印文档的数据**——
+ * 取全量获取数据的最早/最晚测量日期（报告行日期 / 记录与趋势的 measuredAt），
+ * 不依据查询筛选条件（原取 appliedRange，筛选为空时展示「-~-」无信息量）。
+ * 起止同日只展示单个日期；空数据 → `时间：-`（防御，空数据时打印按钮本就禁用）。
  */
-export function formatPrintRange(range: { startTime?: string; endTime?: string }): string {
-  return `时间：${formatPrintDate(range.startTime)}~${formatPrintDate(range.endTime)}`;
+export function formatPrintRangeFromDates(dates: readonly string[]): string {
+  const valid = dates.filter((date) => date.length > 0);
+  if (valid.length === 0) {
+    return '时间：-';
+  }
+  let min = valid[0];
+  let max = valid[0];
+  for (const date of valid) {
+    if (date < min) {
+      min = date;
+    }
+    if (date > max) {
+      max = date;
+    }
+  }
+  const minDay = min.slice(0, 10);
+  const maxDay = max.slice(0, 10);
+  if (minDay === maxDay) {
+    return `时间：${formatPrintDate(minDay)}`;
+  }
+  return `时间：${formatPrintDate(minDay)}~${formatPrintDate(maxDay)}`;
 }
 
 /**

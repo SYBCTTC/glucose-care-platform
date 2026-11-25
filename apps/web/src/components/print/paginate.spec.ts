@@ -3,7 +3,7 @@ import {
   buildPrintFooter,
   formatPrintDate,
   formatPrintDay,
-  formatPrintRange,
+  formatPrintRangeFromDates,
   packUnitsIntoPages,
 } from './paginate';
 
@@ -58,20 +58,31 @@ describe('formatPrintDate / formatPrintDay — 打印日期格式（裁定 B2）
   });
 });
 
-describe('formatPrintRange — 时间范围行（需求第 3 条 + 裁定 B2）', () => {
-  it('双侧有值', () => {
+describe('formatPrintRangeFromDates — 时间范围行（2026-11-25 变更裁定：依据数据不依据筛选）', () => {
+  it('取数据最早/最晚测量日期，丢弃时分秒', () => {
     expect(
-      formatPrintRange({ startTime: '2026-11-01 00:00:00', endTime: '2026-11-25 23:59:59' }),
-    ).toBe('时间：2026年11月01日~2026年11月25日');
+      formatPrintRangeFromDates([
+        '2026-11-19 06:30:00',
+        '2026-11-25 13:45:09',
+        '2026-11-20 08:00:00',
+      ]),
+    ).toBe('时间：2026年11月19日~2026年11月25日');
   });
 
-  it('单侧为空 → 空侧展示 "-"', () => {
-    expect(formatPrintRange({ endTime: '2026-11-25 23:59:59' })).toBe('时间：-~2026年11月25日');
-    expect(formatPrintRange({ startTime: '2026-11-01 00:00:00' })).toBe('时间：2026年11月01日~-');
+  it('输入乱序仍取 min/max（不依赖服务端排序）', () => {
+    expect(formatPrintRangeFromDates(['2026-11-25', '2026-11-18', '2026-11-19'])).toBe(
+      '时间：2026年11月18日~2026年11月25日',
+    );
   });
 
-  it('双侧为空', () => {
-    expect(formatPrintRange({})).toBe('时间：-~-');
+  it('起止同日 → 单日期', () => {
+    expect(formatPrintRangeFromDates(['2026-11-25 08:00:00', '2026-11-25 22:00:00'])).toBe(
+      '时间：2026年11月25日',
+    );
+  });
+
+  it('空数据 → "-"（防御，空数据时打印按钮本就禁用）', () => {
+    expect(formatPrintRangeFromDates([])).toBe('时间：-');
   });
 });
 

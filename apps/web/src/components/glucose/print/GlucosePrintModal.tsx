@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Button, ConfigProvider, Modal, Spin, theme as antdTheme } from 'antd';
 import { DICT_TYPE } from '@gc/shared';
 import type {
@@ -12,7 +12,7 @@ import type { GlucosePrintRange } from '@/api/glucose';
 import { fetchPatientNamePlain } from '@/api/patient';
 import { useCommonDataStore } from '@/store/common-data';
 import { triggerBrowserPrint } from '@/components/print/printBrowser';
-import { formatPrintRange } from '@/components/print/paginate';
+import { formatPrintRangeFromDates } from '@/components/print/paginate';
 import { PRINT_PAGE_WIDTH_PX } from '@/components/print/printConstants';
 import PrintReportDocument from './PrintReportDocument';
 import PrintRecordDocument from './PrintRecordDocument';
@@ -41,8 +41,10 @@ export interface GlucosePrintModalProps {
   printType: 'report' | 'record' | 'trend';
   /** 完整患者详情（打印头患者信息数据源，壳层经 Outlet context 下发） */
   patient: PatientDetail;
-  /** 已应用查询范围（R24 appliedRange）：打印数据范围与时间范围行都用它 */
+  /** 已应用查询范围（R24 appliedRange）：打印数据拉取范围与留痕回显用它；时间范围行不用它（变更裁定 2026-11-25） */
   range: GlucosePrintRange;
+  /** trend 必传：图表背后记录的 measuredAt 列表（时间范围行数据源；报告/记录由 Modal 自取） */
+  trendDates?: string[];
   /** report 必传：R22 展示勾选（打印跟随勾选，规格 §4 规则 6） */
   reportDisplay?: GlucoseReportDisplay;
   /** trend 必传：Tab 打开预览时生成的图表图片（getDataURL，所见即所得） */
@@ -68,6 +70,7 @@ export default function GlucosePrintModal({
   reportDisplay,
   chartImage,
   auditCount,
+  trendDates,
 }: GlucosePrintModalProps) {
   const { token } = antdTheme.useToken();
   const resultTypes = useCommonDataStore(
@@ -188,7 +191,16 @@ export default function GlucosePrintModal({
       : printType === 'report'
         ? reportData !== null
         : recordData !== null);
-  const rangeText = formatPrintRange(range);
+  /** 时间范围行（2026-11-25 变更裁定）：依据打印文档数据的最早/最晚测量日期，不依据筛选条件 */
+  const rangeText = useMemo(() => {
+    if (printType === 'report') {
+      return formatPrintRangeFromDates(reportData?.rows.map((row) => row.date) ?? []);
+    }
+    if (printType === 'record') {
+      return formatPrintRangeFromDates(recordData?.items.map((item) => item.measuredAt) ?? []);
+    }
+    return formatPrintRangeFromDates(trendDates ?? []);
+  }, [printType, reportData, recordData, trendDates]);
 
   return (
     <Modal
@@ -196,7 +208,9 @@ export default function GlucosePrintModal({
       onCancel={onClose}
       afterOpenChange={setShown}
       title="打印预览"
-      width={PRINT_PAGE_WIDTH_PX + PREVIEW_PADDING * 2 + 48}
+      // 宽度 = A4 页宽 + 预览留白 + Modal 内容内边距(48) + 纵向滚动条余量(48)：
+      // 原 +48 恰好等于页宽+留白，纵向滚动条占宽后出现横向滚动（2026-11-25 修复）
+      width={PRINT_PAGE_WIDTH_PX + PREVIEW_PADDING * 2 + 96}
       styles={{ body: { padding: 0 } }}
       footer={[
         <Button key="cancel" onClick={onClose}>
@@ -220,8 +234,9 @@ export default function GlucosePrintModal({
           className="gc-print-preview"
           style={{
             padding: PREVIEW_PADDING,
-            maxHeight: '68vh',
+            maxHeight: '80vh',
             overflowY: 'auto',
+            overflowX: 'hidden',
             background: token.colorFillTertiary,
           }}
         >

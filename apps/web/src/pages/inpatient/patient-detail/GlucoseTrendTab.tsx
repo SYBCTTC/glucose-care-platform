@@ -126,6 +126,8 @@ export default function GlucoseTrendTab() {
     );
     setPrintOpen(true);
   }, []);
+  /** 图表背后记录的 measuredAt（Modal 时间范围行数据源，2026-11-25 变更裁定：范围行依据数据不依据筛选） */
+  const trendDates = useMemo(() => data?.points.map((point) => point.measuredAt) ?? [], [data]);
   // ECharts 点击事件：从数据点附带的 recordId 定位记录（buildTrendOption 已埋入）
   const handleChartClick = useCallback((params: unknown) => {
     const recordId = (params as { data?: { recordId?: string } })?.data?.recordId;
@@ -392,6 +394,7 @@ export default function GlucoseTrendTab() {
           range={appliedRange}
           chartImage={chartImage}
           auditCount={data?.stats.total ?? 0}
+          trendDates={trendDates}
         />
       ) : null}
     </div>

@@ -19,7 +19,7 @@ export interface PrintSheetProps {
   patient: PatientDetail;
   /** 明文姓名；null 回退 nameMasked（规格 §4 规则 15） */
   plainName: string | null;
-  /** 时间范围行文案（formatPrintRange 产物） */
+  /** 时间范围行文案（formatPrintRangeFromDates 产物：依据打印文档数据派生） */
   rangeText: string;
   /** 页脚文案；undefined = 不展示（裁定 Q3：趋势图无页脚） */
   footer?: string;
