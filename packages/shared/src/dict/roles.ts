@@ -33,6 +33,12 @@ export const PERMISSION = {
   /** 办理住院：把出院患者重新转为住院（DISCHARGED → INPATIENT） */
   PATIENT_ADMIT: 'patient:admit',
   /**
+   * 办理出院：把住院患者转为出院（INPATIENT → DISCHARGED），P2-6。
+   * 与 PATIENT_ADMIT 对称：同属护理/管理动作，医生不授予。
+   * 规格：docs/specs/patient-discharge.md §5
+   */
+  PATIENT_DISCHARGE: 'patient:discharge',
+  /**
    * 患者控糖目标编辑（各时段血糖上下限 + 低/高血糖预警值）。
    * **不复用** PATIENT_UPDATE：改控糖目标会改变该患者后续所有血糖的 resultType 判定结果，
    * 敏感度高于改床号/责任医生，需可单独授权与单独审计过滤（2026-11-25 裁定 H）。
@@ -111,6 +117,8 @@ export const ROLE_PERMISSIONS: Record<RoleCode, PermissionCode[]> = {
     PERMISSION.PATIENT_INPATIENT_VIEW,
     PERMISSION.PATIENT_DISCHARGED_VIEW,
     PERMISSION.PATIENT_ADMIT,
+    // P2-6：护士可办理出院（与 admit 同属护理动作）；数据范围 DEPARTMENT
+    PERMISSION.PATIENT_DISCHARGE,
     PERMISSION.DEVICE_VIEW,
     PERMISSION.WARD_VIEW,
     PERMISSION.WARD_MANAGE,
@@ -135,6 +143,8 @@ export const ROLE_PERMISSIONS: Record<RoleCode, PermissionCode[]> = {
     PERMISSION.PATIENT_UPDATE,
     PERMISSION.PATIENT_MANAGE,
     PERMISSION.PATIENT_ADMIT,
+    // P2-6：护士长可办理出院；数据范围 DEPARTMENT
+    PERMISSION.PATIENT_DISCHARGE,
     PERMISSION.DEVICE_VIEW,
     PERMISSION.AUDIT_VIEW,
     PERMISSION.WARD_VIEW,
@@ -173,6 +183,8 @@ export const ROLE_PERMISSIONS: Record<RoleCode, PermissionCode[]> = {
     PERMISSION.PATIENT_UPDATE,
     PERMISSION.PATIENT_MANAGE,
     PERMISSION.PATIENT_ADMIT,
+    // P2-6：SYS_ADMIN 不变式「含全部权限点」，同步授予办理出院
+    PERMISSION.PATIENT_DISCHARGE,
     PERMISSION.DEVICE_VIEW,
     PERMISSION.DEVICE_MANAGE,
     PERMISSION.AUDIT_VIEW,
