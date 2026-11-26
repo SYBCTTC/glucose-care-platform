@@ -4,6 +4,7 @@ import type {
   Gender,
   PatientAdmitResult,
   PatientDetail,
+  PatientDischargeResult,
   PatientGlucoseTargetsResponse,
   PatientGlucoseTargetsUpdateResult,
   PatientListItem,
@@ -130,11 +131,45 @@ export function fetchAdmissions(id: string): Promise<AdmissionsResponse> {
 }
 
 /**
+ * 办理住院请求体（P2-6 契约升级，docs/specs/patient-discharge.md §3）。
+ * 科室/责任医护/住院号/床号按本次住院实际情况覆盖式提交（弹框回填当前值、可改）；
+ * 入院时刻由服务端 now 落库，不在请求体里。
+ */
+export interface AdmitPatientPayload {
+  departmentId: string;
+  doctorId?: string;
+  nurseId?: string;
+  /** 必填；换号撞他人 → 40002，沿用原号放行 */
+  patientNo: string;
+  bedNo?: string;
+}
+
+/**
  * 办理住院：出院患者重新入院（DISCHARGED → INPATIENT）。
  * 属状态流转类敏感操作，后端写 PATIENT_MANAGE 审计并做数据权限校验。
  */
-export function admitPatient(id: string): Promise<PatientAdmitResult> {
-  return http.post<PatientAdmitResult>(`/patients/${id}/admit`);
+export function admitPatient(
+  id: string,
+  payload: AdmitPatientPayload,
+): Promise<PatientAdmitResult> {
+  return http.post<PatientAdmitResult>(`/patients/${id}/admit`, payload);
+}
+
+/** 办理出院请求体（P2-6）：仅备注，可空；出院时刻由服务端 now 落库 */
+export interface DischargePatientPayload {
+  remark?: string;
+}
+
+/**
+ * 办理出院（P2-6）：住院患者转出院（INPATIENT → DISCHARGED）。
+ * 需 `patient:discharge` 权限；后端同事务自动移出虚拟病区（leaveReason=DISCHARGE）
+ * 并关闭本次住院记录（备注落 Admission.dischargeRemark），写 PATIENT_MANAGE 审计。
+ */
+export function dischargePatient(
+  id: string,
+  payload: DischargePatientPayload,
+): Promise<PatientDischargeResult> {
+  return http.post<PatientDischargeResult>(`/patients/${id}/discharge`, payload);
 }
 
 /** 住院 / 出院患者列表：两个接口权限点独立 */

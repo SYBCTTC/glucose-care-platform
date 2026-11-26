@@ -27,10 +27,11 @@ import {
   PATIENT_STATUS_LABELS,
   ROLE_CODE,
 } from '@gc/shared';
-import type { DiabetesType, Gender, PatientStatus, RoleCode } from '@gc/shared';
-import type { DepartmentOption, StaffOption } from '@/api/common-data';
+import type { DiabetesType, Gender, PatientStatus } from '@gc/shared';
 import { useAuthStore } from '@/store/auth';
 import { useCommonDataStore } from '@/store/common-data';
+// P2-6：科室/医护下拉过滤逻辑抽到公共模块，办理住院弹框（PatientAdmitModal）同源复用
+import { filterDepartments, filterStaff, NURSE_ROLE_CODES } from './patient-form-options';
 
 /**
  * 患者表单字段（添加患者 / 编辑患者信息共用）。
@@ -73,35 +74,6 @@ interface PatientFormFieldsProps {
   /** edit 模式：已标记清除的敏感字段，提交时置 null */
   clearedFields?: SensitiveField[];
   onToggleClear?: (field: SensitiveField) => void;
-}
-
-/** 责任护士候选角色：护士 + 护士长（与 DY-OPERATOR 口径一致） */
-const NURSE_ROLE_CODES: RoleCode[] = [ROLE_CODE.NURSE, ROLE_CODE.HEAD_NURSE];
-
-/** 按数据范围收敛科室下拉，避免选到无权的科室 */
-function filterDepartments(
-  departments: DepartmentOption[],
-  dataScope: string | undefined,
-  departmentId: string | undefined,
-): DepartmentOption[] {
-  if (dataScope === 'ALL') {
-    return departments;
-  }
-  if (dataScope === 'NONE' || !departmentId) {
-    return [];
-  }
-  return departments.filter((item) => item.id === departmentId);
-}
-
-/** 医护下拉：按科室联动，并限定角色 */
-function filterStaff(staff: StaffOption[], departmentId: string | undefined, roles: RoleCode[]) {
-  if (!departmentId) {
-    return [];
-  }
-  return staff.filter(
-    (item) =>
-      item.departmentId === departmentId && roles.some((role) => item.roleCodes.includes(role)),
-  );
 }
 
 /** 敏感字段下方的提示与「清除」入口（仅编辑模式） */
