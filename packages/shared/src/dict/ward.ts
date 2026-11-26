@@ -26,17 +26,16 @@ export const WARD_TAB_LABELS: Record<WardTab, string> = {
 /**
  * 移出方式，落库到 `VirtualWardRecord.leaveReason`（VarChar(16)）。
  *
- * ⚠️ `DISCHARGE` / `ARCHIVE` 是**预留值，当前无任何代码写入**：
- * 需求人裁定"患者转出院或归档时自动移出虚拟病区"这条规则**本轮只定不实现**，
- * 且当前系统既无办理出院接口也无归档接口（`PatientStatus` 只有 INPATIENT/DISCHARGED，
- * 归档靠 `archivedAt` 时间戳，两者都只能由 seed 产生），故暂无代码挂载点。
- * 实现出院/归档功能时**必须接上**，否则「当前虚拟病区」会累积已出院患者。
- * 见 docs/specs/virtual-ward.md §4-8。
+ * `DISCHARGE` 已于 P2-6 患者出院接入（2026-11-26）：`POST /patients/:id/discharge`
+ * 事务内自动关闭在区记录（docs/specs/patient-discharge.md §4 规则 4）。
+ * ⚠️ `ARCHIVE` 仍是**预留值，无代码写入**：归档功能未落地（归档靠 `archivedAt`
+ * 时间戳，只能由 seed 产生）。实现归档功能时**必须接上**，
+ * 否则「当前虚拟病区」会累积已归档患者。见 docs/specs/virtual-ward.md §4-8。
  */
 export const WARD_LEAVE_REASON = {
   /** 人工点击「移除虚拟病区」 */
   MANUAL: 'MANUAL',
-  /** 患者转出院时自动移出（预留，未实现） */
+  /** 患者转出院时自动移出（P2-6 已接入，出院接口事务内写入） */
   DISCHARGE: 'DISCHARGE',
   /** 患者归档时自动移出（预留，未实现） */
   ARCHIVE: 'ARCHIVE',

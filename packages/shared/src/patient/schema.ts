@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { dateOnlyStringSchema, dateTimeStringSchema } from '../date';
+import type { WardLeaveReason } from '../dict/ward';
 
 /**
  * 患者领域契约（前后端共享）。
@@ -252,6 +253,50 @@ export interface PatientAdmitResult {
   id: string;
   fromStatus: PatientStatus;
   toStatus: PatientStatus;
+  item: PatientListItem;
+}
+
+/**
+ * 办理住院（P2-6 升级：POST /patients/:id/admit 请求体）。
+ *
+ * 再入院时科室/责任医护/住院号/床号按本次住院实际情况**覆盖式**提交
+ * （弹框回填当前值，可改）；入院时刻由服务端 now 落库，不作为入参。
+ * 住院号必填：换号撞他人 → 40002，沿用原号（撞自己）放行。
+ * 规格：docs/specs/patient-discharge.md §3/§4
+ */
+export const admitPatientSchema = z.object({
+  departmentId: z.string().uuid('请选择科室'),
+  /** 责任医生，须属于所选科室 */
+  doctorId: z.string().uuid('责任医生不合法').optional(),
+  /** 责任护士，须属于所选科室 */
+  nurseId: z.string().uuid('责任护士不合法').optional(),
+  patientNo: z.string().trim().min(1, '请输入住院号').max(32, '住院号过长'),
+  bedNo: z.string().trim().max(32, '床号过长').optional(),
+});
+export type AdmitPatientInput = z.infer<typeof admitPatientSchema>;
+
+/**
+ * 办理出院（P2-6：POST /patients/:id/discharge 请求体）。
+ * 出院时刻由服务端 now 落库（裁定 Q1，弹框展示仅为预览）；备注可空，
+ * trim 后空串按未填处理，只落 Admission.dischargeRemark，不进审计 detail。
+ */
+export const dischargePatientSchema = z.object({
+  remark: z.string().trim().max(255, '备注过长').optional(),
+});
+export type DischargePatientInput = z.infer<typeof dischargePatientSchema>;
+
+/**
+ * 办理出院结果：状态流转 INPATIENT → DISCHARGED（与 PatientAdmitResult 对称）。
+ * - wardRecordId / leaveReason：仅当出院**实际触发**虚拟病区自动移出时返回，
+ *   两字段均在审计 detail 白名单内，供追溯本次移出的是哪条病区记录
+ * - item：流转后的列表项，inVirtualWard 恒为 false（事务内先退区再取行）
+ */
+export interface PatientDischargeResult {
+  id: string;
+  fromStatus: PatientStatus;
+  toStatus: PatientStatus;
+  wardRecordId?: string;
+  leaveReason?: WardLeaveReason;
   item: PatientListItem;
 }
 
