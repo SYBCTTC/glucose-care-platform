@@ -129,6 +129,8 @@ export default function PatientDetailPage() {
           <PatientDetailTabs
             outletContext={{
               glucoseVersion,
+              // 出入院记录 Tab 的刷新信号：与详情重拉同源（办理出院/住院成功后自增）
+              statusVersion: detailVersion,
               onGlucoseChanged: handleGlucoseChanged,
               // R25：子路由内血糖弹框所需的患者摘要（此分支 data 恒非空）
               patient: { id: data.id, nameMasked: data.nameMasked, status: data.status },

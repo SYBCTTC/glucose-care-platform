@@ -21,8 +21,8 @@ import PlaceholderPage from '@/pages/Placeholder';
 import PatientManagementPage from '@/pages/inpatient/patients';
 import VirtualWardPage from '@/pages/inpatient/virtual-ward';
 import PatientDetailPage from '@/pages/inpatient/patient-detail';
+import AdmissionRecordTab from '@/pages/inpatient/patient-detail/AdmissionRecordTab';
 import DetailFallbackRedirect from '@/pages/inpatient/patient-detail/DetailFallbackRedirect';
-import DetailPlaceholder from '@/pages/inpatient/patient-detail/DetailPlaceholder';
 import GlucoseRecordTab from '@/pages/inpatient/patient-detail/GlucoseRecordTab';
 import GlucoseReportTab from '@/pages/inpatient/patient-detail/GlucoseReportTab';
 import GlucoseTrendTab from '@/pages/inpatient/patient-detail/GlucoseTrendTab';
@@ -88,7 +88,8 @@ export const APP_ROUTES: AppRoute[] = [
       // 刻意**不做** /basic → /target 重定向（裁定 M：需求人已知悉并接受旧链接失效）；
       // 旧 URL 会命中下面的 `*` 兜底重定向到默认页，不会白屏。
       { path: DETAIL_TAB_PATH.target, element: <PatientGlucoseTargetTab /> },
-      { path: DETAIL_TAB_PATH.admission, element: <DetailPlaceholder label="出入院记录" /> },
+      // 出入院记录（2026-11-26）：占位替换为正式页面（docs/specs/patient-admission-records.md）
+      { path: DETAIL_TAB_PATH.admission, element: <AdmissionRecordTab /> },
       { path: DETAIL_TAB_PATH.glucoseReport, element: <GlucoseReportTab /> },
       // 血糖记录（R27）+ 趋势图（P3-7）：占位均已替换为正式页面
       { path: DETAIL_TAB_PATH.glucoseRecord, element: <GlucoseRecordTab /> },

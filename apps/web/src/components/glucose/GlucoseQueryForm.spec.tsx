@@ -42,6 +42,12 @@ function fixture(status: string = PATIENT_STATUS.INPATIENT): AdmissionsResponse 
         admittedAt: '2026-11-01 09:00:00',
         dischargedAt: null,
         isCurrent: status === PATIENT_STATUS.INPATIENT,
+        // 出入院记录 Tab 扩展字段（2026-11-26）：本表单不消费，夹具给合法值即可
+        departmentName: '心内科',
+        patientNo: 'H-0002',
+        doctorName: '王医生',
+        nurseName: '李护士',
+        operatorName: '李护士',
         departments: [
           {
             id: 'ad-2a',
@@ -65,6 +71,12 @@ function fixture(status: string = PATIENT_STATUS.INPATIENT): AdmissionsResponse 
         admittedAt: '2026-10-01 08:00:00',
         dischargedAt: '2026-10-20 10:00:00',
         isCurrent: false,
+        // 存量旧行形态：快照四列 null（裁定 1）
+        departmentName: '内分泌科',
+        patientNo: null,
+        doctorName: null,
+        nurseName: null,
+        operatorName: null,
         departments: [
           {
             id: 'ad-1',

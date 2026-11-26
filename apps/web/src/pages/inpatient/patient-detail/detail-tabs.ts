@@ -73,6 +73,11 @@ export interface DetailTabState {
  */
 export interface DetailOutletContext {
   glucoseVersion: number;
+  /**
+   * 出入院记录 Tab：壳层办理出院/住院成功后自增（与 detailVersion 同源）。
+   * 独立于 glucoseVersion——血糖变更不该触发住院记录重拉（多写 ADMISSION_QUERY 审计）
+   */
+  statusVersion: number;
   /** R25：血糖添加/编辑/作废成功后的回调（壳层实现 = glucoseVersion + 1） */
   onGlucoseChanged: () => void;
   /** R25：患者摘要（壳层只在 data 已加载分支渲染 Outlet，故恒非空） */

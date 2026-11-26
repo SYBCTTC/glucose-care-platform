@@ -192,6 +192,7 @@ function renderTabs(pathname: string): string {
       <PatientDetailTabs
         outletContext={{
           glucoseVersion: 0,
+          statusVersion: 0,
           // R25：context 契约新增两项（本测试只渲染 Tabs 壳，给稳定空值即可）
           onGlucoseChanged: () => {},
           patient: { id: 'p1', nameMasked: '林*', status: 'INPATIENT' },
