@@ -74,6 +74,10 @@ model User {
   wardJoinedRecords VirtualWardRecord[]    @relation("WardJoinedBy")
   /// 虚拟病区：由本人移出的进出记录
   wardLeftRecords   VirtualWardRecord[]    @relation("WardLeftBy")
+  /// 住院记录快照：作为当次责任医生 / 责任护士 / 办理操作人（出入院记录 Tab）
+  admissionDoctorRecords  Admission[]      @relation("AdmissionDoctor")
+  admissionNurseRecords   Admission[]      @relation("AdmissionNurse")
+  admissionOperatorRecords Admission[]     @relation("AdmissionOperator")
 
   @@index([departmentId])
   @@index([status])
@@ -182,11 +186,23 @@ model Admission {
   dischargeRemark String? @db.VarChar(255)
   /// 入院科室（首科室；完整科室轨迹见 AdmissionDepartment）
   departmentId String    @db.Uuid
+  /// 当次住院号快照（出入院记录 Tab，2026-11-26 裁定：docs/specs/patient-admission-records.md §2）。
+  /// Patient.patientNo 每次办理住院覆盖写，历史值只能靠本列留存；可空 = 存量旧行（显示「-」，不回填）
+  patientNo String? @db.VarChar(32)
+  /// 当次责任医生快照（可空口径同 patientNo）
+  doctorId String?  @db.Uuid
+  /// 当次责任护士快照（可空口径同 patientNo）
+  nurseId String?   @db.Uuid
+  /// 操作人 = 当次办理住院/建档的登录账号（裁定 3；可空口径同 patientNo）
+  operatorId String? @db.Uuid
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
   patient         Patient               @relation(fields: [patientId], references: [id], onDelete: Cascade)
   department      Department            @relation(fields: [departmentId], references: [id])
+  doctor          User?                 @relation("AdmissionDoctor", fields: [doctorId], references: [id])
+  nurse           User?                 @relation("AdmissionNurse", fields: [nurseId], references: [id])
+  operator        User?                 @relation("AdmissionOperator", fields: [operatorId], references: [id])
   departmentStays AdmissionDepartment[]
 
   @@unique([patientId, seq])
