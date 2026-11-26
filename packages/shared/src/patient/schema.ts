@@ -333,7 +333,7 @@ export interface AdmissionDepartmentOption {
   endedAt: string | null;
 }
 
-/** 一次住院记录（R24） */
+/** 一次住院记录（R24；2026-11-26 出入院记录 Tab 扩展快照四字段 + 平铺科室名） */
 export interface AdmissionOption {
   id: string;
   /** 第几次住院，从 1 起（下拉 label「第N次」前缀的数据源，裁定 Q5） */
@@ -344,6 +344,18 @@ export interface AdmissionOption {
   dischargedAt: string | null;
   /** `dischargedAt === null`；前端「本次住院」选项的判定依据 */
   isCurrent: boolean;
+  /** 入院科室名（出入院记录 Tab「科室」列，裁定 4；平铺下发免前端从停留数组推导） */
+  departmentName: string;
+  /**
+   * 当次住院号 / 责任医生 / 责任护士 / 操作人姓名（出入院记录 Tab，
+   * `docs/specs/patient-admission-records.md` §2/§3）。
+   * null = 存量旧行未回填（显示「-」，裁定 1）或当次未指定医护；
+   * 医护/操作人姓名是员工信息（非患者 PII），不脱敏，同 PatientDetail.doctorName 口径。
+   */
+  patientNo: string | null;
+  doctorName: string | null;
+  nurseName: string | null;
+  operatorName: string | null;
   /** 该次住院的科室停留，按 startedAt 升序（NULLS FIRST） */
   departments: AdmissionDepartmentOption[];
 }
