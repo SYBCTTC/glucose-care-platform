@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import type { ReactNode, RefObject } from 'react';
 import type { PatientDetail } from '@gc/shared';
 import PrintSheet from './PrintSheet';
@@ -42,6 +42,9 @@ export interface PrintPagedDocumentProps {
   renderPageContent: (pageKeys: string[]) => ReactNode;
   /** 重测依赖：数据/展示勾选变化时传入新引用（如 data、display 对象） */
   measureVersion: unknown;
+  /** 实测分页产出后回调一次（pages 由 null 变非 null；重测回 null 后再产出会再回调）。
+      无头打印执行器以此作为「可打印」信号；预览类场景不传 */
+  onPagesReady?: () => void;
 }
 
 export default function PrintPagedDocument({
@@ -53,10 +56,23 @@ export default function PrintPagedDocument({
   measureContent,
   renderPageContent,
   measureVersion,
+  onPagesReady,
 }: PrintPagedDocumentProps) {
   const measureRef = useRef<HTMLDivElement>(null);
   const ready = units.length > 0;
   const pages = usePrintPagination(measureRef, ready, measureVersion);
+
+  // 分页产出（null → 非 null）回调一次；重测回 null 后复位，允许再次回调
+  const pagesNotified = useRef(false);
+  useEffect(() => {
+    if (pages !== null && !pagesNotified.current) {
+      pagesNotified.current = true;
+      onPagesReady?.();
+    }
+    if (pages === null) {
+      pagesNotified.current = false;
+    }
+  }, [pages, onPagesReady]);
 
   const countedByKey = useMemo(
     () => new Map(units.map((unit) => [unit.key, unit.counted])),

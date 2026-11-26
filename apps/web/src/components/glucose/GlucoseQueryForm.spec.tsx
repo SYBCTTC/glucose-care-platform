@@ -142,7 +142,9 @@ describe('deriveStaySelection — 切换/清空科室记录', () => {
   };
 
   it('选中已结束的历史停留 → 时间 = 该停留起止（「全部」场景同样联动，裁定 Q10）', () => {
-    expect(deriveStaySelection(fixture(), { ...base, admissionId: ADMISSION_ALL }, 'ad-2a')).toEqual({
+    expect(
+      deriveStaySelection(fixture(), { ...base, admissionId: ADMISSION_ALL }, 'ad-2a'),
+    ).toEqual({
       admissionId: ADMISSION_ALL,
       departmentStayId: 'ad-2a',
       startTime: '2026-11-01 09:00:00',
@@ -160,9 +162,7 @@ describe('deriveStaySelection — 切换/清空科室记录', () => {
   });
 
   it('清空 + 「全部」→ 时间清空、无限制（裁定 Q11）', () => {
-    expect(
-      deriveStaySelection(fixture(), { ...base, admissionId: ADMISSION_ALL }, null),
-    ).toEqual({
+    expect(deriveStaySelection(fixture(), { ...base, admissionId: ADMISSION_ALL }, null)).toEqual({
       admissionId: ADMISSION_ALL,
       departmentStayId: null,
       startTime: null,
@@ -266,9 +266,11 @@ describe('buildAdmissionOptions / buildDepartmentOptions', () => {
       'ad-2a',
       'ad-2b',
     ]);
-    expect(
-      buildDepartmentOptions(fixture(), ADMISSION_ALL).map((option) => option.value),
-    ).toEqual(['ad-2a', 'ad-2b', 'ad-1']);
+    expect(buildDepartmentOptions(fixture(), ADMISSION_ALL).map((option) => option.value)).toEqual([
+      'ad-2a',
+      'ad-2b',
+      'ad-1',
+    ]);
   });
 });
 
@@ -351,5 +353,21 @@ describe('GlucoseQueryForm — 渲染', () => {
     expect(html).toContain('内分泌科 (2026-11-10 ~ 至今)');
     expect(html).toContain('2026-11-10 08:00:00');
     expect(html).not.toContain('disabled');
+  });
+
+  it('printLoading：打印按钮 loading（2026-11-26 无头打印，覆盖到唤起打印对话框的等待）', () => {
+    const html = renderToStaticMarkup(
+      <GlucoseQueryForm
+        data={fixture()}
+        loading={false}
+        state={deriveQueryDefaults(fixture())}
+        onChange={() => {}}
+        onSearch={() => {}}
+        onReset={() => {}}
+        onPrint={() => {}}
+        printLoading
+      />,
+    );
+    expect(html).toContain('ant-btn-loading');
   });
 });

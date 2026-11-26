@@ -27,7 +27,7 @@ import {
 } from '@/components/glucose/GlucoseQueryForm';
 import type { GlucoseQueryFormState } from '@/components/glucose/GlucoseQueryForm';
 import { GlucoseToolbar } from '@/components/glucose/GlucoseToolbar';
-import GlucosePrintModal from '@/components/glucose/print/GlucosePrintModal';
+import GlucosePrintRunner from '@/components/glucose/print/GlucosePrintRunner';
 import { useFullscreen } from '@/components/glucose/useFullscreen';
 import { useAuthStore } from '@/store/auth';
 import { useCommonDataStore } from '@/store/common-data';
@@ -348,10 +348,10 @@ export default function GlucoseReportTab() {
   }, []);
 
   // R28：打印门控（裁定 Q5/Q6/B3）——无 glucose:print 不传 onPrint（按钮不渲染，
-  // 服务端接口兜底）；已应用范围内无日期（total=0）禁用。预览数据在 Modal 打开时
+  // 服务端接口兜底）；已应用范围内无日期（total=0）禁用。无头执行器挂载时
   // 按范围全量拉取（裁定 B1），打印跟随展示勾选 reportDisplay（规格 §4 规则 6）
   const canPrint = hasPermission(PERMISSION.GLUCOSE_PRINT);
-  const [printOpen, setPrintOpen] = useState(false);
+  const [printRunning, setPrintRunning] = useState(false);
 
   // 换患者时回到第 1 页、退出全屏并重置查询表单：同一路由不同 :id 不会重挂载组件，
   // state 需手动重置。表单置回 null（未就绪）→ 报表请求挂起，等新患者的住院记录到达
@@ -478,8 +478,9 @@ export default function GlucoseReportTab() {
             onChange={setQueryForm}
             onSearch={handleSearch}
             onReset={handleReset}
-            onPrint={canPrint ? () => setPrintOpen(true) : undefined}
+            onPrint={canPrint ? () => setPrintRunning(true) : undefined}
             printDisabled={!data || data.total === 0}
+            printLoading={printRunning}
           />
         }
         fullscreen={fullscreen}
@@ -542,16 +543,16 @@ export default function GlucoseReportTab() {
         onChanged={onGlucoseChanged}
       />
 
-      {/* R28：打印预览（三 Tab 共用 Modal）——打开时拉明文姓名（访问即留痕）与
-          范围内全量报表；点「打印」先留痕（GLUCOSE_PRINT）再触发浏览器打印（裁定 Q11） */}
-      {canPrint ? (
-        <GlucosePrintModal
-          open={printOpen}
-          onClose={() => setPrintOpen(false)}
+      {/* R28：无头打印执行器（2026-11-26 裁定方案 B：删除预览 Modal，打印按钮直接
+          唤起浏览器打印）——挂载即拉明文姓名（访问即留痕）与范围内全量报表；分页就绪
+          后先留痕（GLUCOSE_PRINT）再触发浏览器打印（裁定 Q11），onDone 卸载并释放按钮 loading */}
+      {printRunning ? (
+        <GlucosePrintRunner
           printType="report"
           patient={patientDetail}
           range={appliedRange}
           reportDisplay={reportDisplay}
+          onDone={() => setPrintRunning(false)}
         />
       ) : null}
     </div>

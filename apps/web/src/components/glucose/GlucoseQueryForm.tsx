@@ -317,6 +317,8 @@ export interface GlucoseQueryFormProps {
   onPrint?: () => void;
   /** R28：已应用范围内无数据 → 打印按钮禁用（裁定 B3；数据门控由调用页判定） */
   printDisabled?: boolean;
+  /** R28：打印按钮 loading（2026-11-26 无头打印：覆盖取数+实测分页到唤起打印对话框的等待） */
+  printLoading?: boolean;
 }
 
 /**
@@ -333,6 +335,7 @@ export function GlucoseQueryForm({
   extra,
   onPrint,
   printDisabled,
+  printLoading,
 }: GlucoseQueryFormProps) {
   const { token } = theme.useToken();
   const disabled = data === null || state === null;
@@ -446,7 +449,12 @@ export function GlucoseQueryForm({
       </Button>
       {/* R28：打印按钮（重置之后、与查询同类型）；onPrint 未传 = 无权限，不渲染（裁定 Q6） */}
       {onPrint ? (
-        <Button type="primary" disabled={disabled || printDisabled} onClick={onPrint}>
+        <Button
+          type="primary"
+          disabled={disabled || printDisabled}
+          loading={printLoading}
+          onClick={onPrint}
+        >
           打印
         </Button>
       ) : null}

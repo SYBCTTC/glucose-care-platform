@@ -353,7 +353,7 @@ body {
 /* ---------- R28 血糖数据打印（16 节，docs/specs/glucose-print.md） ----------
    打印件恒为「白底黑字、固定字号」（规格 §4 规则 14）：不随主题/暗色模式/字号档变化。
    本节的 #fff/#000/#333 等是**打印输出常量**（同 15 节先例），不是主题色，
-   不适用 ui-design-tokens 语义色规则；屏幕上的预览容器仍走 token（见 GlucosePrintModal）。 */
+   不适用 ui-design-tokens 语义色规则；无头打印容器屏上不可见、无屏幕装饰（2026-11-26 方案 B）。 */
 
 /* 一张 A4 页：210×297mm、边距 12mm（裁定 C4）、固定高度 + overflow hidden（分页由
    usePrintPagination 实测切分，不靠内容自然溢出）；flex 纵向：头部自然高、内容区占余 */
@@ -462,10 +462,15 @@ body {
   pointer-events: none;
 }
 
-/* 预览容器（Modal body 内）：屏幕上看分页效果；打印时全部还原为无装饰 */
-.gc-print-preview .gc-print-sheet {
-  margin: 0 auto 16px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+/* 无头打印容器（2026-11-26 裁定方案 B：删除预览 Modal，打印按钮直接唤起浏览器
+   打印）：GlucosePrintRunner 经 portal 挂到 body 层。屏上离屏 + visibility hidden
+   但**保留布局**（内部 PrintPagedDocument 测量层要量高分页）；纸上还原正常流 */
+.gc-print-headless {
+  position: fixed;
+  left: -100000px;
+  top: 0;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 @media print {
@@ -476,64 +481,23 @@ body {
     margin: 0;
   }
 
-  /* 打印开关：triggerBrowserPrint 给 body 挂 .gc-printing 期间只输出预览页。
-     Modal 挂在 body 下的独立 portal（不在 #root 内），故隐藏 #root 后
-     还需把 Modal 壳（mask/close/header/footer/定位/内边距）全部剥掉，只留页内容。
-     header 必在清单内：漏掉时标题「打印预览」上纸占高，.gc-print-sheet 固定
-     297mm 零余量会被物理页高截断——页脚统计行切片独占下一页（2026-11-25 修复） */
+  /* 打印开关：triggerBrowserPrint 给 body 挂 .gc-printing 期间只输出打印页。
+     无头打印容器挂在 body 层 portal（不在 #root 内；预览 Modal 已按
+     2026-11-26 裁定方案 B 删除），故隐藏 #root 后把它还原正常流并可见即可 */
   body.gc-printing #root {
     display: none !important;
   }
 
-  body.gc-printing .ant-modal-mask,
-  body.gc-printing .ant-modal-close,
-  body.gc-printing .ant-modal-header,
-  body.gc-printing .ant-modal-footer {
-    display: none !important;
+  body.gc-printing .gc-print-headless {
+    position: static;
+    left: auto;
+    visibility: visible;
+    pointer-events: auto;
   }
 
-  body.gc-printing .ant-modal-wrap {
-    position: static !important;
-    overflow: visible !important;
-  }
-
-  body.gc-printing .ant-modal {
-    position: static !important;
-    top: 0 !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    max-width: none !important;
-    width: auto !important;
-  }
-
-  body.gc-printing .ant-modal-content {
-    box-shadow: none !important;
-    border-radius: 0 !important;
-    background: #fff !important;
-    padding: 0 !important;
-  }
-
-  body.gc-printing .ant-modal-body {
-    padding: 0 !important;
-    max-height: none !important;
-    overflow: visible !important;
-  }
-
-  body.gc-printing .gc-print-preview {
-    background: #fff !important;
-    padding: 0 !important;
-    max-height: none !important;
-    overflow: visible !important;
-  }
-
-  /* 测量层与预览装饰（阴影/页间距）不上纸 */
+  /* 测量层不上纸 */
   body.gc-printing .gc-print-measure {
     display: none !important;
-  }
-
-  body.gc-printing .gc-print-preview .gc-print-sheet {
-    margin: 0 !important;
-    box-shadow: none !important;
   }
 
   /* 页间切分：每张 sheet 一页；最后一张不再追加分页符（避免尾部空白页） */

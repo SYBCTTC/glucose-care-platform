@@ -32,6 +32,8 @@ export interface PrintReportDocumentProps {
   patient: PatientDetail;
   plainName: string | null;
   rangeText: string;
+  /** 透传 PrintPagedDocument：实测分页产出后回调（无头打印执行器的「可打印」信号） */
+  onPagesReady?: () => void;
 }
 
 export default function PrintReportDocument({
@@ -41,6 +43,7 @@ export default function PrintReportDocument({
   patient,
   plainName,
   rangeText,
+  onPagesReady,
 }: PrintReportDocumentProps) {
   const counted = useMemo(() => countedCodeSet(resultTypes), [resultTypes]);
   const units = useMemo(
@@ -127,6 +130,7 @@ export default function PrintReportDocument({
         )
       }
       measureVersion={units}
+      onPagesReady={onPagesReady}
     />
   );
 }

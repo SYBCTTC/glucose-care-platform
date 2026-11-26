@@ -15,7 +15,7 @@ import {
 } from '@/components/glucose/GlucoseQueryForm';
 import type { GlucoseQueryFormState } from '@/components/glucose/GlucoseQueryForm';
 import { GlucoseToolbar } from '@/components/glucose/GlucoseToolbar';
-import GlucosePrintModal from '@/components/glucose/print/GlucosePrintModal';
+import GlucosePrintRunner from '@/components/glucose/print/GlucosePrintRunner';
 import { useFullscreen } from '@/components/glucose/useFullscreen';
 import { PRINT_IMAGE_BACKGROUND } from '@/components/print/printConstants';
 import { useAuthStore } from '@/store/auth';
@@ -111,20 +111,20 @@ export default function GlucoseTrendTab() {
   const [chartType, setChartType] = useState<TrendChartType>('line');
 
   // R28：打印门控（裁定 Q5/Q6/B3）——无 glucose:print 不传 onPrint（按钮不渲染，服务端接口兜底）；
-  // 无数值型点（不成图）时禁用。趋势打印不取数：打开预览瞬间把当前图表转成图片（裁定 C3
+  // 无数值型点（不成图）时禁用。趋势打印不取数：点击打印瞬间把当前图表转成图片（裁定 C3
   // 所见即所得——含当前时段过滤与折线/散点形态），pixelRatio 2 保证清晰度、白底（规格 §4 规则 14）
   const hasPermission = useAuthStore((state) => state.hasPermission);
   const canPrint = hasPermission(PERMISSION.GLUCOSE_PRINT);
-  const [printOpen, setPrintOpen] = useState(false);
+  const [printRunning, setPrintRunning] = useState(false);
   const [chartImage, setChartImage] = useState<string | null>(null);
-  const handleOpenPrint = useCallback(() => {
+  const handlePrint = useCallback(() => {
     const instance = chartRef.current?.getEchartsInstance();
     setChartImage(
       instance
         ? instance.getDataURL({ pixelRatio: 2, backgroundColor: PRINT_IMAGE_BACKGROUND })
         : null,
     );
-    setPrintOpen(true);
+    setPrintRunning(true);
   }, []);
   /** 图表背后记录的 measuredAt（Modal 时间范围行数据源，2026-11-25 变更裁定：范围行依据数据不依据筛选） */
   const trendDates = useMemo(() => data?.points.map((point) => point.measuredAt) ?? [], [data]);
@@ -283,8 +283,9 @@ export default function GlucoseTrendTab() {
             onChange={setQueryForm}
             onSearch={handleSearch}
             onReset={handleReset}
-            onPrint={canPrint ? handleOpenPrint : undefined}
+            onPrint={canPrint ? handlePrint : undefined}
             printDisabled={!data || data.points.length === 0}
+            printLoading={printRunning}
           />
         }
         fullscreen={fullscreen}
@@ -383,18 +384,18 @@ export default function GlucoseTrendTab() {
         onChanged={onGlucoseChanged}
       />
 
-      {/* R28：打印预览（三 Tab 共用 Modal）——趋势图不取数，直接用打开时生成的图表图片；
-          单页不分页、无页脚（裁定 Q3/C3）。点「打印」先留痕（GLUCOSE_PRINT）再触发浏览器打印 */}
-      {canPrint ? (
-        <GlucosePrintModal
-          open={printOpen}
-          onClose={() => setPrintOpen(false)}
+      {/* R28：无头打印执行器（2026-11-26 裁定方案 B：删除预览 Modal，打印按钮直接
+          唤起浏览器打印）——趋势图不取数，直接用点击时生成的图表图片；单页不分页、
+          无页脚（裁定 Q3/C3）。挂载后先留痕（GLUCOSE_PRINT）再触发浏览器打印（裁定 Q11） */}
+      {printRunning ? (
+        <GlucosePrintRunner
           printType="trend"
           patient={patientDetail}
           range={appliedRange}
           chartImage={chartImage}
           auditCount={data?.stats.total ?? 0}
           trendDates={trendDates}
+          onDone={() => setPrintRunning(false)}
         />
       ) : null}
     </div>

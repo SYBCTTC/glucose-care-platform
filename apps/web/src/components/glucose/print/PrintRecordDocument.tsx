@@ -32,6 +32,8 @@ export interface PrintRecordDocumentProps {
   patient: PatientDetail;
   plainName: string | null;
   rangeText: string;
+  /** 透传 PrintPagedDocument：实测分页产出后回调（无头打印执行器的「可打印」信号） */
+  onPagesReady?: () => void;
 }
 
 export default function PrintRecordDocument({
@@ -41,6 +43,7 @@ export default function PrintRecordDocument({
   patient,
   plainName,
   rangeText,
+  onPagesReady,
 }: PrintRecordDocumentProps) {
   const counted = useMemo(() => countedCodeSet(resultTypes), [resultTypes]);
   const countedFlags = useMemo(
@@ -110,6 +113,7 @@ export default function PrintRecordDocument({
       measureContent={renderTable(data.items.map((item) => item.id))}
       renderPageContent={(pageKeys) => renderTable(pageKeys)}
       measureVersion={units}
+      onPagesReady={onPagesReady}
     />
   );
 }
