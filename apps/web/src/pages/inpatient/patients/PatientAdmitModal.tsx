@@ -209,8 +209,11 @@ export default function PatientAdmitModal({
         ) : (
           <div style={{ minHeight: 64 }} />
         )}
-        {/* Form 常驻渲染（不随 detail 条件挂载），避免 resetFields/setFieldsValue 报未连接警告 */}
-        <Form form={form} layout="vertical" preserve={false} requiredMark style={{ marginTop: 16 }}>
+        {/* Form 常驻渲染（不随 detail 条件挂载），避免 resetFields/setFieldsValue 报未连接警告。
+            ⚠️ 不要加 preserve={false}（同 GlucoseCreateModal 的教训）：Modal body 首帧后会再挂载
+            一次，非保留字段在 Form 卸载时被清空，详情页 prefetchedDetail 的同步回填会被抹掉
+            （表现为科室/住院号全空）。关闭时不清空无妨：每次打开 effect 都 resetFields+重填 */}
+        <Form form={form} layout="vertical" requiredMark style={{ marginTop: 16 }}>
           <Form.Item
             name="departmentId"
             label="科室"
