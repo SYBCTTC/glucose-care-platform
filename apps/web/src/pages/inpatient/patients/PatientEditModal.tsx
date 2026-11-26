@@ -13,6 +13,11 @@ import PatientFormFields, {
 interface PatientEditModalProps {
   /** null 表示未选中患者，弹框不打开 */
   patientId: string | null;
+  /**
+   * 详情页打开时复用已加载的详情（裁定 Q1，同 PatientAdmitModal 口径）：
+   * 不重复请求、不重复写 PATIENT_VIEW 审计；列表/卡片入口不传，由弹框内拉取
+   */
+  prefetchedDetail?: PatientDetail | null;
   open: boolean;
   onClose: () => void;
   /** 保存成功回调：回传后端返回的最新列表项，供页面局部更新（不整页重查） */
@@ -62,6 +67,7 @@ function toUpdatePayload(
 
 export default function PatientEditModal({
   patientId,
+  prefetchedDetail,
   open,
   onClose,
   onUpdated,
@@ -72,36 +78,53 @@ export default function PatientEditModal({
   const [submitting, setSubmitting] = useState(false);
   const [clearedFields, setClearedFields] = useState<SensitiveField[]>([]);
 
-  /** 打开时拉详情回填。取消标记避免快速切换患者时用旧响应覆盖新表单 */
+  /**
+   * 详情页入口：prefetchedDetail 同步可用（同 PatientAdmitModal 口径）；
+   * 列表入口：走 effect 拉取，结果存 detail。表单回填统一在 effect 里做。
+   */
+  const displayDetail =
+    prefetchedDetail && prefetchedDetail.id === patientId ? prefetchedDetail : detail;
+
+  /** 打开时回填。取消标记避免快速切换患者时用旧响应覆盖新表单 */
   useEffect(() => {
     if (!open || !patientId) {
       return;
     }
-    let cancelled = false;
-    setLoading(true);
-    setDetail(null);
     setClearedFields([]);
     form.resetFields();
 
+    const fill = (data: PatientDetail) => {
+      setDetail(data);
+      form.setFieldsValue({
+        gender: data.gender ? (data.gender as Gender) : undefined,
+        birthDate: data.birthDate ? dayjs(data.birthDate) : undefined,
+        bedNo: data.bedNo ?? undefined,
+        doctorId: data.doctorId ?? undefined,
+        diabetesType: data.diabetesType ?? undefined,
+        hba1c: data.hba1c ?? undefined,
+        patientNo: data.patientNo ?? undefined,
+        departmentId: data.departmentId,
+        nurseId: data.nurseId ?? undefined,
+        admissionAt: data.admissionAt ? dayjs(data.admissionAt) : undefined,
+        status: data.status,
+      });
+    };
+
+    // 详情页入口：同步回填，不重复请求、不重复写 PATIENT_VIEW 审计（裁定 Q1）
+    if (prefetchedDetail && prefetchedDetail.id === patientId) {
+      fill(prefetchedDetail);
+      setLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLoading(true);
+    setDetail(null);
     fetchPatientDetail(patientId)
       .then((data) => {
-        if (cancelled) {
-          return;
+        if (!cancelled) {
+          fill(data);
         }
-        setDetail(data);
-        form.setFieldsValue({
-          gender: data.gender ? (data.gender as Gender) : undefined,
-          birthDate: data.birthDate ? dayjs(data.birthDate) : undefined,
-          bedNo: data.bedNo ?? undefined,
-          doctorId: data.doctorId ?? undefined,
-          diabetesType: data.diabetesType ?? undefined,
-          hba1c: data.hba1c ?? undefined,
-          patientNo: data.patientNo ?? undefined,
-          departmentId: data.departmentId,
-          nurseId: data.nurseId ?? undefined,
-          admissionAt: data.admissionAt ? dayjs(data.admissionAt) : undefined,
-          status: data.status,
-        });
       })
       .catch(() => {
         // 错误提示由请求拦截器统一处理，这里只需保证弹框不卡在 loading
@@ -115,7 +138,7 @@ export default function PatientEditModal({
     return () => {
       cancelled = true;
     };
-  }, [open, patientId, form]);
+  }, [open, patientId, prefetchedDetail, form]);
 
   const toggleClear = useCallback((field: SensitiveField) => {
     setClearedFields((prev) =>
@@ -124,7 +147,7 @@ export default function PatientEditModal({
   }, []);
 
   const handleSubmit = async () => {
-    if (!detail) {
+    if (!displayDetail) {
       return;
     }
 
@@ -150,7 +173,7 @@ export default function PatientEditModal({
 
     setSubmitting(true);
     try {
-      const result = await updatePatient(detail.id, payload);
+      const result = await updatePatient(displayDetail.id, payload);
       if (result.changedFields.length === 0) {
         void message.info('未做修改');
       } else {
@@ -181,27 +204,30 @@ export default function PatientEditModal({
       okText="确定"
       cancelText="取消"
       confirmLoading={submitting}
-      okButtonProps={{ disabled: loading || !detail }}
+      okButtonProps={{ disabled: loading || !displayDetail }}
       onOk={() => {
         void handleSubmit();
       }}
       onCancel={onClose}
       maskClosable={false}
     >
-      {/* 用 Spin 包裹而不是条件渲染，保证 form 实例始终已连接，避免 resetFields 报警 */}
+      {/* 用 Spin 包裹而不是条件渲染，保证 form 实例始终已连接，避免 resetFields 报警。
+          ⚠️ 不要加 preserve={false}（同 PatientAdmitModal/GlucoseCreateModal 的教训）：
+          Modal body 首帧后会再挂载一次，非保留字段在 Form 卸载时被清空，详情页
+          prefetchedDetail 的同步回填会被抹掉。关闭时不清空无妨：每次打开 effect 都
+          resetFields + 重填 */}
       <Spin spinning={loading}>
         <Form
           form={form}
           layout="horizontal"
           labelCol={{ flex: '120px' }}
           wrapperCol={{ flex: '1 1 0' }}
-          preserve={false}
           requiredMark
         >
           <PatientFormFields
             form={form}
             mode="edit"
-            masked={detail}
+            masked={displayDetail}
             clearedFields={clearedFields}
             onToggleClear={toggleClear}
           />

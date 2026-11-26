@@ -67,8 +67,10 @@ function makeDetail(overrides: Partial<PatientDetail> = {}): PatientDetail {
   };
 }
 
-/** P2-6：PatientBasicInfo 新增「更多操作」下拉 props，测试统一给默认值 */
+/** P2-6：PatientBasicInfo 新增「更多操作」下拉 props，测试统一给默认值（2026-11-26 增编辑项） */
 const noMoreActions = {
+  canEdit: false,
+  onEdit: () => {},
   canDischarge: false,
   canAdmit: false,
   onDischarge: () => {},
@@ -137,6 +139,52 @@ describe('PatientBasicInfo — 基本信息区渲染', () => {
 });
 
 /**
+ * 糖尿病类型展示（2026-11-26 需求规则 4）：年龄与入院时间之间、样式同姓名（加粗放大）。
+ * 菜单项顺序（裁定 Q3）渲染在浮层 portal，静态标记测不到，由 playwright 覆盖。
+ */
+describe('PatientBasicInfo — 糖尿病类型（2026-11-26）', () => {
+  function renderBasicInfo(overrides: Partial<PatientDetail> = {}): string {
+    return renderToStaticMarkup(
+      <PatientBasicInfo
+        detail={makeDetail(overrides)}
+        canAddGlucose={false}
+        onAddGlucose={() => {}}
+        {...noMoreActions}
+      />,
+    );
+  }
+
+  /** 截取「年龄」与「入院时间」之间的片段，断言糖尿病类型的位置与内容 */
+  function betweenAgeAndAdmission(html: string): string {
+    return html.slice(html.indexOf('45 岁'), html.indexOf('入院时间'));
+  }
+
+  it('有值：显示字典 label（TYPE_2 → II型糖尿病），位于年龄与入院时间之间', () => {
+    const segment = betweenAgeAndAdmission(renderBasicInfo());
+    expect(segment).toContain('II型糖尿病');
+  });
+
+  it('有值：样式同姓名（加粗放大，只显示值不带 label 前缀）', () => {
+    const html = renderBasicInfo();
+    expect(html).not.toContain('糖尿病类型：');
+    // 与姓名同款样式：fontSizeLG(16px) + fontWeight 600
+    const segment = betweenAgeAndAdmission(html);
+    expect(segment).toContain('font-weight:600');
+  });
+
+  it('null → 显示「-」（裁定 Q2，与其他字段空值口径一致）', () => {
+    const segment = betweenAgeAndAdmission(renderBasicInfo({ diabetesType: null }));
+    expect(segment).not.toContain('糖尿病');
+    expect(segment).toContain('-');
+  });
+
+  it('出院患者同样展示（裁定 Q4：纯展示字段与状态无关）', () => {
+    const segment = betweenAgeAndAdmission(renderBasicInfo({ status: 'DISCHARGED' }));
+    expect(segment).toContain('II型糖尿病');
+  });
+});
+
+/**
  * P2-6「更多操作」下拉（裁定 Q3/6）。菜单项渲染在浮层（portal），静态标记里
  * 只出现触发按钮（同 PatientMoreActions.spec 口径）：这里断言触发按钮的有无。
  */
@@ -168,7 +216,20 @@ describe('PatientBasicInfo — 更多操作下拉（P2-6）', () => {
     expect(html).not.toContain('添加血糖');
   });
 
-  it('两项均无权限 → 整个下拉不渲染（裁定 6：菜单为空时隐藏）', () => {
+  it('住院患者 + patient:update → 渲染"更多操作"触发按钮（2026-11-26 编辑入口）', () => {
+    const html = renderToStaticMarkup(
+      <PatientBasicInfo
+        detail={makeDetail()}
+        canAddGlucose={false}
+        onAddGlucose={() => {}}
+        {...noMoreActions}
+        canEdit
+      />,
+    );
+    expect(html).toContain('更多操作');
+  });
+
+  it('三项均无权限 → 整个下拉不渲染（裁定 6：菜单为空时隐藏）', () => {
     const html = renderToStaticMarkup(
       <PatientBasicInfo
         detail={makeDetail()}

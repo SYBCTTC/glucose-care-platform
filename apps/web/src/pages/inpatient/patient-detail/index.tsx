@@ -8,6 +8,7 @@ import { layoutSize } from '@/styles/tokens';
 import GlucoseCreateModal from '../patients/GlucoseCreateModal';
 import PatientAdmitModal from '../patients/PatientAdmitModal';
 import PatientDischargeModal from '../patients/PatientDischargeModal';
+import PatientEditModal from '../patients/PatientEditModal';
 import PatientBasicInfo from './PatientBasicInfo';
 import PatientDetailTabs from './PatientDetailTabs';
 import { usePatientDetail } from './usePatientDetail';
@@ -29,9 +30,14 @@ export default function PatientDetailPage() {
   const [glucoseOpen, setGlucoseOpen] = useState(false);
   // 录入成功后自增，经 Outlet context 通知血糖报告子路由重新拉取（弹窗在壳上、报表数据在子路由里）
   const [glucoseVersion, setGlucoseVersion] = useState(0);
+  // 出入院记录 Tab 的重拉信号：仅办理出院/住院成功后自增。编辑患者信息不触发——
+  // update() 只写 Patient 表，住院记录数据未变，不发假变更信号
+  const [statusVersion, setStatusVersion] = useState(0);
   /** P2-6：办理出院/住院弹框（详情页「更多操作」入口） */
   const [dischargeOpen, setDischargeOpen] = useState(false);
   const [admitOpen, setAdmitOpen] = useState(false);
+  /** 2026-11-26：编辑患者信息弹框（「更多操作」首项，复用列表页弹框，裁定 Q1） */
+  const [editOpen, setEditOpen] = useState(false);
 
   // C1 方式B：从入口点进来时 location.state.from 有值 → navigate(-1) 回来源页并还原其 Tab/筛选/视图/页码；
   // 直接访问详情 URL / 新标签打开（无 from，无可靠历史）→ 兜底回患者管理（决策 C1）。
@@ -49,11 +55,15 @@ export default function PatientDetailPage() {
     data?.status === PATIENT_STATUS.INPATIENT && hasPermission(PERMISSION.GLUCOSE_CREATE);
 
   // P2-6「更多操作」下拉（裁定 Q3/6）：住院患者 → 办理出院；出院患者 → 办理住院。
-  // 无对应权限仅隐藏该菜单项；两项都不可用时 PatientBasicInfo 不渲染整个下拉。
+  // 无对应权限仅隐藏该菜单项；全部不可用时 PatientBasicInfo 不渲染整个下拉。
   const canDischarge =
     data?.status === PATIENT_STATUS.INPATIENT && hasPermission(PERMISSION.PATIENT_DISCHARGE);
   const canAdmit =
     data?.status === PATIENT_STATUS.DISCHARGED && hasPermission(PERMISSION.PATIENT_ADMIT);
+  // 2026-11-26「编辑患者信息」：仅住院患者（规则 3：出院患者详情无此功能，服务端 40004
+  // 独立兜底）+ patient:update（复用列表页权限点，规则 2）；无权限仅隐藏该项
+  const canEdit =
+    data?.status === PATIENT_STATUS.INPATIENT && hasPermission(PERMISSION.PATIENT_UPDATE);
 
   // R25：血糖变更（壳上添加 / 子路由内添加·编辑·作废）统一走这一个回调 → 版本号 +1 → 报表重拉。
   // 患者摘要区不含血糖字段，故本页其余部分无需刷新；成功提示由各弹框内部给出（决策 D5 口径不变）。
@@ -62,10 +72,21 @@ export default function PatientDetailPage() {
   }, []);
 
   // P2-6：状态流转成功 → 重拉详情（摘要区状态/按钮随之切换）；同时 bump glucoseVersion：
-  // 住院记录（admissions）随出院关闭/随住院新开，报表子路由的「本次住院」上下文必须重拉
+  // 住院记录（admissions）随出院关闭/随住院新开，报表子路由的「本次住院」上下文必须重拉；
+  // statusVersion 独立自增 → 出入院记录 Tab 就地刷新
   const handleStatusChanged = useCallback(() => {
     setDetailVersion((version) => version + 1);
     setGlucoseVersion((version) => version + 1);
+    setStatusVersion((version) => version + 1);
+  }, []);
+
+  // 2026-11-26：编辑成功 → 仅重拉详情（摘要区科室/医护/糖尿病类型等随之刷新）。
+  // 不 bump glucoseVersion/statusVersion：编辑只写 Patient 表，血糖与住院记录数据未变，
+  // 不发假变更信号（重拉详情期间壳层进 loading、子树重挂载，各子 Tab 会随之重拉一次——
+  // 与办理出院/住院刷新同款的壳层既有行为，非本次引入）。
+  // onUpdated 回传的列表项本页用不上（详情比重查列表更全）
+  const handleEdited = useCallback(() => {
+    setDetailVersion((version) => version + 1);
   }, []);
 
   return (
@@ -119,6 +140,8 @@ export default function PatientDetailPage() {
               detail={data}
               canAddGlucose={canAddGlucose}
               onAddGlucose={() => setGlucoseOpen(true)}
+              canEdit={canEdit}
+              onEdit={() => setEditOpen(true)}
               canDischarge={canDischarge}
               canAdmit={canAdmit}
               onDischarge={() => setDischargeOpen(true)}
@@ -129,8 +152,8 @@ export default function PatientDetailPage() {
           <PatientDetailTabs
             outletContext={{
               glucoseVersion,
-              // 出入院记录 Tab 的刷新信号：与详情重拉同源（办理出院/住院成功后自增）
-              statusVersion: detailVersion,
+              // 出入院记录 Tab 的刷新信号：仅办理出院/住院成功后自增（编辑患者信息不触发）
+              statusVersion,
               onGlucoseChanged: handleGlucoseChanged,
               // R25：子路由内血糖弹框所需的患者摘要（此分支 data 恒非空）
               patient: { id: data.id, nameMasked: data.nameMasked, status: data.status },
@@ -163,6 +186,17 @@ export default function PatientDetailPage() {
         open={admitOpen && data !== null}
         onClose={() => setAdmitOpen(false)}
         onSuccess={handleStatusChanged}
+      />
+
+      {/* 2026-11-26：编辑患者信息弹框——复用列表页同一组件/接口/权限点（需求规则 2）。
+          裁定 Q1：传 prefetchedDetail，不重复请求、不重复写 PATIENT_VIEW 审计；
+          保存成功后停留原地重拉详情（handleEdited） */}
+      <PatientEditModal
+        patientId={data?.id ?? null}
+        prefetchedDetail={data}
+        open={editOpen && data !== null}
+        onClose={() => setEditOpen(false)}
+        onUpdated={handleEdited}
       />
     </Card>
   );
