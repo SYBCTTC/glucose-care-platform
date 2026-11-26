@@ -7,37 +7,37 @@
 
 ## 0. 元信息
 
-| 项 | 内容 |
-|---|---|
-| 阶段号 | P2-8 虚拟病区（`docs/ROADMAP.md`，当前 ⚠️ 部分完成） |
-| 模块 | 新增服务端 `ward`；前端改造 `pages/inpatient/virtual-ward` 与 `pages/inpatient/patients` |
-| 优先级 | P1 |
-| 依赖 | 患者管理列表/卡片、数据权限 `scope.util.ts`、审计拦截器均已落地 |
-| 需求人 | 产品（2026-11-17 提出并逐条确认） |
+| 项     | 内容                                                                                     |
+| ------ | ---------------------------------------------------------------------------------------- |
+| 阶段号 | P2-8 虚拟病区（`docs/ROADMAP.md`，当前 ⚠️ 部分完成）                                     |
+| 模块   | 新增服务端 `ward`；前端改造 `pages/inpatient/virtual-ward` 与 `pages/inpatient/patients` |
+| 优先级 | P1                                                                                       |
+| 依赖   | 患者管理列表/卡片、数据权限 `scope.util.ts`、审计拦截器均已落地                          |
+| 需求人 | 产品（2026-11-17 提出并逐条确认）                                                        |
 
 ## 0.1 决策记录（需求人 2026-11-17 确认）
 
-| # | 决策 |
-|---|---|
-| 1a | **单一全局虚拟病区**，非多个可命名病区 |
-| 2a | **沿用患者数据范围**：医生/护士/护士长只看本科室，系统管理员看全院；不跨科室 |
-| 3a | **新增 `ward:manage` 权限点**，授予 DOCTOR / NURSE / NURSE_HEAD / SYS_ADMIN |
-| 4a | **仅住院患者**可加入 |
-| 5 | 加入当天算 **1 天**（与 `formatHospitalDays` 口径一致） |
-| 6a | 历史 Tab 显示**加入→移出的实际天数**；列表**新增「移出时间」列** |
-| 7a | 重复进出**每次新建记录**，历史全留，不复用旧行 |
-| 8 | 出院/归档自动移出——**本轮只定规则不实现**（见 §4-8） |
-| 9 | 虚拟病区页更多操作**只有那一项**，不要编辑/添加血糖/查看详情 |
-| 10 | ~~用 `Popconfirm`~~ → **改用 `Modal.confirm`**（2026-11-18 裁定，见 §11-1）；文案不变 |
-| 11 | **新增** `AuditAction` 枚举值 |
-| 12a | 卡片变矮但**同一网格内仍等高** |
-| 13 | 接受接口变更：`PatientListItem` 加 `inVirtualWard` |
-| 14 | 筛选条件**不增不减** |
-| 15 | 成功后**局部更新**，不整表重查 |
-| 16 | 模型名定为 **`VirtualWardRecord`**（§11-2） |
-| 17 | 归档患者**不排除**出虚拟病区列表，与患者管理口径一致（§11-3） |
-| 18 | 历史 Tab **同时显示「加入时间」与「移出时间」两列**（§11-4） |
-| 19 | 卡片模式**照患者管理实现滚动加载**，`useVirtualWardQuery` 补双路径逻辑（§11-5） |
+| #   | 决策                                                                                  |
+| --- | ------------------------------------------------------------------------------------- |
+| 1a  | **单一全局虚拟病区**，非多个可命名病区                                                |
+| 2a  | **沿用患者数据范围**：医生/护士/护士长只看本科室，系统管理员看全院；不跨科室          |
+| 3a  | **新增 `ward:manage` 权限点**，授予 DOCTOR / NURSE / NURSE_HEAD / SYS_ADMIN           |
+| 4a  | **仅住院患者**可加入                                                                  |
+| 5   | 加入当天算 **1 天**（与 `formatHospitalDays` 口径一致）                               |
+| 6a  | 历史 Tab 显示**加入→移出的实际天数**；列表**新增「移出时间」列**                      |
+| 7a  | 重复进出**每次新建记录**，历史全留，不复用旧行                                        |
+| 8   | 出院/归档自动移出——**本轮只定规则不实现**（见 §4-8）                                  |
+| 9   | 虚拟病区页更多操作**只有那一项**，不要编辑/添加血糖/查看详情                          |
+| 10  | ~~用 `Popconfirm`~~ → **改用 `Modal.confirm`**（2026-11-18 裁定，见 §11-1）；文案不变 |
+| 11  | **新增** `AuditAction` 枚举值                                                         |
+| 12a | 卡片变矮但**同一网格内仍等高**                                                        |
+| 13  | 接受接口变更：`PatientListItem` 加 `inVirtualWard`                                    |
+| 14  | 筛选条件**不增不减**                                                                  |
+| 15  | 成功后**局部更新**，不整表重查                                                        |
+| 16  | 模型名定为 **`VirtualWardRecord`**（§11-2）                                           |
+| 17  | 归档患者**不排除**出虚拟病区列表，与患者管理口径一致（§11-3）                         |
+| 18  | 历史 Tab **同时显示「加入时间」与「移出时间」两列**（§11-4）                          |
+| 19  | 卡片模式**照患者管理实现滚动加载**，`useVirtualWardQuery` 补双路径逻辑（§11-5）       |
 
 > 1~19 全部裁定完毕，本规格 **2026-11-18 评审通过**，无遗留待确认项。
 
@@ -129,14 +129,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS virtual_ward_record_one_active
 
 ### 2.5 共享契约变更（`packages/shared`）
 
-| 变更 | 位置 |
-|---|---|
-| `PERMISSION.WARD_MANAGE = 'ward:manage'`（权限点 **22 → 23**） | `dict/roles.ts` |
-| `ROLE_PERMISSIONS` 四个角色加 `WARD_MANAGE` | `dict/roles.ts` |
-| `WARD_LEAVE_REASON`：`MANUAL` / `DISCHARGE` / `ARCHIVE` | 新增 `dict/ward.ts` |
-| `PatientListItem.inVirtualWard: boolean`（**必填**） | `patient/schema.ts` |
-| `VirtualWardListItem`、`wardListQuerySchema` | 新增 `ward/schema.ts` |
-| `ERROR_CODES.WARD_ALREADY_JOINED = 44001`、`WARD_NOT_JOINED = 44002`（新开 `44xxx` 号段） | `error/codes.ts` |
+| 变更                                                                                      | 位置                  |
+| ----------------------------------------------------------------------------------------- | --------------------- |
+| `PERMISSION.WARD_MANAGE = 'ward:manage'`（权限点 **22 → 23**）                            | `dict/roles.ts`       |
+| `ROLE_PERMISSIONS` 四个角色加 `WARD_MANAGE`                                               | `dict/roles.ts`       |
+| `WARD_LEAVE_REASON`：`MANUAL` / `DISCHARGE` / `ARCHIVE`                                   | 新增 `dict/ward.ts`   |
+| `PatientListItem.inVirtualWard: boolean`（**必填**）                                      | `patient/schema.ts`   |
+| `VirtualWardListItem`、`wardListQuerySchema`                                              | 新增 `ward/schema.ts` |
+| `ERROR_CODES.WARD_ALREADY_JOINED = 44001`、`WARD_NOT_JOINED = 44002`（新开 `44xxx` 号段） | `error/codes.ts`      |
 
 改共享包后必须走 `.codebuddy/rules/shared-package.md` 三步（构建 → 服务端 → 前端）。
 
@@ -145,11 +145,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS virtual_ward_record_one_active
 新增 `apps/server/src/modules/ward/`（module / controller / service）。路由前缀 `/ward`，
 与前端路由 `/inpatient/ward`、权限点 `ward:*` 命名一致。
 
-| # | 方法 | 路径 | 权限点 | 数据范围 | 审计 |
-|---|---|---|---|---|---|
-| 1 | GET | `/ward/patients` | `ward:view` | `RESOURCE.PATIENT` | — |
-| 2 | POST | `/ward/patients/:id` | `ward:manage` | `RESOURCE.PATIENT` | `PATIENT_WARD_JOIN` |
-| 3 | DELETE | `/ward/patients/:id` | `ward:manage` | `RESOURCE.PATIENT` | `PATIENT_WARD_REMOVE` |
+| #   | 方法   | 路径                 | 权限点        | 数据范围           | 审计                  |
+| --- | ------ | -------------------- | ------------- | ------------------ | --------------------- |
+| 1   | GET    | `/ward/patients`     | `ward:view`   | `RESOURCE.PATIENT` | —                     |
+| 2   | POST   | `/ward/patients/:id` | `ward:manage` | `RESOURCE.PATIENT` | `PATIENT_WARD_JOIN`   |
+| 3   | DELETE | `/ward/patients/:id` | `ward:manage` | `RESOURCE.PATIENT` | `PATIENT_WARD_REMOVE` |
 
 > **路径参数必须叫 `:id`**（实现期修正，原稿写的是 `:patientId`）：
 > `AuditLogInterceptor` 只从 `params.id` 取审计对象 ID（`audit-log.interceptor.ts:137`），
@@ -177,10 +177,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS virtual_ward_record_one_active
 与现有 `useVirtualWardQuery.buildParams` 已实现的参数**逐字段对齐**，前端参数构建逻辑无需改造。
 跨 Tab 多传的日期字段按 strip 丢弃。
 
-| Tab | 主条件 | 日期条件 | 排序 |
-|---|---|---|---|
-| `CURRENT` | `leftAt: null` | `joinedAt` ∈ [joinFrom, joinTo] | `joinedAt desc, id asc` |
-| `HISTORY` | `leftAt: { not: null }` | `leftAt` ∈ [leaveFrom, leaveTo] | `leftAt desc, id asc` |
+| Tab       | 主条件                  | 日期条件                        | 排序                    |
+| --------- | ----------------------- | ------------------------------- | ----------------------- |
+| `CURRENT` | `leftAt: null`          | `joinedAt` ∈ [joinFrom, joinTo] | `joinedAt desc, id asc` |
+| `HISTORY` | `leftAt: { not: null }` | `leftAt` ∈ [leaveFrom, leaveTo] | `leftAt desc, id asc`   |
 
 两个 Tab 都叠加 `patient: { ...buildScopeWhere(user, PATIENT), departmentId?, doctorId?, patientNo?, nameCipher?, bedNo? }`。
 追加 `id asc` 保证分页顺序稳定（同 `patient.service.ts:268`）。响应 `page(items, total, page, pageSize)`。
@@ -191,9 +191,19 @@ CREATE UNIQUE INDEX IF NOT EXISTS virtual_ward_record_one_active
 
 ```ts
 // POST
-{ patientId: string; wardRecordId: string; joinedAt: string; item: PatientListItem }
+{
+  patientId: string;
+  wardRecordId: string;
+  joinedAt: string;
+  item: PatientListItem;
+}
 // DELETE
-{ patientId: string; wardRecordId: string; leftAt: string; leaveReason: 'MANUAL' }
+{
+  patientId: string;
+  wardRecordId: string;
+  leftAt: string;
+  leaveReason: 'MANUAL';
+}
 ```
 
 `item` 是更新后的患者列表项（`inVirtualWard` 已翻转），供前端**局部更新**（决策 15），
@@ -214,8 +224,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS virtual_ward_record_one_active
 ```ts
 export interface VirtualWardListItem extends PatientListItem {
   wardRecordId: string;
-  wardJoinedAt: string;          // YYYY-MM-DD HH:mm:ss
-  wardLeftAt: string | null;     // CURRENT Tab 恒为 null
+  wardJoinedAt: string; // YYYY-MM-DD HH:mm:ss
+  wardLeftAt: string | null; // CURRENT Tab 恒为 null
   wardLeaveReason: string | null;
 }
 ```
@@ -251,25 +261,26 @@ export interface VirtualWardListItem extends PatientListItem {
    历史 Tab 以 `leftAt` 为终点（显示"曾在区多久"，不是"至今"）。
 7. **列表口径与患者管理一致**：不加 `archivedAt`、不加 `status` 过滤（`patient.service.ts:list()` 也没有）。
    依据决策 4「展示与患者管理一样」。若将来患者管理开始排除归档患者，本列表须同步。
-8. **决策 8 的规则（本轮只写文档、不写代码）**：患者转出院或归档时应自动移出——
+8. **决策 8 的规则**：患者转出院或归档时应自动移出——
    写 `leftAt = now()`、`leaveReason = 'DISCHARGE' | 'ARCHIVE'`、`leftById = 触发者`。
    自动移出走 service 内部方法，**不做归档校验**（归档本身就是触发原因）。
-   ⚠️ 当前系统**既无办理出院接口也无归档接口**（`PatientStatus` 只有 `INPATIENT`/`DISCHARGED`，
-   归档靠 `archivedAt`，两者都只能由 seed 产生），故这条规则**暂无代码挂载点**。
-   `WARD_LEAVE_REASON` 预留 `DISCHARGE`/`ARCHIVE`，实现出院/归档功能时**必须接上**，
-   否则「当前虚拟病区」会累积已出院患者。
+   ✅ **`DISCHARGE` 已于 2026-11-26 接入**（P2-6 患者出院，`docs/specs/patient-discharge.md` §4 规则 4）：
+   `POST /patients/:id/discharge` 事务内 `updateMany({id, leftAt: null})` 原子关闭在区记录，
+   并发下他人已先移出（count=0）不阻断出院；出院结果返回 `wardRecordId`/`leaveReason` 供审计追溯。
+   ⚠️ `ARCHIVE` 仍为**预留值**：归档功能未落地（归档靠 `archivedAt`，只能由 seed 产生），
+   实现归档功能时**必须接上**，否则「当前虚拟病区」会累积已归档患者。
 
 ## 5. 权限与数据安全
 
-| 项 | 内容 |
-|---|---|
-| 功能权限 | 列表 `WARD_VIEW`；加入/移出 `WARD_MANAGE` |
+| 项             | 内容                                                                                                             |
+| -------------- | ---------------------------------------------------------------------------------------------------------------- |
+| 功能权限       | 列表 `WARD_VIEW`；加入/移出 `WARD_MANAGE`                                                                        |
 | 权限分配（3a） | `WARD_MANAGE` → **DOCTOR / NURSE / NURSE_HEAD / SYS_ADMIN**，与现有 `WARD_VIEW` 完全同一批（设备管理员两者都无） |
-| 数据范围（2a） | `@RequireDataScope(RESOURCE.PATIENT)`。**不新增 RESOURCE、不改 `ROLE_DATA_SCOPE`、不改 `scope.util.ts`** |
-| 脱敏 | 列表只出 `nameMasked`，复用 `PATIENT_PUBLIC_SELECT`——`*Cipher` 列永不进 select |
-| 加密 | 无新增。姓名筛选沿用 `encryptDeterministic` 等值匹配（不支持模糊，前端已标「姓名（精确）」） |
-| 审计 | 两个新动作，`targetType='PATIENT'`、`targetId=patientId`；越权（`3xxxx`）由拦截器自动记 `DENIED` |
-| 列表是否记审计 | **不记**，与 `GET /patients/inpatient` 一致；虚拟病区列表不含明文，非敏感查询 |
+| 数据范围（2a） | `@RequireDataScope(RESOURCE.PATIENT)`。**不新增 RESOURCE、不改 `ROLE_DATA_SCOPE`、不改 `scope.util.ts`**         |
+| 脱敏           | 列表只出 `nameMasked`，复用 `PATIENT_PUBLIC_SELECT`——`*Cipher` 列永不进 select                                   |
+| 加密           | 无新增。姓名筛选沿用 `encryptDeterministic` 等值匹配（不支持模糊，前端已标「姓名（精确）」）                     |
+| 审计           | 两个新动作，`targetType='PATIENT'`、`targetId=patientId`；越权（`3xxxx`）由拦截器自动记 `DENIED`                 |
+| 列表是否记审计 | **不记**，与 `GET /patients/inpatient` 一致；虚拟病区列表不含明文，非敏感查询                                    |
 
 ### 5.1 权限点新增的连带影响
 
@@ -337,16 +348,16 @@ renderActions?: (record: PatientListItem) => ReactNode;
 
 新开 `44xxx` 号段，需**先登记 `docs/ERROR-CODES.md` 再改 `codes.ts`**（该文件头部注释的硬约束）。
 
-| 场景 | 码 | HTTP | action |
-|---|---|---|---|
-| 必填/格式不合法 | `10001` | 422 | field |
-| 缺 `ward:view` / `ward:manage` | `30004` | 403 | toast |
-| 跨科室操作患者 | `30002` | 403 | toast |
-| `NONE` 档（设备管理员） | `30006` | 403 | toast |
-| 患者不存在或已归档 | `40001` | 404 | toast |
-| 非住院患者调用加入 | `40004` | 409 | toast-refresh |
-| **患者已在虚拟病区**「该患者已在虚拟病区」 | `44001` | 409 | toast-refresh |
-| **患者不在虚拟病区**「该患者不在虚拟病区」 | `44002` | 409 | toast-refresh |
+| 场景                                       | 码      | HTTP | action        |
+| ------------------------------------------ | ------- | ---- | ------------- |
+| 必填/格式不合法                            | `10001` | 422  | field         |
+| 缺 `ward:view` / `ward:manage`             | `30004` | 403  | toast         |
+| 跨科室操作患者                             | `30002` | 403  | toast         |
+| `NONE` 档（设备管理员）                    | `30006` | 403  | toast         |
+| 患者不存在或已归档                         | `40001` | 404  | toast         |
+| 非住院患者调用加入                         | `40004` | 409  | toast-refresh |
+| **患者已在虚拟病区**「该患者已在虚拟病区」 | `44001` | 409  | toast-refresh |
+| **患者不在虚拟病区**「该患者不在虚拟病区」 | `44002` | 409  | toast-refresh |
 
 `44001`/`44002` 正常流程不触发（前端已置灰/已过滤），只在**并发**或**页面数据过期**时出现，
 故用 `toast-refresh` 而非 `toast`——让用户立刻看到最新状态。
@@ -373,12 +384,12 @@ renderActions?: (record: PatientListItem) => ReactNode;
 
 ## 9. 非功能要求
 
-| 项 | 要求 |
-|---|---|
+| 项   | 要求                                                                                                                                                                     |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | 性能 | `@@index([patientId, leftAt])` 支撑 `inVirtualWard` 子查询（每行一次、`take: 1`）；`@@index([leftAt, joinedAt])` 支撑两个 Tab 的排序与区间筛选。1000 患者规模下列表 < 1s |
-| 内网 | 不引入新依赖，不引用公网资源 |
-| 等保 | 加入/移出全部落审计（含越权 `DENIED`）；列表只出脱敏值；操作人 `Restrict` 不可删 |
-| 兼容 | 复用患者管理组件，大字号、打印（`gc-no-print`）、明暗模式自动继承 |
+| 内网 | 不引入新依赖，不引用公网资源                                                                                                                                             |
+| 等保 | 加入/移出全部落审计（含越权 `DENIED`）；列表只出脱敏值；操作人 `Restrict` 不可删                                                                                         |
+| 兼容 | 复用患者管理组件，大字号、打印（`gc-no-print`）、明暗模式自动继承                                                                                                        |
 
 ## 10. 验收标准
 
@@ -388,8 +399,8 @@ renderActions?: (record: PatientListItem) => ReactNode;
 - [ ] 越权被拒并落 `DENIED` 审计
 - [ ] 菜单项置灰、两个 Tab 的展示模式、天数口径符合 §6
 - [ ] 文档更新：`ROADMAP.md` P2-8 → ✅；`ERROR-CODES.md` 登记 `44xxx`；
-  `ARCHITECTURE.md` §3/§4 补权限点数与新模型；`AGENTS.md` §5.1 补权限点数；
-  `PERMISSION-DESIGN.md` 补 `ward:manage`
+      `ARCHITECTURE.md` §3/§4 补权限点数与新模型；`AGENTS.md` §5.1 补权限点数；
+      `PERMISSION-DESIGN.md` 补 `ward:manage`
 - [ ] `useVirtualWardQuery.ts:134` 的 `TODO` 消除（全仓当前唯一的真实待办注释）
 
 ## 11. 待确认项（**已全部裁定，2026-11-18**）
@@ -400,11 +411,11 @@ renderActions?: (record: PatientListItem) => ReactNode;
 `Popconfirm` 无法正常弹出。现有代码里 `Popconfirm` 用得通的地方（`PatientTable.tsx:115` 的「办理住院」）
 都是**直接挂在操作列按钮上、不在 Dropdown 内**。
 
-| 方案 | 说明 | 代价 |
-|---|---|---|
-| **(A) 改用 `Modal.confirm`**（推荐） | 菜单项点击后调命令式 API 弹居中确认框，可取消 | 与决策 10 字面不符，但交互等价（都是"确认弹框、可取消、可确认"），且是 Dropdown 内的标准做法 |
-| (B) 保留 `Popconfirm`，锚定「更多操作」按钮 | 菜单项点击后不关菜单，在按钮位置弹气泡 | 需手动控制 Dropdown `open`，菜单与气泡同时悬浮，视觉杂乱且易出定位 bug |
-| (C) 虚拟病区页去掉 Dropdown | 该页只有一项（决策 9），直接做操作列按钮 + `Popconfirm` | 与需求原文"点击更多操作展示的功能有…"不符；且患者管理页仍在 Dropdown 内，两处交互不一致 |
+| 方案                                        | 说明                                                    | 代价                                                                                         |
+| ------------------------------------------- | ------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| **(A) 改用 `Modal.confirm`**（推荐）        | 菜单项点击后调命令式 API 弹居中确认框，可取消           | 与决策 10 字面不符，但交互等价（都是"确认弹框、可取消、可确认"），且是 Dropdown 内的标准做法 |
+| (B) 保留 `Popconfirm`，锚定「更多操作」按钮 | 菜单项点击后不关菜单，在按钮位置弹气泡                  | 需手动控制 Dropdown `open`，菜单与气泡同时悬浮，视觉杂乱且易出定位 bug                       |
+| (C) 虚拟病区页去掉 Dropdown                 | 该页只有一项（决策 9），直接做操作列按钮 + `Popconfirm` | 与需求原文"点击更多操作展示的功能有…"不符；且患者管理页仍在 Dropdown 内，两处交互不一致      |
 
 ✅ **裁定：方案 (A)**。两页统一用 `Modal.confirm`，文案照决策 10 不变。
 理由：`Popconfirm` 的锚点会随 Dropdown 菜单关闭而卸载，在菜单项内无法可靠弹出；
