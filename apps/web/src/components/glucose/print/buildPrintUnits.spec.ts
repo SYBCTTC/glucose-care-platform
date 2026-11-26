@@ -7,7 +7,12 @@ import type {
 } from '@gc/shared';
 import { DEFAULT_GLUCOSE_REPORT_DISPLAY } from '@/pages/inpatient/patient-detail/detail-tabs';
 import type { GlucoseReportDisplay } from '@/pages/inpatient/patient-detail/detail-tabs';
-import { buildRecordPrintCounted, buildReportPrintUnits, countedCodeSet } from './buildPrintUnits';
+import {
+  buildRecordPrintCounted,
+  buildReportPrintUnits,
+  countedCodeSet,
+  countVisibleReportRecords,
+} from './buildPrintUnits';
 
 /* -------------------------------------------------------------------------- */
 /* 测试数据工厂                                                                  */
@@ -47,6 +52,7 @@ function report(overrides: Partial<GlucoseReportResponse> = {}): GlucoseReportRe
       // type: TIME_SLOT_CATEGORY.NORMAL=1（普通时段成列），sortOrder 升序
       { code: 'FASTING', name: '空腹', type: 1, sortOrder: 1 },
       { code: 'BREAKFAST_POST', name: '早餐后', type: 1, sortOrder: 2 },
+      { code: 'LUNCH_POST', name: '午餐后', type: 1, sortOrder: 3 },
     ],
     rows: [],
     page: 1,
@@ -86,18 +92,21 @@ describe('countedCodeSet — 页脚计数口径（裁定 Q2：动态跟随字典
   });
 });
 
-describe('buildReportPrintUnits — 报表打印单元（裁定 C1 + 规格 §4 规则 6/16）', () => {
-  it('同一日期同一时段多条记录 → 每条独占一行，按列序排列', () => {
-    const e1 = entry({ id: 'e1', time: '08:00' });
-    const e2 = entry({ id: 'e2', time: '10:30' });
-    const e3 = entry({ id: 'e3', time: '09:00' });
+describe('buildReportPrintUnits — 报表打印单元（对齐子行，2026-11-26 裁定 + 规格 §4 规则 6/16）', () => {
+  it('空腹2+早餐后2+午餐后1 → 2 个子行：各时段第 i 条落第 i 行，缺位为 null（需求人例 1）', () => {
+    const f1 = entry({ id: 'f1', time: '06:00' });
+    const f2 = entry({ id: 'f2', time: '06:30' });
+    const b1 = entry({ id: 'b1', time: '08:00' });
+    const b2 = entry({ id: 'b2', time: '08:30' });
+    const l1 = entry({ id: 'l1', time: '12:00' });
     const data = report({
       rows: [
         {
-          date: '2026-11-20',
+          date: '2026-11-25',
           cells: [
-            { slotCode: 'FASTING', entries: [e1, e2] },
-            { slotCode: 'BREAKFAST_POST', entries: [e3] },
+            { slotCode: 'FASTING', entries: [f1, f2] },
+            { slotCode: 'BREAKFAST_POST', entries: [b1, b2] },
+            { slotCode: 'LUNCH_POST', entries: [l1] },
           ],
         },
       ],
@@ -105,15 +114,45 @@ describe('buildReportPrintUnits — 报表打印单元（裁定 C1 + 规格 §4 
 
     const units = buildReportPrintUnits(data, ALL_ON, countedCodeSet(RESULT_TYPES));
 
-    // 行级单元：每条记录一个单元，key = 记录 id；列序优先（同列内保持时间升序）
-    expect(units.map((unit) => [unit.slotIndex, unit.key, unit.date])).toEqual([
-      [0, 'e1', '2026-11-20'],
-      [0, 'e2', '2026-11-20'],
-      [1, 'e3', '2026-11-20'],
-    ]);
+    expect(units.map((unit) => unit.key)).toEqual(['2026-11-25#0', '2026-11-25#1']);
+    expect(units.map((unit) => unit.date)).toEqual(['2026-11-25', '2026-11-25']);
+    // 行1 = 各时段第 1 条；行2 = 各时段第 2 条（午餐后无第 2 条 → null）
+    expect(units[0].cells).toEqual([f1, b1, l1]);
+    expect(units[1].cells).toEqual([f2, b2, null]);
+    expect(units.map((unit) => unit.visible)).toEqual([3, 2]);
+    expect(units.map((unit) => unit.counted)).toEqual([3, 2]);
   });
 
-  it('多日期按日期升序摊平为行级单元序列（行级装箱、日期组可跨页的前提）', () => {
+  it('早餐后增至 3 条 → 3 个子行，其余时段不受影响（需求人例 2）', () => {
+    const f1 = entry({ id: 'f1' });
+    const f2 = entry({ id: 'f2' });
+    const b1 = entry({ id: 'b1' });
+    const b2 = entry({ id: 'b2' });
+    const b3 = entry({ id: 'b3' });
+    const l1 = entry({ id: 'l1' });
+    const data = report({
+      rows: [
+        {
+          date: '2026-11-25',
+          cells: [
+            { slotCode: 'FASTING', entries: [f1, f2] },
+            { slotCode: 'BREAKFAST_POST', entries: [b1, b2, b3] },
+            { slotCode: 'LUNCH_POST', entries: [l1] },
+          ],
+        },
+      ],
+    });
+
+    const units = buildReportPrintUnits(data, ALL_ON, countedCodeSet(RESULT_TYPES));
+
+    expect(units.map((unit) => unit.key)).toEqual(['2026-11-25#0', '2026-11-25#1', '2026-11-25#2']);
+    expect(units[0].cells).toEqual([f1, b1, l1]);
+    expect(units[1].cells).toEqual([f2, b2, null]);
+    expect(units[2].cells).toEqual([null, b3, null]);
+    expect(units.map((unit) => unit.visible)).toEqual([3, 2, 1]);
+  });
+
+  it('多日期按日期升序摊平为子行序列（日期组可跨页的前提）', () => {
     const data = report({
       rows: [
         { date: '2026-11-20', cells: [{ slotCode: 'FASTING', entries: [entry({ id: 'a1' })] }] },
@@ -129,12 +168,10 @@ describe('buildReportPrintUnits — 报表打印单元（裁定 C1 + 规格 §4 
     const units = buildReportPrintUnits(data, ALL_ON, countedCodeSet(RESULT_TYPES));
 
     expect(units.map((unit) => [unit.date, unit.key])).toEqual([
-      ['2026-11-20', 'a1'],
-      ['2026-11-21', 'b1'],
-      ['2026-11-21', 'b2'],
+      ['2026-11-20', '2026-11-20#0'],
+      ['2026-11-21', '2026-11-21#0'],
+      ['2026-11-21', '2026-11-21#1'],
     ]);
-    // 页脚计数：行级 0/1
-    expect(units.map((unit) => unit.counted)).toEqual([1, 1, 1]);
   });
 
   it('无可见记录的日期整组跳过（裁定 16：勾选过滤后为空的日期不占行）', () => {
@@ -163,7 +200,7 @@ describe('buildReportPrintUnits — 报表打印单元（裁定 C1 + 规格 §4 
     expect(units.map((unit) => unit.date)).toEqual(['2026-11-21']);
   });
 
-  it('counted 计数：只数 counted=true 的记录（拒检等 5~9 不计入）', () => {
+  it('counted 只数字典 counted=true；visible 数全部可见记录（拒检可见不计数）', () => {
     const data = report({
       rows: [
         {
@@ -180,8 +217,9 @@ describe('buildReportPrintUnits — 报表打印单元（裁定 C1 + 规格 §4 
 
     const units = buildReportPrintUnits(data, ALL_ON, countedCodeSet(RESULT_TYPES));
 
-    expect(units).toHaveLength(2); // 拒检记录仍占一行（可见），只是不计数
+    expect(units).toHaveLength(2); // 拒检记录仍占一个子行（可见），只是不计入 counted
     expect(units.map((unit) => unit.counted)).toEqual([1, 0]);
+    expect(units.map((unit) => unit.visible)).toEqual([1, 1]);
   });
 
   it('列集合外的格防御性跳过（columns 与 cells 同源，正常不发生）', () => {
@@ -195,6 +233,42 @@ describe('buildReportPrintUnits — 报表打印单元（裁定 C1 + 规格 §4 
     });
 
     expect(buildReportPrintUnits(data, ALL_ON, countedCodeSet(RESULT_TYPES))).toEqual([]);
+  });
+});
+
+describe('countVisibleReportRecords — 页脚「总计 Y 条」/审计留痕口径（2026-11-26 裁定）', () => {
+  it('= 勾选过滤后 entry 总条数（含拒检/请假等 5~9，与 Σvisible 同口径）', () => {
+    const data = report({
+      rows: [
+        {
+          date: '2026-11-25',
+          cells: [
+            { slotCode: 'FASTING', entries: [entry(), entry()] },
+            { slotCode: 'BREAKFAST_POST', entries: [entry({ resultType: '5', valueMmolL: null })] },
+          ],
+        },
+        {
+          date: '2026-11-19',
+          cells: [
+            {
+              slotCode: 'FASTING',
+              entries: [entry({ sourceType: 0, sourceSlotName: '强化-上午' })],
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(countVisibleReportRecords(data, ALL_ON)).toBe(4);
+    // 取消勾选强化 → 11-19 那条不渲染、不计数
+    expect(countVisibleReportRecords(data, { ...ALL_ON, intensive: false })).toBe(3);
+    // 与子行模型的 Σvisible 一致
+    const units = buildReportPrintUnits(data, ALL_ON, countedCodeSet(RESULT_TYPES));
+    expect(units.reduce((sum, unit) => sum + unit.visible, 0)).toBe(4);
+  });
+
+  it('空 rows → 0', () => {
+    expect(countVisibleReportRecords(report(), ALL_ON)).toBe(0);
   });
 });
 

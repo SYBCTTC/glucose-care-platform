@@ -234,7 +234,7 @@ export interface GlucosePrintPayload {
   /** YYYY-MM-DD HH:mm:ss，本地时间；不传 = 该侧不限（与查询口径一致） */
   startTime?: string;
   endTime?: string;
-  /** 打印范围内 counted=true 记录数（stats.total 口径，裁定 17） */
+  /** 打印留痕条数：report/record = 可见记录数（2026-11-26 裁定）；trend = stats.total（裁定 17 沿用） */
   count: number;
 }
 

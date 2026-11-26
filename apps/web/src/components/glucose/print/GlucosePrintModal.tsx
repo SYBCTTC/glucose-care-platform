@@ -13,6 +13,7 @@ import { fetchPatientNamePlain } from '@/api/patient';
 import { useCommonDataStore } from '@/store/common-data';
 import { triggerBrowserPrint } from '@/components/print/printBrowser';
 import { formatPrintRangeFromDates } from '@/components/print/paginate';
+import { countVisibleReportRecords } from './buildPrintUnits';
 import { PRINT_PAGE_WIDTH_PX } from '@/components/print/printConstants';
 import PrintReportDocument from './PrintReportDocument';
 import PrintRecordDocument from './PrintRecordDocument';
@@ -49,7 +50,8 @@ export interface GlucosePrintModalProps {
   reportDisplay?: GlucoseReportDisplay;
   /** trend 必传：Tab 打开预览时生成的图表图片（getDataURL，所见即所得） */
   chartImage?: string | null;
-  /** trend 的审计/页脚计数（stats.total，裁定 17）；report/record 从拉取数据自取 */
+  /** trend 的审计计数（stats.total，裁定 17 沿用——趋势打印的是图表、无记录列表可数）；
+      report/record 从拉取数据自取可见记录数（2026-11-26 裁定） */
   auditCount?: number;
 }
 
@@ -157,12 +159,18 @@ export default function GlucosePrintModal({
     // range 是对象，按原始值订阅（appliedRange 在 Tab 层已 memo，此处再防一层）
   }, [open, printType, patient.id, range.startTime, range.endTime]);
 
-  /** 审计/留痕条数 = stats.total（counted 口径，裁定 17） */
+  /**
+   * 审计/留痕条数 = **可见记录数**（2026-11-26 需求人裁定，替代裁定 17 的 stats.total
+   * counted 口径；与打印页脚「总计 Y 条」同口径）：
+   *  - report：展示勾选过滤后的 entry 总条数（含拒检/请假等 5~9）；
+   *  - record：范围内全部记录条数（记录打印不做勾选过滤）；
+   *  - trend：打印的是图表图片、无记录列表，沿用 Tab 传入的 stats.total（裁定 17）。
+   */
   const totalCount =
-    printType === 'report'
-      ? (reportData?.stats.total ?? 0)
-      : printType === 'record'
-        ? (recordData?.stats.total ?? 0)
+    printType === 'report' && reportData
+      ? countVisibleReportRecords(reportData, reportDisplay ?? DEFAULT_GLUCOSE_REPORT_DISPLAY)
+      : printType === 'record' && recordData
+        ? recordData.items.length
         : (auditCount ?? 0);
 
   const handlePrint = useCallback(async () => {

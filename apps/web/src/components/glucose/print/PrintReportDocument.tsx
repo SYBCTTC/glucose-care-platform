@@ -13,10 +13,11 @@ import { ReportCell } from '@/pages/inpatient/patient-detail/GlucoseReportTab';
 /**
  * R28：血糖报告打印文档（docs/specs/glucose-print.md §4 规则 6/9/10）。
  *
- * 与屏幕的差异（裁定 C1）：同一日期同一时段的多条记录**每条独占一行**，
- * 日期列 rowspan 跨行合并；记录落对应时段列、其余列留空；不含统计栏。
- * 分页单元 = 单记录行（2026-11-25 变更裁定：行级装箱、实测高度自适应装满）；
- * 日期组可跨页，日期列按「页内连续同日期片段」合并——同日期跨两页时两页各自合并。
+ * 与屏幕的差异（2026-11-26 变更裁定，替代原裁定 C1「每条独占一行」）：
+ * 屏幕同格多条纵向堆叠，打印用**对齐子行**——同日行数 = 该日单时段最大记录数，
+ * 每个时段第 i 条（检测时间升序）落第 i 行、缺位留空；不含统计栏。
+ * 分页单元 = 子行（实测高度自适应装满），日期组可跨页，
+ * 日期列按「页内连续同日期片段」合并——同日期跨两页时两页各自合并。
  */
 
 /** 日期列宽（px）：容纳 YYYY-MM-DD（12px 字号）+ 单元格内边距；时段列均分余宽 */
@@ -85,17 +86,20 @@ export default function PrintReportDocument({
                   {row.date}
                 </td>
               ) : null}
-              {data.columns.map((column, columnIndex) => (
-                <td key={column.code}>
-                  {row.slotIndex === columnIndex ? (
-                    <ReportCell
-                      cell={{ slotCode: column.code, entries: [row.entry] }}
-                      resultTypes={resultTypes}
-                      display={display}
-                    />
-                  ) : null}
-                </td>
-              ))}
+              {data.columns.map((column, columnIndex) => {
+                const entry = row.cells[columnIndex];
+                return (
+                  <td key={column.code}>
+                    {entry ? (
+                      <ReportCell
+                        cell={{ slotCode: column.code, entries: [entry] }}
+                        resultTypes={resultTypes}
+                        display={display}
+                      />
+                    ) : null}
+                  </td>
+                );
+              })}
             </tr>
           ))}
         </tbody>
@@ -109,8 +113,11 @@ export default function PrintReportDocument({
       patient={patient}
       plainName={plainName}
       rangeText={rangeText}
-      units={units.map((unit) => ({ key: unit.key, counted: unit.counted }))}
-      totalCount={data.stats.total}
+      units={units.map((unit) => ({
+        key: unit.key,
+        counted: unit.counted,
+        visible: unit.visible,
+      }))}
       measureContent={renderTable(units)}
       renderPageContent={(pageKeys) =>
         renderTable(

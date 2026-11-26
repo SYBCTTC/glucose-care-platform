@@ -47,8 +47,14 @@ export default function PrintRecordDocument({
     () => buildRecordPrintCounted(data.items, counted),
     [data.items, counted],
   );
+  // visible 恒 1（一行一条记录）：页脚「总计 Y 条」= 可见记录数（2026-11-26 裁定）
   const units = useMemo(
-    () => data.items.map((item, index) => ({ key: item.id, counted: countedFlags[index] })),
+    () =>
+      data.items.map((item, index) => ({
+        key: item.id,
+        counted: countedFlags[index],
+        visible: 1,
+      })),
     [data.items, countedFlags],
   );
   const itemById = useMemo(() => new Map(data.items.map((item) => [item.id, item])), [data.items]);
@@ -101,7 +107,6 @@ export default function PrintRecordDocument({
       plainName={plainName}
       rangeText={rangeText}
       units={units}
-      totalCount={data.stats.total}
       measureContent={renderTable(data.items.map((item) => item.id))}
       renderPageContent={(pageKeys) => renderTable(pageKeys)}
       measureVersion={units}

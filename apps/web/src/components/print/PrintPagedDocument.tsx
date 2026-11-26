@@ -12,18 +12,22 @@ import { PRINT_CONTENT_WIDTH_PX } from './printConstants';
  * 职责（docs/specs/glucose-print.md §4 规则 9/10、§6）：
  *  1. 渲染隐藏测量层（校准 sheet + 全量内容），交给 usePrintPagination 实测分页；
  *  2. 按分页结果渲染 N 张 PrintSheet，每页重复完整头部（裁定：新页与首页一致）；
- *  3. 每页页脚 `第X/Y页，本页N条数据，总计M条数据`（裁定 Q3/Q4）——
- *     N 按该页单元的 counted 数求和，M = 服务端 stats.total（裁定 17，前端不重算）。
+ *  3. 每页页脚 `第X/Y页，本页N条数据，总计M条数据`（裁定 Q3/Q4，文案不变）——
+ *     N 按该页单元的 counted 数求和（字典 counted 口径，裁定 Q2 不变）；
+ *     M = 全部单元的可见记录数求和（2026-11-26 需求人裁定；原 = 服务端
+ *     stats.total 裁定 17，因拒检/请假等可见但不计入 counted、数字对不上而改）。
  *
  * 内容表格由调用方以 render prop 提供（测量层与真实页共用同一渲染函数，
  * 保证量到的高度与实际打印一致）；行上须打 data-print-unit / data-print-unit-key。
  */
 
 export interface PrintPageUnit {
-  /** 单元唯一键（报表 = 日期，记录 = 记录 id），与行上的 data-print-unit-key 一致 */
+  /** 单元唯一键（报表 = `日期#子行序号`，记录 = 记录 id），与行上的 data-print-unit-key 一致 */
   key: string;
   /** 该单元内 counted=true 的记录数（页脚「本页 X 条」用，口径见裁定 Q2/Q3） */
   counted: number;
+  /** 该单元内可见记录数（页脚「总计 Y 条」求和用，2026-11-26 裁定；记录打印恒 1） */
+  visible: number;
 }
 
 export interface PrintPagedDocumentProps {
@@ -32,8 +36,6 @@ export interface PrintPagedDocumentProps {
   plainName: string | null;
   rangeText: string;
   units: PrintPageUnit[];
-  /** 页脚「总计 Y 条」= 服务端 stats.total（counted 口径，裁定 17） */
-  totalCount: number;
   /** 隐藏测量层里的全量内容（所有单元的行，含 data-print-unit 标记） */
   measureContent: ReactNode;
   /** 渲染一页的内容（该页单元的 key，按页内顺序） */
@@ -48,7 +50,6 @@ export default function PrintPagedDocument({
   plainName,
   rangeText,
   units,
-  totalCount,
   measureContent,
   renderPageContent,
   measureVersion,
@@ -61,6 +62,8 @@ export default function PrintPagedDocument({
     () => new Map(units.map((unit) => [unit.key, unit.counted])),
     [units],
   );
+  // 页脚「总计 Y 条」= 全部单元可见记录数之和（2026-11-26 裁定，与审计留痕同口径）
+  const totalCount = useMemo(() => units.reduce((sum, unit) => sum + unit.visible, 0), [units]);
 
   return (
     <>

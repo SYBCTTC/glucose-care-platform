@@ -599,8 +599,9 @@ export class GlucoseService {
    * 校验患者可读（存在、未归档、数据范围内）后回显审计 detail 字段；
    * **不查血糖数据、不生成文件**——打印数据由前端走既有 report/records 接口拉取，
    * 本方法的意义是「谁在何时打印了哪个范围、多少条」落审计（裁定 Q10/Q11）。
-   * `count` 由前端透传（各 Tab 既有接口 `stats.total` 的 counted 口径，规格 §4 裁定 17），
-   * 服务端不重算：留痕口径与数据接口一致即可，重算需再查一遍库、无增益。
+   * `count` 由前端透传（report/record = 打印件**可见记录数**，2026-11-26 需求人裁定，
+   * 替代裁定 17 的 `stats.total` counted 口径；trend = `stats.total` 沿用裁定 17），
+   * 服务端不重算：留痕口径与打印件一致即可，重算需再查一遍库、无增益。
    */
   async print(
     user: AuthenticatedUser,

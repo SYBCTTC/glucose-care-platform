@@ -9,8 +9,8 @@ import { packUnitsIntoPages } from './paginate';
  *  1. 一张校准 PrintSheet（与真实页同头部/时间行/页脚），其 `[data-print-content-slot]`
  *     的实测高度 = 每页内容可用高度；
  *  2. 全部内容，每个分页单元的行打 `data-print-unit` + `data-print-unit-key`
- *     （相邻同 key 的多行聚合为一个单元；2026-11-25 变更后报表/记录均为行级 key，
- *     该聚合为兼容机制，报表日期列的跨页合并由文档组件按页内片段处理）。
+ *     （相邻同 key 的多行聚合为一个单元；报表 = 对齐子行 key `日期#序号`、记录 = 记录 id，
+ *     均一 key 一行，该聚合为兼容机制；报表日期列的跨页合并由文档组件按页内片段处理）。
  *
  * ready 变 true 或 `version` 变化（数据/勾选变了）时重测；返回按单元 key 分组的页。
  * 测量在 useLayoutEffect 里同步完成，浏览器绘制前即产出分页，预览不会闪。

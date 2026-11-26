@@ -89,7 +89,8 @@ export function formatPrintRangeFromDates(dates: readonly string[]): string {
 
 /**
  * 页脚文案（裁定 Q3/Q4，每页展示）：`第<当前页>/<总页>页，本页<X>条数据，总计<Y>条数据`。
- * pageIndex 从 0 起；X = 该页 counted 记录数，Y = 范围内 counted 总数（stats.total 口径，裁定 17）。
+ * pageIndex 从 0 起；X = 该页 counted 记录数（字典 counted 口径，裁定 Q2 不变）；
+ * Y = 范围内**可见记录数**（2026-11-26 需求人裁定，替代裁定 17 的 stats.total 口径）。
  */
 export function buildPrintFooter(
   pageIndex: number,
