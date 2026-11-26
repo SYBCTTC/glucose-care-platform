@@ -452,20 +452,21 @@ export default function GlucoseReportTab() {
   // R23 全屏态：叠加 useFullscreen 产出的 fixed 覆盖样式（不用浏览器 Fullscreen API——
   // antd 弹层挂 body，该模式下会不可见，且纯 CSS 方案无兼容性问题）；flex 链与
   // .gc-report-table 不变，表格随之撑满视口、body 内滚、分页钉底
+  // gap 16px（2026-11-26 样式调整）：公共工具栏块与内容区（表格）的间距与块内部间距一致
   const rootStyle: CSSProperties = {
     height: '100%',
     display: 'flex',
     flexDirection: 'column',
-    gap: token.marginXS,
+    gap: token.margin,
     overflow: 'auto',
     ...overlayStyle,
   };
 
   return (
     <div style={rootStyle}>
-      {/* R20 预留位兑现（R24，裁定 Q18a）：统计栏居左 + 查询表单 + 全屏按钮最右。
-          这一行的布局（space-between / flexWrap / flexShrink:0）与打印隐藏口径由公共
-          GlucoseToolbar 承接，记录页与趋势图复用同一行；全屏态它随覆盖层固定在视口
+      {/* R20 预留位兑现（R24，裁定 Q18a；2026-11-26 起两行：统计栏一行 + 表单/全屏一行）。
+          布局（flexWrap / flexShrink:0 / 16px 间距）与打印隐藏口径由公共
+          GlucoseToolbar 承接，记录页与趋势图复用同一块；全屏态它随覆盖层固定在视口
           顶部、表单照常可用。统计项经 buildReportStatsItems 把报表 stats 适配成公共
           items（R20 口径不变），data 未到时不传 → 统计区不渲染、按钮仍靠右 */}
       <GlucoseToolbar

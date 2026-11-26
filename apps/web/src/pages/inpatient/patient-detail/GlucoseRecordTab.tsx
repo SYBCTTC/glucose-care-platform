@@ -285,19 +285,20 @@ export default function GlucoseRecordTab() {
   );
 
   // 根节点布局同报表（R21/R23 口径）：撑满内容区、工具栏固定、表格占剩余空间 body 内滚；
-  // 全屏态叠加 useFullscreen 的 fixed 覆盖样式
+  // 全屏态叠加 useFullscreen 的 fixed 覆盖样式。
+  // gap 16px（2026-11-26 样式调整）：公共工具栏块与内容区（表格）的间距与块内部间距一致
   const rootStyle: CSSProperties = {
     height: '100%',
     display: 'flex',
     flexDirection: 'column',
-    gap: token.marginXS,
+    gap: token.margin,
     overflow: 'auto',
     ...overlayStyle,
   };
 
   return (
     <div style={rootStyle}>
-      {/* R26 公共工具栏：统计栏（左）+ 查询表单（中）+ 全屏按钮（右）。
+      {/* R26 公共工具栏（2026-11-26 起两行：统计栏一行 + 表单/全屏一行）。
           裁定 Q4：extra 插槽不使用——记录页无追加筛选；展示勾选属报表专属，本页不渲染 */}
       <GlucoseToolbar
         stats={statsItems}

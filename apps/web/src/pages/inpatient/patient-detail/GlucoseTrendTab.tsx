@@ -243,12 +243,13 @@ export default function GlucoseTrendTab() {
   );
 
   // 根节点布局同报表/记录（R21/R23 口径）：撑满内容区、工具栏固定、图表占剩余空间；
-  // 全屏态叠加 useFullscreen 的 fixed 覆盖样式
+  // 全屏态叠加 useFullscreen 的 fixed 覆盖样式。
+  // gap 16px（2026-11-26 样式调整）：公共工具栏块与内容区（图表）的间距与块内部间距一致
   const rootStyle: CSSProperties = {
     height: '100%',
     display: 'flex',
     flexDirection: 'column',
-    gap: token.marginXS,
+    gap: token.margin,
     overflow: 'auto',
     ...overlayStyle,
   };
@@ -270,7 +271,7 @@ export default function GlucoseTrendTab() {
 
   return (
     <div style={rootStyle}>
-      {/* R26 公共工具栏：统计栏（左）+ 查询表单（中）+ 全屏按钮（右）。
+      {/* R26 公共工具栏（2026-11-26 起两行：统计栏一行 + 表单/全屏一行）。
           裁定：extra 插槽不使用——时段过滤放在下方图表区顶部覆盖行（紧贴图例，勾选即所见即所滤），
           不挤进工具栏；展示勾选属报表专属，本页不渲染 */}
       <GlucoseToolbar

@@ -30,8 +30,8 @@ describe('FullscreenToggle — 全屏切换按钮（R23）', () => {
   });
 });
 
-describe('GlucoseToolbar — 工具栏行（统计 + 表单 + 全屏）', () => {
-  it('三部分同行渲染：统计文本、表单插槽、全屏按钮', () => {
+describe('GlucoseToolbar — 工具栏块（统计一行 + 表单/全屏一行）', () => {
+  it('三部分齐备：统计文本、表单插槽、全屏按钮（2026-11-26 起分两行渲染）', () => {
     const html = renderToStaticMarkup(
       <GlucoseToolbar
         stats={[{ label: '总计', value: '17', suffix: ' 次', numeric: true }]}
@@ -45,6 +45,8 @@ describe('GlucoseToolbar — 工具栏行（统计 + 表单 + 全屏）', () => 
     expect(text).toContain('总计：17 次');
     expect(text).toContain('住院记录表单');
     expect(text).toContain('全屏');
+    // 统计栏在前、表单/全屏行在后（两行结构的顺序钉住）
+    expect(html.indexOf('总计：17')).toBeLessThan(html.indexOf('住院记录表单'));
   });
 
   it('不传 stats（数据未加载）：统计区不渲染，全屏按钮仍靠右不跳动', () => {
@@ -65,21 +67,33 @@ describe('GlucoseToolbar — 工具栏行（统计 + 表单 + 全屏）', () => 
     expect(html).not.toContain('gc-num');
   });
 
-  it('行布局：左右分布 + 窄屏允许换行 + 不被内容区压扁', () => {
+  it('块布局：纵向两行 + 内部间距 16px + 窄屏允许换行 + 不被内容区压扁', () => {
     const html = renderToStaticMarkup(
       <GlucoseToolbar fullscreen={false} onToggleFullscreen={() => {}} />,
     );
 
-    expect(html).toContain('justify-content:space-between');
+    // 2026-11-26 样式调整：单行 space-between 改纵向两行（统计栏一行 + 表单/全屏一行）
+    expect(html).toContain('flex-direction:column');
+    expect(html).not.toContain('justify-content:space-between');
+    // 块内部间距 16px（token.margin，需求人指定保持现状）
+    expect(html).toContain('gap:16px');
     // R24 裁定 Q18a：窄屏接受换行，不挤压控件
     expect(html).toContain('flex-wrap:wrap');
     expect(html).toContain('flex-shrink:0');
   });
 
-  it('全屏态透传给按钮：文案变为「退出全屏」', () => {
+  it('表单/全屏行整行挂 gc-no-print：打印时不残留 16px 空行', () => {
     const html = renderToStaticMarkup(
-      <GlucoseToolbar fullscreen onToggleFullscreen={() => {}} />,
+      <GlucoseToolbar fullscreen={false} onToggleFullscreen={() => {}} />,
     );
+
+    // 表单与全屏按钮各自 no-print，打印时该行必为空——行容器整体隐藏，
+    // 避免两行结构的根 gap 在纸质输出留下空档
+    expect(html).toContain('gc-no-print');
+  });
+
+  it('全屏态透传给按钮：文案变为「退出全屏」', () => {
+    const html = renderToStaticMarkup(<GlucoseToolbar fullscreen onToggleFullscreen={() => {}} />);
 
     expect(textOf(html)).toContain('退出全屏');
   });
