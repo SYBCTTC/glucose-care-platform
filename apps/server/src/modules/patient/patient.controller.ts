@@ -1,14 +1,22 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import {
+  admitPatientSchema,
   createPatientSchema,
+  dischargePatientSchema,
   patientIdSchema,
   patientListQuerySchema,
   PERMISSION,
   RESOURCE,
   updatePatientSchema,
 } from '@gc/shared';
-import type { CreatePatientInput, PatientListQuery, UpdatePatientInput } from '@gc/shared';
+import type {
+  AdmitPatientInput,
+  CreatePatientInput,
+  DischargePatientInput,
+  PatientListQuery,
+  UpdatePatientInput,
+} from '@gc/shared';
 import { Audit } from '../../common/decorators/audit.decorator';
 import { RequireDataScope } from '../../common/data-scope/data-scope.decorator';
 import { RequirePermissions } from '../../common/guards/permissions.guard';
@@ -145,8 +153,10 @@ export class PatientController {
 
   /**
    * 办理住院：出院患者 → 住院患者。
-   * 状态流转校验与数据范围都在 service；审计沿用 PATIENT_MANAGE
-   * （AuditAction 是 Prisma 枚举，新增专用值需改 schema + migration，走人工评审）。
+   * P2-6 契约升级：接收科室/责任医护/住院号/床号（办理住院弹框表单），
+   * 校验与覆盖写入都在 service。状态流转校验与数据范围都在 service；
+   * 审计沿用 PATIENT_MANAGE（AuditAction 是 Prisma 枚举，新增专用值需改
+   * schema + migration，走人工评审），detail 记 fromStatus / toStatus。
    */
   @Post(':id/admit')
   @RequirePermissions(PERMISSION.PATIENT_ADMIT)
@@ -155,8 +165,36 @@ export class PatientController {
   async admit(
     @Req() request: Request,
     @Param(new ZodValidationPipe(patientIdSchema)) params: { id: string },
+    @Body(new ZodValidationPipe(admitPatientSchema)) body: AdmitPatientInput,
   ) {
-    const result = await this.patientService.admit(request.user as AuthenticatedUser, params.id);
+    const result = await this.patientService.admit(
+      request.user as AuthenticatedUser,
+      params.id,
+      body,
+    );
+    return ok(result);
+  }
+
+  /**
+   * 办理出院（P2-6）：住院患者 → 出院患者。
+   * 出院时刻 = 服务端 now（裁定 Q1）；请求体仅备注（可空，落 Admission.dischargeRemark）。
+   * 虚拟病区自动移出与 R24 双写关闭都在 service 事务内；审计沿用 PATIENT_MANAGE
+   * （裁定 Q2），detail 记 fromStatus / toStatus（发生退区时另有 wardRecordId / leaveReason）。
+   */
+  @Post(':id/discharge')
+  @RequirePermissions(PERMISSION.PATIENT_DISCHARGE)
+  @RequireDataScope(RESOURCE.PATIENT)
+  @Audit('PATIENT_MANAGE')
+  async discharge(
+    @Req() request: Request,
+    @Param(new ZodValidationPipe(patientIdSchema)) params: { id: string },
+    @Body(new ZodValidationPipe(dischargePatientSchema)) body: DischargePatientInput,
+  ) {
+    const result = await this.patientService.discharge(
+      request.user as AuthenticatedUser,
+      params.id,
+      body,
+    );
     return ok(result);
   }
 }

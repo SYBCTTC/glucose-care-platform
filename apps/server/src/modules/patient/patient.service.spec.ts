@@ -1,6 +1,6 @@
 import { Logger } from '@nestjs/common';
-import { ERROR_CODES, GENDER, PATIENT_STATUS, PERMISSION } from '@gc/shared';
-import type { UpdatePatientInput } from '@gc/shared';
+import { ERROR_CODES, GENDER, PATIENT_STATUS, PERMISSION, WARD_LEAVE_REASON } from '@gc/shared';
+import type { AdmitPatientInput, UpdatePatientInput } from '@gc/shared';
 import { Prisma } from '@prisma/client';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { decryptField } from '../../common/crypto/field-crypto';
@@ -113,6 +113,11 @@ function createService() {
       updateMany: vi.fn(),
     },
     admissionDepartment: {
+      updateMany: vi.fn(),
+    },
+    // P2-6：出院时虚拟病区自动移出（findFirst 探在区行 + updateMany 原子关闭）
+    virtualWardRecord: {
+      findFirst: vi.fn(),
       updateMany: vi.fn(),
     },
     $transaction: vi.fn(),
@@ -424,64 +429,139 @@ describe('PatientService.admit — 办理住院', () => {
   let service: PatientService;
   let prisma: ReturnType<typeof createService>['prisma'];
 
+  /** P2-6 升级后的默认入参：本科室 + 沿用原住院号，无医护（跳过归属校验） */
+  function admitInput(overrides: Partial<AdmitPatientInput> = {}): AdmitPatientInput {
+    return { departmentId: 'd-endo', patientNo: 'H-0001', ...overrides };
+  }
+
+  /**
+   * admit 现在会调 findUnique 两次（按 id 取患者行、按 patientNo 查重），
+   * mock 必须按 where 形状分流，否则查重会拿到患者行误判 40002。
+   */
+  function mockPatientRow(row: unknown, duplicateOfPatientNo: unknown = null) {
+    prisma.patient.findUnique.mockImplementation(
+      async (args: { where: Record<string, unknown> }) =>
+        'patientNo' in args.where ? duplicateOfPatientNo : row,
+    );
+  }
+
   beforeEach(() => {
     ({ service, prisma } = createService());
     prisma.patient.update.mockResolvedValue(publicRow());
   });
 
-  it('出院患者可办理住院：状态转住院、清空出院时间、写入本次入院时间', async () => {
-    prisma.patient.findUnique.mockResolvedValue({
+  it('出院患者可办理住院：状态转住院、清空出院时间、覆盖写入科室/住院号/床号', async () => {
+    mockPatientRow({
       status: PATIENT_STATUS.DISCHARGED,
       archivedAt: null,
       departmentId: 'd-endo',
     });
 
-    const result = await service.admit(deptUser, PATIENT_ID);
+    const result = await service.admit(
+      deptUser,
+      PATIENT_ID,
+      admitInput({ patientNo: 'H-0009', bedNo: '16-02' }),
+    );
 
     const args = prisma.patient.update.mock.calls[0][0];
     expect(args.where).toEqual({ id: PATIENT_ID, status: PATIENT_STATUS.DISCHARGED });
     expect(args.data.status).toBe(PATIENT_STATUS.INPATIENT);
     expect(args.data.admissionAt).toBeInstanceOf(Date);
     expect(args.data.dischargeAt).toBeNull();
+    expect(args.data.patientNo).toBe('H-0009');
+    expect(args.data.bedNo).toBe('16-02');
+    expect(args.data.departmentId).toBe('d-endo');
+    expect(args.data.doctorId).toBeNull();
+    expect(args.data.nurseId).toBeNull();
     expect(result.fromStatus).toBe(PATIENT_STATUS.DISCHARGED);
     expect(result.toStatus).toBe(PATIENT_STATUS.INPATIENT);
     expect(result.item.status).toBe(PATIENT_STATUS.INPATIENT);
   });
 
+  it('住院号撞他人 → 40002，且不写库', async () => {
+    mockPatientRow(
+      { status: PATIENT_STATUS.DISCHARGED, archivedAt: null, departmentId: 'd-endo' },
+      { id: 'p-other' },
+    );
+
+    await expect(service.admit(deptUser, PATIENT_ID, admitInput())).rejects.toMatchObject({
+      code: ERROR_CODES.PATIENT_NO_DUPLICATE,
+    });
+    expect(prisma.patient.update).not.toHaveBeenCalled();
+  });
+
+  it('住院号撞自己（沿用原号）→ 放行', async () => {
+    mockPatientRow(
+      { status: PATIENT_STATUS.DISCHARGED, archivedAt: null, departmentId: 'd-endo' },
+      { id: PATIENT_ID },
+    );
+
+    const result = await service.admit(deptUser, PATIENT_ID, admitInput());
+
+    expect(result.toStatus).toBe(PATIENT_STATUS.INPATIENT);
+  });
+
+  it('目标科室超出数据范围 → 30002（借改科室跨范围被拦），且不写库', async () => {
+    mockPatientRow({
+      status: PATIENT_STATUS.DISCHARGED,
+      archivedAt: null,
+      departmentId: 'd-endo',
+    });
+
+    await expect(
+      service.admit(deptUser, PATIENT_ID, admitInput({ departmentId: 'd-cardio' })),
+    ).rejects.toMatchObject({ code: ERROR_CODES.CROSS_DEPARTMENT_DENIED });
+    expect(prisma.patient.update).not.toHaveBeenCalled();
+  });
+
+  it('责任医生不属于所选科室 → 10001 字段级，且不写库', async () => {
+    mockPatientRow({
+      status: PATIENT_STATUS.DISCHARGED,
+      archivedAt: null,
+      departmentId: 'd-endo',
+    });
+    prisma.user.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.admit(deptUser, PATIENT_ID, admitInput({ doctorId: 'doc-x' })),
+    ).rejects.toMatchObject({ code: ERROR_CODES.VALIDATION_FAILED });
+    expect(prisma.patient.update).not.toHaveBeenCalled();
+  });
+
   it('住院中的患者重复办理按 40004 拒绝，且不写库', async () => {
-    prisma.patient.findUnique.mockResolvedValue({
+    mockPatientRow({
       status: PATIENT_STATUS.INPATIENT,
       archivedAt: null,
       departmentId: 'd-endo',
     });
 
-    await expect(service.admit(allUser, PATIENT_ID)).rejects.toMatchObject({
+    await expect(service.admit(allUser, PATIENT_ID, admitInput())).rejects.toMatchObject({
       code: ERROR_CODES.PATIENT_INVALID_STATE,
     });
     expect(prisma.patient.update).not.toHaveBeenCalled();
   });
 
   it('跨科室患者 → 30002，且不写库', async () => {
-    prisma.patient.findUnique.mockResolvedValue({
+    mockPatientRow({
       status: PATIENT_STATUS.DISCHARGED,
       archivedAt: null,
       departmentId: 'd-cardio',
     });
 
-    await expect(service.admit(deptUser, PATIENT_ID)).rejects.toMatchObject({
+    await expect(service.admit(deptUser, PATIENT_ID, admitInput())).rejects.toMatchObject({
       code: ERROR_CODES.CROSS_DEPARTMENT_DENIED,
     });
     expect(prisma.patient.update).not.toHaveBeenCalled();
   });
 
   it('患者不存在或已归档按 40001 处理', async () => {
-    prisma.patient.findUnique.mockResolvedValue({
+    mockPatientRow({
       status: PATIENT_STATUS.DISCHARGED,
       archivedAt: new Date('2026-10-01T00:00:00.000Z'),
       departmentId: 'd-endo',
     });
 
-    await expect(service.admit(allUser, PATIENT_ID)).rejects.toMatchObject({
+    await expect(service.admit(allUser, PATIENT_ID, admitInput())).rejects.toMatchObject({
       code: ERROR_CODES.PATIENT_NOT_FOUND,
     });
     expect(prisma.patient.update).not.toHaveBeenCalled();
@@ -495,9 +575,20 @@ describe('PatientService.admit — R24 住院记录双写', () => {
   let prisma: ReturnType<typeof createService>['prisma'];
   const dischargedAt = new Date('2026-10-01T02:00:00.000Z');
 
+  function admitInput(overrides: Partial<AdmitPatientInput> = {}): AdmitPatientInput {
+    return { departmentId: 'd-endo', patientNo: 'H-0001', ...overrides };
+  }
+
+  /** 按 where 形状分流：id → 患者行；patientNo → 查重结果（默认无冲突） */
+  function mockPatientRow(row: unknown) {
+    prisma.patient.findUnique.mockImplementation(
+      async (args: { where: Record<string, unknown> }) => ('patientNo' in args.where ? null : row),
+    );
+  }
+
   beforeEach(() => {
     ({ service, prisma } = createService());
-    prisma.patient.findUnique.mockResolvedValue({
+    mockPatientRow({
       status: PATIENT_STATUS.DISCHARGED,
       archivedAt: null,
       departmentId: 'd-endo',
@@ -508,7 +599,7 @@ describe('PatientService.admit — R24 住院记录双写', () => {
   });
 
   it('办理住院 → 新住院 seq=max+1 + 首条科室停留，入院时刻与 Patient.admissionAt 一致', async () => {
-    await service.admit(deptUser, PATIENT_ID);
+    await service.admit(deptUser, PATIENT_ID, admitInput());
 
     const admissionAt = prisma.patient.update.mock.calls[0][0].data.admissionAt as Date;
     const created = prisma.admission.create.mock.calls[0][0].data;
@@ -525,8 +616,17 @@ describe('PatientService.admit — R24 住院记录双写', () => {
     });
   });
 
+  it('P2-6：再入院换科室 → 新 Admission 与首条停留用入参科室（全院档用户）', async () => {
+    await service.admit(allUser, PATIENT_ID, admitInput({ departmentId: 'd-cardio' }));
+
+    const created = prisma.admission.create.mock.calls[0][0].data;
+    expect(created.departmentId).toBe('d-cardio');
+    expect(created.departmentStays.create.departmentId).toBe('d-cardio');
+    expect(prisma.patient.update.mock.calls[0][0].data.departmentId).toBe('d-cardio');
+  });
+
   it('防御性关闭：上一次「进行中」的住院/停留用原出院时间关闭', async () => {
-    await service.admit(deptUser, PATIENT_ID);
+    await service.admit(deptUser, PATIENT_ID, admitInput());
 
     expect(prisma.admission.updateMany).toHaveBeenCalledWith({
       where: { patientId: PATIENT_ID, dischargedAt: null },
@@ -539,14 +639,14 @@ describe('PatientService.admit — R24 住院记录双写', () => {
   });
 
   it('原出院时间为空（数据不一致）→ 以本次办理时刻近似关闭', async () => {
-    prisma.patient.findUnique.mockResolvedValue({
+    mockPatientRow({
       status: PATIENT_STATUS.DISCHARGED,
       archivedAt: null,
       departmentId: 'd-endo',
       dischargeAt: null,
     });
 
-    await service.admit(deptUser, PATIENT_ID);
+    await service.admit(deptUser, PATIENT_ID, admitInput());
 
     const admissionAt = prisma.patient.update.mock.calls[0][0].data.admissionAt as Date;
     expect(prisma.admission.updateMany.mock.calls[0][0].data.dischargedAt).toBe(admissionAt);
@@ -555,9 +655,160 @@ describe('PatientService.admit — R24 住院记录双写', () => {
   it('无历史住院记录（迁移前老数据兜底）→ seq=1', async () => {
     prisma.admission.findFirst.mockResolvedValue(null);
 
-    await service.admit(deptUser, PATIENT_ID);
+    await service.admit(deptUser, PATIENT_ID, admitInput());
 
     expect(prisma.admission.create.mock.calls[0][0].data.seq).toBe(1);
+  });
+});
+
+/* -------------------- P2-6：办理出院 -------------------- */
+
+describe('PatientService.discharge — 办理出院', () => {
+  let service: PatientService;
+  let prisma: ReturnType<typeof createService>['prisma'];
+
+  beforeEach(() => {
+    ({ service, prisma } = createService());
+    prisma.patient.findUnique.mockResolvedValue({
+      status: PATIENT_STATUS.INPATIENT,
+      archivedAt: null,
+      departmentId: 'd-endo',
+    });
+    prisma.patient.update.mockResolvedValue(
+      publicRow({ status: PATIENT_STATUS.DISCHARGED, dischargeAt: new Date() }),
+    );
+    prisma.virtualWardRecord.findFirst.mockResolvedValue(null);
+    prisma.virtualWardRecord.updateMany.mockResolvedValue({ count: 1 });
+  });
+
+  it('住院患者可办理出院：状态转出院、写入服务端出院时刻', async () => {
+    const result = await service.discharge(deptUser, PATIENT_ID, {});
+
+    const args = prisma.patient.update.mock.calls[0][0];
+    expect(args.where).toEqual({ id: PATIENT_ID, status: PATIENT_STATUS.INPATIENT });
+    expect(args.data.status).toBe(PATIENT_STATUS.DISCHARGED);
+    expect(args.data.dischargeAt).toBeInstanceOf(Date);
+    expect(result.fromStatus).toBe(PATIENT_STATUS.INPATIENT);
+    expect(result.toStatus).toBe(PATIENT_STATUS.DISCHARGED);
+    expect(result.item.status).toBe(PATIENT_STATUS.DISCHARGED);
+  });
+
+  it('已出院患者重复办理 → 40004，且不写库', async () => {
+    prisma.patient.findUnique.mockResolvedValue({
+      status: PATIENT_STATUS.DISCHARGED,
+      archivedAt: null,
+      departmentId: 'd-endo',
+    });
+
+    await expect(service.discharge(allUser, PATIENT_ID, {})).rejects.toMatchObject({
+      code: ERROR_CODES.PATIENT_INVALID_STATE,
+    });
+    expect(prisma.patient.update).not.toHaveBeenCalled();
+  });
+
+  it('跨科室患者 → 30002；NONE 档 → 30006；均不写库', async () => {
+    prisma.patient.findUnique.mockResolvedValue({
+      status: PATIENT_STATUS.INPATIENT,
+      archivedAt: null,
+      departmentId: 'd-cardio',
+    });
+    await expect(service.discharge(deptUser, PATIENT_ID, {})).rejects.toMatchObject({
+      code: ERROR_CODES.CROSS_DEPARTMENT_DENIED,
+    });
+
+    prisma.patient.findUnique.mockResolvedValue({
+      status: PATIENT_STATUS.INPATIENT,
+      archivedAt: null,
+      departmentId: 'd-endo',
+    });
+    const noneUser = { ...deptUser, dataScope: 'NONE' } as unknown as AuthenticatedUser;
+    await expect(service.discharge(noneUser, PATIENT_ID, {})).rejects.toMatchObject({
+      code: ERROR_CODES.NO_PATIENT_DATA_SCOPE,
+    });
+    expect(prisma.patient.update).not.toHaveBeenCalled();
+  });
+
+  it('患者不存在或已归档按 40001 处理', async () => {
+    prisma.patient.findUnique.mockResolvedValue({
+      status: PATIENT_STATUS.INPATIENT,
+      archivedAt: new Date('2026-10-01T00:00:00.000Z'),
+      departmentId: 'd-endo',
+    });
+
+    await expect(service.discharge(allUser, PATIENT_ID, {})).rejects.toMatchObject({
+      code: ERROR_CODES.PATIENT_NOT_FOUND,
+    });
+    expect(prisma.patient.update).not.toHaveBeenCalled();
+  });
+
+  it('并发重复办理（update 命中 0 行 P2025）→ 40004', async () => {
+    prisma.patient.update.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('not found', {
+        code: 'P2025',
+        clientVersion: '5.22.0',
+      }),
+    );
+
+    await expect(service.discharge(deptUser, PATIENT_ID, {})).rejects.toMatchObject({
+      code: ERROR_CODES.PATIENT_INVALID_STATE,
+    });
+  });
+
+  it('R24 双写关闭：Admission 行带出院备注、科室停留同步关闭，时刻与 Patient.dischargeAt 一致', async () => {
+    await service.discharge(deptUser, PATIENT_ID, { remark: '转社区随访' });
+
+    const dischargedAt = prisma.patient.update.mock.calls[0][0].data.dischargeAt as Date;
+    expect(prisma.admission.updateMany).toHaveBeenCalledWith({
+      where: { patientId: PATIENT_ID, dischargedAt: null },
+      data: { dischargedAt, dischargeRemark: '转社区随访' },
+    });
+    expect(prisma.admissionDepartment.updateMany).toHaveBeenCalledWith({
+      where: { patientId: PATIENT_ID, endedAt: null },
+      data: { endedAt: dischargedAt },
+    });
+  });
+
+  it('备注空串/纯空白 → 落库 NULL（可为空，裁定 1a）', async () => {
+    await service.discharge(deptUser, PATIENT_ID, { remark: '   ' });
+
+    expect(prisma.admission.updateMany.mock.calls[0][0].data.dischargeRemark).toBeNull();
+  });
+
+  it('在虚拟病区 → 自动移出（DISCHARGE），返回 wardRecordId/leaveReason，退区先于状态更新', async () => {
+    prisma.virtualWardRecord.findFirst.mockResolvedValue({ id: 'w-0001' });
+
+    const result = await service.discharge(deptUser, PATIENT_ID, {});
+
+    const wardArgs = prisma.virtualWardRecord.updateMany.mock.calls[0][0];
+    expect(wardArgs.where).toEqual({ id: 'w-0001', leftAt: null });
+    expect(wardArgs.data.leftById).toBe('u-nurse');
+    expect(wardArgs.data.leaveReason).toBe(WARD_LEAVE_REASON.DISCHARGE);
+    const dischargedAt = prisma.patient.update.mock.calls[0][0].data.dischargeAt as Date;
+    expect(wardArgs.data.leftAt).toBe(dischargedAt);
+    expect(result.wardRecordId).toBe('w-0001');
+    expect(result.leaveReason).toBe(WARD_LEAVE_REASON.DISCHARGE);
+    // 事务顺序：先退区再 patient.update，保证出参 item.inVirtualWard 已翻转
+    expect(prisma.virtualWardRecord.updateMany.mock.invocationCallOrder[0]).toBeLessThan(
+      prisma.patient.update.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('不在虚拟病区 → 不调 updateMany，结果不含 wardRecordId', async () => {
+    const result = await service.discharge(deptUser, PATIENT_ID, {});
+
+    expect(prisma.virtualWardRecord.updateMany).not.toHaveBeenCalled();
+    expect(result.wardRecordId).toBeUndefined();
+    expect(result.leaveReason).toBeUndefined();
+  });
+
+  it('并发下他人已先移出（updateMany count=0）→ 不阻断出院，不返回 wardRecordId', async () => {
+    prisma.virtualWardRecord.findFirst.mockResolvedValue({ id: 'w-0001' });
+    prisma.virtualWardRecord.updateMany.mockResolvedValue({ count: 0 });
+
+    const result = await service.discharge(deptUser, PATIENT_ID, {});
+
+    expect(result.toStatus).toBe(PATIENT_STATUS.DISCHARGED);
+    expect(result.wardRecordId).toBeUndefined();
   });
 });
 

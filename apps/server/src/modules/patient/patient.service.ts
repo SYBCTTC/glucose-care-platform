@@ -9,14 +9,18 @@ import {
   PATIENT_STATUS,
   RESOURCE,
   ROLE_CODE,
+  WARD_LEAVE_REASON,
 } from '@gc/shared';
 import type {
   AdmissionsResponse,
+  AdmitPatientInput,
   CreatePatientInput,
   DiabetesType,
+  DischargePatientInput,
   FieldError,
   PatientAdmitResult,
   PatientDetail,
+  PatientDischargeResult,
   PatientListItem,
   PatientListQuery,
   PatientNamePlainResult,
@@ -546,13 +550,24 @@ export class PatientService {
 
   /**
    * 办理住院（重新入院）：出院患者 → 住院患者。
+   *
+   * P2-6 契约升级（docs/specs/patient-discharge.md §4）：科室 / 责任医护 / 住院号 / 床号
+   * 按本次住院实际情况**覆盖式**落库（弹框回填当前值、可改）；入院时刻 = 服务端 now，
+   * 弹框展示的入院时间仅为预览，不作为入参（裁定 Q1 口径）。
+   *
    * 安全约定：
    *  1. 只有 DISCHARGED 可办理，其它状态 → 40004（PATIENT_INVALID_STATE）；
-   *  2. 数据范围走 assertInScope（PATIENT），跨科室 → 30002；
-   *  3. 审计由 controller 的 @Audit 统一留痕，detail 记 fromStatus / toStatus；
-   *  4. 住院号沿用原值（院内唯一业务主键不变），床位不自动分配，由后续入院流程补齐。
+   *  2. 数据范围双判：患者当前科室与目标科室（变更时）都过 assertInScope，
+   *     防「借改科室跨出数据范围」（与 update() 同口径），跨科室 → 30002；
+   *  3. 责任医生 / 护士按最终生效科室校验（assertStaffInDepartment，字段级 10001）；
+   *  4. 住院号撞他人 → 40002；沿用原号（撞自己）放行，并发冲突由事务内 P2002 兜底；
+   *  5. 审计由 controller 的 @Audit 统一留痕，detail 记 fromStatus / toStatus。
    */
-  async admit(user: AuthenticatedUser, id: string): Promise<PatientAdmitResult> {
+  async admit(
+    user: AuthenticatedUser,
+    id: string,
+    input: AdmitPatientInput,
+  ): Promise<PatientAdmitResult> {
     const existing = await this.prisma.patient.findUnique({
       where: { id },
       select: { status: true, archivedAt: true, departmentId: true, dischargeAt: true },
@@ -563,6 +578,34 @@ export class PatientService {
     assertInScope(user, RESOURCE.PATIENT, { departmentId: existing.departmentId });
     if (existing.status !== PATIENT_STATUS.DISCHARGED) {
       throw new BusinessException(ERROR_CODES.PATIENT_INVALID_STATE);
+    }
+    if (input.departmentId !== existing.departmentId) {
+      assertInScope(user, RESOURCE.PATIENT, { departmentId: input.departmentId });
+    }
+
+    // 医护归属按「最终生效科室」校验：只改科室、没换医护时也会被拦下（同 update() 口径）
+    await this.assertStaffInDepartment(
+      input.doctorId,
+      input.departmentId,
+      [ROLE_CODE.DOCTOR],
+      'doctorId',
+      '责任医生不属于所选科室',
+    );
+    await this.assertStaffInDepartment(
+      input.nurseId,
+      input.departmentId,
+      NURSE_ROLE_CODES,
+      'nurseId',
+      '责任护士不属于所选科室',
+    );
+
+    // 住院号院内唯一：先查一次给出明确业务码（撞自己 = 沿用原号，放行）
+    const duplicated = await this.prisma.patient.findUnique({
+      where: { patientNo: input.patientNo },
+      select: { id: true },
+    });
+    if (duplicated && duplicated.id !== id) {
+      throw new BusinessException(ERROR_CODES.PATIENT_NO_DUPLICATE);
     }
 
     // 办理住院时间 = 本次操作时刻（业务时刻，明确赋值，不用默认值兜底）
@@ -578,12 +621,18 @@ export class PatientService {
             status: PATIENT_STATUS.INPATIENT,
             admissionAt,
             dischargeAt: null,
+            // P2-6：科室/医护/住院号/床号覆盖式写入（弹框清空医护/床号 = 置 NULL）
+            departmentId: input.departmentId,
+            doctorId: input.doctorId ?? null,
+            nurseId: input.nurseId ?? null,
+            patientNo: input.patientNo,
+            bedNo: input.bedNo?.trim() || null,
           },
           select: PATIENT_PUBLIC_SELECT,
         });
 
         // R24 双写（规格 §2.4）。防御性关闭：上一次住院记录/科室停留若仍是「进行中」
-        // （出院功能缺失或历史数据不一致所致），用原出院时间关闭，保证不变量
+        // （历史数据不一致所致），用原出院时间关闭，保证不变量
         // 「每患者至多一条本次住院」；原出院时间为空时以本次办理时刻近似。
         const previousDischargedAt = existing.dischargeAt ?? admissionAt;
         await tx.admission.updateMany({
@@ -595,7 +644,8 @@ export class PatientService {
           data: { endedAt: previousDischargedAt },
         });
 
-        // 新一次住院 = max(seq)+1；事务内读 max 再写，并发安全由上方 status 条件保证
+        // 新一次住院 = max(seq)+1；事务内读 max 再写，并发安全由上方 status 条件保证。
+        // 科室用**入参科室**（P2-6：再入院可能换科，不再沿用患者原科室）
         const last = await tx.admission.findFirst({
           where: { patientId: id },
           orderBy: { seq: 'desc' },
@@ -607,11 +657,11 @@ export class PatientService {
             seq: (last?.seq ?? 0) + 1,
             admittedAt: admissionAt,
             dischargedAt: null,
-            departmentId: existing.departmentId,
+            departmentId: input.departmentId,
             departmentStays: {
               create: {
                 patientId: id,
-                departmentId: existing.departmentId,
+                departmentId: input.departmentId,
                 startedAt: admissionAt,
                 endedAt: null,
               },
@@ -624,6 +674,10 @@ export class PatientService {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
         throw new BusinessException(ERROR_CODES.PATIENT_INVALID_STATE);
       }
+      // 并发换号撞唯一约束（预查后被他人抢占）→ 与预查同码
+      if (isUniqueConstraintViolation(error)) {
+        throw new BusinessException(ERROR_CODES.PATIENT_NO_DUPLICATE);
+      }
       throw error;
     }
 
@@ -631,6 +685,104 @@ export class PatientService {
       id,
       fromStatus: PATIENT_STATUS.DISCHARGED,
       toStatus: PATIENT_STATUS.INPATIENT,
+      item: toListItem(row),
+    };
+  }
+
+  /**
+   * 办理出院（P2-6）：住院患者 → 出院患者。
+   * 规格：docs/specs/patient-discharge.md §4。
+   *
+   * 安全约定：
+   *  1. 只有 INPATIENT 可办理，其它状态 → 40004；不存在/已归档 → 40001；
+   *  2. 数据范围走 assertInScope（PATIENT），跨科室 → 30002；
+   *  3. **虚拟病区自动移出**（WARD_LEAVE_REASON.DISCHARGE 预留值正式接入，
+   *     virtual-ward.md §4-8 裁定义务）：并发下他人已先移出（updateMany count=0）
+   *     不阻断出院，只是不返回 wardRecordId；
+   *  4. R24 双写关闭：Admission.dischargedAt + 出院备注、AdmissionDepartment.endedAt；
+   *  5. 备注为自由文本：只落 Admission.dischargeRemark，**不进审计 detail**（白名单原则）；
+   *  6. 事务顺序「退区 → 关双写 → patient.update（select 出参）」：保证返回的
+   *     item.inVirtualWard 已是 false；
+   *  7. 出院时刻 = 服务端 now（裁定 Q1），弹框展示仅为预览。
+   */
+  async discharge(
+    user: AuthenticatedUser,
+    id: string,
+    input: DischargePatientInput,
+  ): Promise<PatientDischargeResult> {
+    const existing = await this.prisma.patient.findUnique({
+      where: { id },
+      select: { status: true, archivedAt: true, departmentId: true },
+    });
+    if (!existing || existing.archivedAt) {
+      throw new BusinessException(ERROR_CODES.PATIENT_NOT_FOUND);
+    }
+    assertInScope(user, RESOURCE.PATIENT, { departmentId: existing.departmentId });
+    if (existing.status !== PATIENT_STATUS.INPATIENT) {
+      throw new BusinessException(ERROR_CODES.PATIENT_INVALID_STATE);
+    }
+
+    const dischargedAt = new Date();
+    // Zod 已 trim；空串按未填处理（裁定 1a：备注可为空）
+    const remark = input.remark?.trim() || null;
+
+    let row: PatientPublicRow;
+    let wardRecordId: string | null = null;
+    try {
+      ({ row, wardRecordId } = await this.prisma.$transaction(async (tx) => {
+        // 虚拟病区自动移出：与 ward.service.leave() 同一原子口径
+        // （updateMany + leftAt:null 条件，并发第二人 count=0 不覆盖对方记录）
+        let removedWardRecordId: string | null = null;
+        const activeWard = await tx.virtualWardRecord.findFirst({
+          where: { patientId: id, leftAt: null },
+          select: { id: true },
+        });
+        if (activeWard) {
+          const { count } = await tx.virtualWardRecord.updateMany({
+            where: { id: activeWard.id, leftAt: null },
+            data: {
+              leftAt: dischargedAt,
+              leftById: user.userId,
+              leaveReason: WARD_LEAVE_REASON.DISCHARGE,
+            },
+          });
+          if (count > 0) {
+            removedWardRecordId = activeWard.id;
+          }
+        }
+
+        // R24 双写关闭：本次住院记录（含出院备注）+ 科室停留。
+        // 正常数据至多各一条「进行中」；updateMany 兼容历史脏数据一次关齐
+        await tx.admission.updateMany({
+          where: { patientId: id, dischargedAt: null },
+          data: { dischargedAt, dischargeRemark: remark },
+        });
+        await tx.admissionDepartment.updateMany({
+          where: { patientId: id, endedAt: null },
+          data: { endedAt: dischargedAt },
+        });
+
+        // where 带 status 条件：并发重复点击只有一次命中，后到事务 P2025 → 整体回滚
+        const updated = await tx.patient.update({
+          where: { id, status: PATIENT_STATUS.INPATIENT },
+          data: { status: PATIENT_STATUS.DISCHARGED, dischargeAt: dischargedAt },
+          select: PATIENT_PUBLIC_SELECT,
+        });
+        return { row: updated, wardRecordId: removedWardRecordId };
+      }));
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
+        throw new BusinessException(ERROR_CODES.PATIENT_INVALID_STATE);
+      }
+      throw error;
+    }
+
+    return {
+      id,
+      fromStatus: PATIENT_STATUS.INPATIENT,
+      toStatus: PATIENT_STATUS.DISCHARGED,
+      // 仅实际发生自动移出时返回；两字段均在审计 detail 白名单内（追溯移出了哪条病区记录）
+      ...(wardRecordId ? { wardRecordId, leaveReason: WARD_LEAVE_REASON.DISCHARGE } : {}),
       item: toListItem(row),
     };
   }
