@@ -9,6 +9,7 @@ const ACTION_LABELS: Record<string, string> = {
   glucose: '添加血糖',
   ward: '加入虚拟病区',
   wardJoined: '已加入虚拟病区',
+  discharge: '办理出院',
 };
 
 interface PatientMoreActionsProps<T extends PatientListItem> {
@@ -23,9 +24,15 @@ interface PatientMoreActionsProps<T extends PatientListItem> {
   canCreateGlucose?: boolean;
   /** 是否有虚拟病区操作权限（ward:manage）：无权限时整项不展示 */
   canJoinWard?: boolean;
+  /**
+   * 是否可办理出院（P2-6：住院 Tab 且持 patient:discharge）：无权限时整项不展示。
+   * 菜单第 4 项（裁定 7）；确认走 PatientDischargeModal 弹框，不用 Popconfirm。
+   */
+  canDischarge?: boolean;
   onEdit: (patient: T) => void;
   onAddGlucose?: (patient: T) => void;
   onJoinWard?: (patient: T) => void;
+  onDischarge?: (patient: T) => void;
 }
 
 /**
@@ -42,9 +49,11 @@ export default function PatientMoreActions<T extends PatientListItem>({
   editDisabledReason,
   canCreateGlucose = false,
   canJoinWard = false,
+  canDischarge = false,
   onEdit,
   onAddGlucose,
   onJoinWard,
+  onDischarge,
 }: PatientMoreActionsProps<T>) {
   const items = useMemo<NonNullable<MenuProps['items']>>(() => {
     const result: NonNullable<MenuProps['items']> = [];
@@ -73,8 +82,18 @@ export default function PatientMoreActions<T extends PatientListItem>({
         disabled: patient.inVirtualWard,
       });
     }
+    if (canDischarge) {
+      result.push({ key: 'discharge', label: ACTION_LABELS.discharge });
+    }
     return result;
-  }, [canEdit, editDisabledReason, canCreateGlucose, canJoinWard, patient.inVirtualWard]);
+  }, [
+    canEdit,
+    editDisabledReason,
+    canCreateGlucose,
+    canJoinWard,
+    canDischarge,
+    patient.inVirtualWard,
+  ]);
 
   const handleClick: MenuProps['onClick'] = ({ key }) => {
     if (key === 'edit') {
@@ -90,6 +109,10 @@ export default function PatientMoreActions<T extends PatientListItem>({
       if (!patient.inVirtualWard) {
         onJoinWard?.(patient);
       }
+      return;
+    }
+    if (key === 'discharge') {
+      onDischarge?.(patient);
       return;
     }
     message.info(`${ACTION_LABELS[key] ?? '该功能'}暂未开发`);

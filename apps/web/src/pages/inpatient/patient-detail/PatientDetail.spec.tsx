@@ -67,10 +67,23 @@ function makeDetail(overrides: Partial<PatientDetail> = {}): PatientDetail {
   };
 }
 
+/** P2-6：PatientBasicInfo 新增「更多操作」下拉 props，测试统一给默认值 */
+const noMoreActions = {
+  canDischarge: false,
+  canAdmit: false,
+  onDischarge: () => {},
+  onAdmit: () => {},
+} as const;
+
 describe('PatientBasicInfo — 基本信息区渲染', () => {
   it('展示姓名/性别/年龄（仅值）与脱敏身份证/手机号、责任护士等 label：值字段', () => {
     const html = renderToStaticMarkup(
-      <PatientBasicInfo detail={makeDetail()} canAddGlucose={false} onAddGlucose={() => {}} />,
+      <PatientBasicInfo
+        detail={makeDetail()}
+        canAddGlucose={false}
+        onAddGlucose={() => {}}
+        {...noMoreActions}
+      />,
     );
     expect(html).toContain('张**'); // 姓名（脱敏）
     expect(html).toContain('男'); // getGenderLabel('MALE')
@@ -86,7 +99,12 @@ describe('PatientBasicInfo — 基本信息区渲染', () => {
 
   it('住院 + 有权限（canAddGlucose）时展示"添加血糖"按钮', () => {
     const html = renderToStaticMarkup(
-      <PatientBasicInfo detail={makeDetail()} canAddGlucose onAddGlucose={() => {}} />,
+      <PatientBasicInfo
+        detail={makeDetail()}
+        canAddGlucose
+        onAddGlucose={() => {}}
+        {...noMoreActions}
+      />,
     );
     expect(html).toContain('添加血糖');
   });
@@ -97,6 +115,7 @@ describe('PatientBasicInfo — 基本信息区渲染', () => {
         detail={makeDetail({ status: 'DISCHARGED' })}
         canAddGlucose={false}
         onAddGlucose={() => {}}
+        {...noMoreActions}
       />,
     );
     expect(html).not.toContain('添加血糖');
@@ -109,10 +128,56 @@ describe('PatientBasicInfo — 基本信息区渲染', () => {
         detail={makeDetail({ nurseName: null })}
         canAddGlucose={false}
         onAddGlucose={() => {}}
+        {...noMoreActions}
       />,
     );
     expect(html).toContain('责任护士');
     expect(html).not.toContain('赵护士');
+  });
+});
+
+/**
+ * P2-6「更多操作」下拉（裁定 Q3/6）。菜单项渲染在浮层（portal），静态标记里
+ * 只出现触发按钮（同 PatientMoreActions.spec 口径）：这里断言触发按钮的有无。
+ */
+describe('PatientBasicInfo — 更多操作下拉（P2-6）', () => {
+  it('住院患者 + patient:discharge → 渲染"更多操作"触发按钮', () => {
+    const html = renderToStaticMarkup(
+      <PatientBasicInfo
+        detail={makeDetail()}
+        canAddGlucose={false}
+        onAddGlucose={() => {}}
+        {...noMoreActions}
+        canDischarge
+      />,
+    );
+    expect(html).toContain('更多操作');
+  });
+
+  it('出院患者 + patient:admit → 渲染"更多操作"触发按钮（无"添加血糖"）', () => {
+    const html = renderToStaticMarkup(
+      <PatientBasicInfo
+        detail={makeDetail({ status: 'DISCHARGED' })}
+        canAddGlucose={false}
+        onAddGlucose={() => {}}
+        {...noMoreActions}
+        canAdmit
+      />,
+    );
+    expect(html).toContain('更多操作');
+    expect(html).not.toContain('添加血糖');
+  });
+
+  it('两项均无权限 → 整个下拉不渲染（裁定 6：菜单为空时隐藏）', () => {
+    const html = renderToStaticMarkup(
+      <PatientBasicInfo
+        detail={makeDetail()}
+        canAddGlucose={false}
+        onAddGlucose={() => {}}
+        {...noMoreActions}
+      />,
+    );
+    expect(html).not.toContain('更多操作');
   });
 });
 

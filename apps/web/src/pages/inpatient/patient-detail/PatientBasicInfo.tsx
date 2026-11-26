@@ -1,5 +1,7 @@
-import { Button, theme } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import { useMemo } from 'react';
+import { Button, Dropdown, theme } from 'antd';
+import type { MenuProps } from 'antd';
+import { DownOutlined, PlusOutlined } from '@ant-design/icons';
 import { PATIENT_STATUS_LABELS } from '@gc/shared';
 import type { PatientDetail } from '@gc/shared';
 import { layoutSize } from '@/styles/tokens';
@@ -10,6 +12,12 @@ interface PatientBasicInfoProps {
   /** 是否展示"添加血糖"按钮：住院患者 + GLUCOSE_CREATE 权限（决策 D5） */
   canAddGlucose: boolean;
   onAddGlucose: () => void;
+  /** P2-6「更多操作」下拉：住院患者 + patient:discharge（裁定 Q3/6，无权限仅隐藏该项） */
+  canDischarge: boolean;
+  /** P2-6「更多操作」下拉：出院患者 + patient:admit */
+  canAdmit: boolean;
+  onDischarge: () => void;
+  onAdmit: () => void;
 }
 
 /**
@@ -21,8 +29,34 @@ export default function PatientBasicInfo({
   detail,
   canAddGlucose,
   onAddGlucose,
+  canDischarge,
+  canAdmit,
+  onDischarge,
+  onAdmit,
 }: PatientBasicInfoProps) {
   const { token } = theme.useToken();
+
+  // P2-6：菜单项按患者状态 + 权限收敛；两项都不可用时整个下拉不渲染（裁定 6）
+  const moreItems = useMemo<NonNullable<MenuProps['items']>>(() => {
+    const items: NonNullable<MenuProps['items']> = [];
+    if (canDischarge) {
+      items.push({ key: 'discharge', label: '办理出院' });
+    }
+    if (canAdmit) {
+      items.push({ key: 'admit', label: '办理住院' });
+    }
+    return items;
+  }, [canDischarge, canAdmit]);
+
+  const handleMoreClick: MenuProps['onClick'] = ({ key }) => {
+    if (key === 'discharge') {
+      onDischarge();
+      return;
+    }
+    if (key === 'admit') {
+      onAdmit();
+    }
+  };
 
   // 决策 D1 字段顺序：入院时间、手机号、身份证、状态、住院号、科室、责任医生、责任护士
   const fields: Array<{ label: string; value: string; numeric?: boolean }> = [
@@ -67,15 +101,30 @@ export default function PatientBasicInfo({
         </span>
       ))}
 
-      {canAddGlucose ? (
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={onAddGlucose}
-          style={{ marginLeft: 'auto', alignSelf: 'flex-end' }}
+      {canAddGlucose || moreItems.length > 0 ? (
+        <div
+          style={{
+            marginLeft: 'auto',
+            alignSelf: 'flex-end',
+            display: 'flex',
+            alignItems: 'center',
+            gap: token.marginXS,
+          }}
         >
-          添加血糖
-        </Button>
+          {canAddGlucose ? (
+            <Button type="primary" icon={<PlusOutlined />} onClick={onAddGlucose}>
+              添加血糖
+            </Button>
+          ) : null}
+          {/* P2-6：「更多操作」下拉在"添加血糖"之后（裁定 Q3），hover 触发展示菜单 */}
+          {moreItems.length > 0 ? (
+            <Dropdown trigger={['hover']} menu={{ items: moreItems, onClick: handleMoreClick }}>
+              <Button>
+                更多操作 <DownOutlined />
+              </Button>
+            </Dropdown>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );

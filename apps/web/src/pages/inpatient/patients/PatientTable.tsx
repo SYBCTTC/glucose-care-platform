@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { Button, Popconfirm, Table } from 'antd';
+import { Button, Table } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type { ReactNode } from 'react';
 import { WARD_TAB } from '@gc/shared';
@@ -45,9 +45,8 @@ interface PatientModeProps<T extends PatientListItem> {
   isDischarged: boolean;
   /** 是否有办理住院权限（无权限时操作列为空，后端仍强制校验） */
   canAdmitPatient: boolean;
-  /** 正在办理的患者 ID，用于按钮 loading 与防重复提交 */
-  admittingId: string | null;
   onEditPatient: (patient: T) => void;
+  /** P2-6：点击打开办理住院弹框（原 Popconfirm 直接执行已废弃，提交 loading 在弹框内） */
   onAdmitPatient: (patient: T) => void;
   /** 是否有添加血糖权限（住院 Tab 且具备 GLUCOSE_CREATE 时才为 true） */
   canCreateGlucose: boolean;
@@ -55,6 +54,10 @@ interface PatientModeProps<T extends PatientListItem> {
   /** 是否有虚拟病区操作权限（ward:manage）：无权限时菜单里不出现该项 */
   canJoinWard: boolean;
   onJoinWard: (patient: T) => void;
+  /** 是否可办理出院（P2-6：住院 Tab 且持 patient:discharge）：无权限时菜单里不出现该项 */
+  canDischargePatient: boolean;
+  /** 点击打开办理出院弹框 */
+  onDischargePatient: (patient: T) => void;
 }
 
 /** 虚拟病区模式：中段列换成加入天数，操作列由调用方渲染（单菜单） */
@@ -69,13 +72,14 @@ interface WardModeProps<T extends PatientListItem> {
   canEditPatient?: undefined;
   isDischarged?: undefined;
   canAdmitPatient?: undefined;
-  admittingId?: undefined;
   onEditPatient?: undefined;
   onAdmitPatient?: undefined;
   canCreateGlucose?: undefined;
   onAddGlucose?: undefined;
   canJoinWard?: undefined;
   onJoinWard?: undefined;
+  canDischargePatient?: undefined;
+  onDischargePatient?: undefined;
 }
 
 export type PatientTableProps<T extends PatientListItem = PatientListItem> = TableBaseProps<T> &
@@ -214,7 +218,6 @@ function buildPatientActionColumn<T extends PatientListItem>(
   const {
     isDischarged,
     canAdmitPatient,
-    admittingId,
     onAdmitPatient,
     canEditPatient,
     canCreateGlucose,
@@ -222,6 +225,8 @@ function buildPatientActionColumn<T extends PatientListItem>(
     onAddGlucose,
     canJoinWard,
     onJoinWard,
+    canDischargePatient,
+    onDischargePatient,
   } = props;
   return {
     title: '操作',
@@ -229,29 +234,22 @@ function buildPatientActionColumn<T extends PatientListItem>(
     width: 120,
     fixed: 'right',
     render: (_, record) => {
-      // 出院 Tab：只有一个「办理住院」按钮，不再提供更多操作菜单
+      // 出院 Tab：只有一个「办理住院」按钮（P2-6：点击打开办理住院弹框，
+      // 原 Popconfirm 直接执行已废弃——admit 契约升级后需要填表单，
+      // 提交 loading/防连点在弹框内，按钮本身不再需要 loading）
       if (isDischarged) {
         if (!canAdmitPatient) {
           return null;
         }
         return (
-          <Popconfirm
-            title="办理住院"
-            description={`确认将 ${record.nameMasked} 重新办理住院？`}
-            okText="确认"
-            cancelText="取消"
-            onConfirm={() => onAdmitPatient(record)}
+          <Button
+            type="link"
+            size="small"
+            style={{ paddingInline: 0, height: 'auto' }}
+            onClick={() => onAdmitPatient(record)}
           >
-            <Button
-              type="link"
-              size="small"
-              loading={admittingId === record.id}
-              disabled={admittingId !== null && admittingId !== record.id}
-              style={{ paddingInline: 0, height: 'auto' }}
-            >
-              办理住院
-            </Button>
-          </Popconfirm>
+            办理住院
+          </Button>
         );
       }
       return (
@@ -260,9 +258,11 @@ function buildPatientActionColumn<T extends PatientListItem>(
           canEdit={canEditPatient}
           canCreateGlucose={canCreateGlucose}
           canJoinWard={canJoinWard}
+          canDischarge={canDischargePatient}
           onEdit={onEditPatient}
           onAddGlucose={onAddGlucose}
           onJoinWard={onJoinWard}
+          onDischarge={onDischargePatient}
         />
       );
     },

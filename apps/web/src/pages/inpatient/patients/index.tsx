@@ -3,7 +3,6 @@ import { Alert, Button, Card, Modal, Result, message } from 'antd';
 import { PATIENT_STATUS, PERMISSION } from '@gc/shared';
 import type { PatientListItem, PatientStatus } from '@gc/shared';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { admitPatient } from '@/api/patient';
 import { joinWard } from '@/api/ward';
 import Tabs, { type TabItem } from '@/components/common/Tabs';
 import {
@@ -12,8 +11,10 @@ import {
 } from '@/pages/inpatient/patient-detail/detail-tabs';
 import { useAuthStore } from '@/store/auth';
 import GlucoseCreateModal from './GlucoseCreateModal';
+import PatientAdmitModal from './PatientAdmitModal';
 import PatientCardGrid from './PatientCardGrid';
 import PatientCreateModal from './PatientCreateModal';
+import PatientDischargeModal from './PatientDischargeModal';
 import PatientEditModal from './PatientEditModal';
 import PatientFilter from './PatientFilter';
 import PatientTable from './PatientTable';
@@ -49,27 +50,18 @@ export default function PatientManagementPage() {
   const canCreateGlucose = isInpatient && hasPermission(PERMISSION.GLUCOSE_CREATE);
   // 决策 4a：仅住院患者可加入虚拟病区，出院 Tab 本就不渲染更多操作菜单
   const canJoinWard = isInpatient && hasPermission(PERMISSION.WARD_MANAGE);
-  const [admittingId, setAdmittingId] = useState<string | null>(null);
+  // P2-6：仅住院患者可办理出院；无权限时 MoreActions 里整项不展示（后端仍强制校验）
+  const canDischargePatient = isInpatient && hasPermission(PERMISSION.PATIENT_DISCHARGE);
+  /** 正在办理住院的患者（出院 Tab 入口）；null 表示弹框关闭。P2-6：确认改走弹框表单 */
+  const [admittingPatientId, setAdmittingPatientId] = useState<string | null>(null);
+  /** 正在办理出院的患者（住院 Tab MoreActions 入口）；null 表示弹框关闭 */
+  const [dischargingPatientId, setDischargingPatientId] = useState<string | null>(null);
   /**
    * 确认框用 Modal.useModal() 而非静态 Modal.confirm：主题（暗色 + 字号档）由
    * App.tsx 的 ConfigProvider 下发，静态方法渲染在 React 树外拿不到上下文。
    * 不用 Popconfirm 是因为它需要持续存在的锚点，而 Dropdown 菜单项点击后菜单即关闭。
    */
   const [modal, contextHolder] = Modal.useModal();
-
-  const handleAdmit = async (patient: PatientListItem) => {
-    setAdmittingId(patient.id);
-    try {
-      await admitPatient(patient.id);
-      void message.success('已办理住院');
-      // 患者已转到住院 Tab，出院列表需重查
-      query.refresh();
-    } catch {
-      // 失败提示由请求拦截器统一处理（含越权、状态冲突），这里只解除 loading
-    } finally {
-      setAdmittingId(null);
-    }
-  };
 
   const handleJoinWard = (patient: PatientListItem) => {
     modal.confirm({
@@ -203,6 +195,8 @@ export default function PatientManagementPage() {
               onAddGlucose={setGlucosePatient}
               canJoinWard={canJoinWard}
               onJoinWard={handleJoinWard}
+              canDischargePatient={canDischargePatient}
+              onDischargePatient={(patient) => setDischargingPatientId(patient.id)}
             />
           </div>
         ) : (
@@ -217,13 +211,14 @@ export default function PatientManagementPage() {
             canEditPatient={canEditPatient}
             isDischarged={!isInpatient}
             canAdmitPatient={canAdmitPatient}
-            admittingId={admittingId}
             onEditPatient={(patient) => setEditingPatientId(patient.id)}
-            onAdmitPatient={handleAdmit}
+            onAdmitPatient={(patient) => setAdmittingPatientId(patient.id)}
             canCreateGlucose={canCreateGlucose}
             onAddGlucose={setGlucosePatient}
             canJoinWard={canJoinWard}
             onJoinWard={handleJoinWard}
+            canDischargePatient={canDischargePatient}
+            onDischargePatient={(patient) => setDischargingPatientId(patient.id)}
           />
         )}
       </div>
@@ -249,6 +244,21 @@ export default function PatientManagementPage() {
         open={glucosePatient !== null}
         onClose={() => setGlucosePatient(null)}
         onSuccess={(result) => query.patchItem(result.item)}
+      />
+
+      {/* P2-6：办理出院/住院都走弹框；成功后刷新当前页（裁定 4），
+          患者已流转 Tab，不能用 patchItem 局部替换 */}
+      <PatientDischargeModal
+        patientId={dischargingPatientId}
+        open={dischargingPatientId !== null}
+        onClose={() => setDischargingPatientId(null)}
+        onSuccess={query.refresh}
+      />
+      <PatientAdmitModal
+        patientId={admittingPatientId}
+        open={admittingPatientId !== null}
+        onClose={() => setAdmittingPatientId(null)}
+        onSuccess={query.refresh}
       />
     </Card>
   );

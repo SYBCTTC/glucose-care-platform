@@ -49,6 +49,10 @@ interface PatientModeProps<T extends PatientListItem> {
   /** 是否有虚拟病区操作权限（ward:manage）：无权限时菜单里不出现该项 */
   canJoinWard: boolean;
   onJoinWard: (patient: T) => void;
+  /** 是否可办理出院（P2-6：住院 Tab 且持 patient:discharge）：无权限时菜单里不出现该项 */
+  canDischargePatient: boolean;
+  /** 点击打开办理出院弹框 */
+  onDischargePatient: (patient: T) => void;
 }
 
 /** 虚拟病区模式：操作区由调用方给（单菜单），底部是加入天数 */
@@ -61,6 +65,8 @@ interface WardModeProps<T extends PatientListItem> {
   onAddGlucose?: undefined;
   canJoinWard?: undefined;
   onJoinWard?: undefined;
+  canDischargePatient?: undefined;
+  onDischargePatient?: undefined;
 }
 
 export type PatientCardGridProps<T extends PatientListItem = PatientListItem> = CardBaseProps<T> &
@@ -195,7 +201,14 @@ function PatientCard<T extends PatientListItem>({
 export default function PatientCardGrid<T extends PatientListItem = PatientListItem>(
   props: PatientCardGridProps<T>,
 ) {
-  const { items, loading, hasMore, hasError = false, onLoadMore, emptyText = '暂无住院患者' } = props;
+  const {
+    items,
+    loading,
+    hasMore,
+    hasError = false,
+    onLoadMore,
+    emptyText = '暂无住院患者',
+  } = props;
   const scrollRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
@@ -264,9 +277,11 @@ export default function PatientCardGrid<T extends PatientListItem = PatientListI
                     canEdit={props.canEditPatient}
                     canCreateGlucose={props.canCreateGlucose}
                     canJoinWard={props.canJoinWard}
+                    canDischarge={props.canDischargePatient}
                     onEdit={props.onEditPatient}
                     onAddGlucose={props.onAddGlucose}
                     onJoinWard={props.onJoinWard}
+                    onDischarge={props.onDischargePatient}
                   />
                 )
               }
