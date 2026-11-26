@@ -155,6 +155,47 @@ async function main(): Promise<void> {
       dischargeAt: dayjs().subtract(2, 'day').toDate(),
     },
   ];
+  // 出入院记录（2026-11-26 规格 docs/specs/patient-admission-records.md §2）：
+  // 为每位患者幂等补 seq=1 住院记录 + 首条科室停留。此前新库只靠 R24 迁移内的一次性
+  // 回填 SQL，而全新环境 migrate deploy 先于 seed 执行、回填空转 → 新库患者没有住院记录
+  // （出入院记录 Tab 与报表「住院记录」下拉全空）。快照四列口径：patientNo/doctorId
+  // 镜像患者行；nurseId 随 Patient.nurseId（seed 未设 → null，显示「-」）；
+  // operatorId 用李护士（演示口径：住院由护士办理，裁定 3）。
+  // update 为空对象 = 已有行不动——保住开发库里经 UI 流转产生的真实历史（裁定 2：不重置）。
+  async function ensureAdmission(patient: {
+    id: string;
+    patientNo: string | null;
+    departmentId: string;
+    admissionAt: Date | null;
+    dischargeAt: Date | null;
+    doctorId: string | null;
+  }): Promise<void> {
+    await prisma.admission.upsert({
+      where: { patientId_seq: { patientId: patient.id, seq: 1 } },
+      update: {},
+      create: {
+        patientId: patient.id,
+        seq: 1,
+        admittedAt: patient.admissionAt,
+        // 与 R24 回填 SQL 同口径：出院患者带 dischargeAt（日期列展示「开始 至 结束」完整）
+        dischargedAt: patient.dischargeAt,
+        departmentId: patient.departmentId,
+        patientNo: patient.patientNo,
+        doctorId: patient.doctorId,
+        nurseId: null,
+        operatorId: nurseLi.id,
+        departmentStays: {
+          create: {
+            patientId: patient.id,
+            departmentId: patient.departmentId,
+            startedAt: patient.admissionAt,
+            endedAt: patient.dischargeAt,
+          },
+        },
+      },
+    });
+  }
+
   const patients: Array<{ id: string }> = [];
   for (const seed of patientSeeds) {
     // 兼容旧 seed 创建的无住院号记录：先补住院号，避免重复插入
@@ -162,44 +203,44 @@ async function main(): Promise<void> {
       where: { patientNo: null, nameMasked: maskName(seed.name) },
       data: { patientNo: seed.patientNo },
     });
-    patients.push(
-      await prisma.patient.upsert({
-        where: { patientNo: seed.patientNo },
-        update: {
-          nameCipher: cipher(seed.name),
-          nameMasked: maskName(seed.name),
-          idCardCipher: cipher(seed.idCard),
-          idCardMasked: maskIdCard(seed.idCard),
-          phoneCipher: cipher(seed.phone),
-          phoneMasked: maskPhone(seed.phone),
-          gender: seed.gender,
-          birthDate: seed.birthDate,
-          bedNo: seed.bedNo,
-          departmentId: endocrinology.id,
-          status: seed.status,
-          admissionAt: seed.admissionAt,
-          dischargeAt: seed.dischargeAt,
-          doctorId: doctorWang.id,
-        },
-        create: {
-          patientNo: seed.patientNo,
-          nameCipher: cipher(seed.name),
-          nameMasked: maskName(seed.name),
-          idCardCipher: cipher(seed.idCard),
-          idCardMasked: maskIdCard(seed.idCard),
-          phoneCipher: cipher(seed.phone),
-          phoneMasked: maskPhone(seed.phone),
-          gender: seed.gender,
-          birthDate: seed.birthDate,
-          bedNo: seed.bedNo,
-          departmentId: endocrinology.id,
-          status: seed.status,
-          admissionAt: seed.admissionAt,
-          dischargeAt: seed.dischargeAt,
-          doctorId: doctorWang.id,
-        },
-      }),
-    );
+    const baseRow = await prisma.patient.upsert({
+      where: { patientNo: seed.patientNo },
+      update: {
+        nameCipher: cipher(seed.name),
+        nameMasked: maskName(seed.name),
+        idCardCipher: cipher(seed.idCard),
+        idCardMasked: maskIdCard(seed.idCard),
+        phoneCipher: cipher(seed.phone),
+        phoneMasked: maskPhone(seed.phone),
+        gender: seed.gender,
+        birthDate: seed.birthDate,
+        bedNo: seed.bedNo,
+        departmentId: endocrinology.id,
+        status: seed.status,
+        admissionAt: seed.admissionAt,
+        dischargeAt: seed.dischargeAt,
+        doctorId: doctorWang.id,
+      },
+      create: {
+        patientNo: seed.patientNo,
+        nameCipher: cipher(seed.name),
+        nameMasked: maskName(seed.name),
+        idCardCipher: cipher(seed.idCard),
+        idCardMasked: maskIdCard(seed.idCard),
+        phoneCipher: cipher(seed.phone),
+        phoneMasked: maskPhone(seed.phone),
+        gender: seed.gender,
+        birthDate: seed.birthDate,
+        bedNo: seed.bedNo,
+        departmentId: endocrinology.id,
+        status: seed.status,
+        admissionAt: seed.admissionAt,
+        dischargeAt: seed.dischargeAt,
+        doctorId: doctorWang.id,
+      },
+    });
+    await ensureAdmission(baseRow);
+    patients.push(baseRow);
   }
 
   // ---------- 批量演示患者：3 条基础数据 + 997 条生成数据 = 1000 ----------
@@ -281,13 +322,13 @@ async function main(): Promise<void> {
       dischargeAt: dischargeAt?.toDate() ?? null,
       doctorId: isEndocrinology ? doctorWang.id : doctorChen.id,
     };
-    patients.push(
-      await prisma.patient.upsert({
-        where: { patientNo },
-        update: data,
-        create: { patientNo, ...data },
-      }),
-    );
+    const bulkRow = await prisma.patient.upsert({
+      where: { patientNo },
+      update: data,
+      create: { patientNo, ...data },
+    });
+    await ensureAdmission(bulkRow);
+    patients.push(bulkRow);
   }
 
   // ---------- 最近血糖：每位患者 3~5 条，列表取 measuredAt 最新一条 ----------

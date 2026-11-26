@@ -227,6 +227,11 @@ export class PatientService {
             // 状态也留空，前端初始态判定以 AdmissionsResponse.status 为权威（裁定 Q15）
             dischargedAt: null,
             departmentId: input.departmentId,
+            // 出入院记录快照（裁定 3）：建档直接建为住院患者时，seq=1 的操作人 = 建档人
+            patientNo: input.patientNo,
+            doctorId: input.doctorId ?? null,
+            nurseId: input.nurseId ?? null,
+            operatorId: user.userId,
             departmentStays: {
               create: {
                 patientId: patient.id,
@@ -658,6 +663,11 @@ export class PatientService {
             admittedAt: admissionAt,
             dischargedAt: null,
             departmentId: input.departmentId,
+            // 出入院记录快照（裁定 3）：操作人 = 本次点「办理住院」提交的账号
+            patientNo: input.patientNo,
+            doctorId: input.doctorId ?? null,
+            nurseId: input.nurseId ?? null,
+            operatorId: user.userId,
             departmentStays: {
               create: {
                 patientId: id,
@@ -813,6 +823,13 @@ export class PatientService {
         seq: true,
         admittedAt: true,
         dischargedAt: true,
+        // 出入院记录 Tab（规格 §3）：入院科室名 + 当次住院号/医护/操作人快照。
+        // 快照列可空 = 存量旧行（显示「-」，裁定 1）；姓名是员工信息不脱敏
+        patientNo: true,
+        department: { select: { name: true } },
+        doctor: { select: { name: true } },
+        nurse: { select: { name: true } },
+        operator: { select: { name: true } },
         departmentStays: {
           select: {
             id: true,
@@ -838,6 +855,11 @@ export class PatientService {
         // isCurrent 只对住院患者成立：出院患者若存在 dischargedAt 为空的脏数据行，
         // 不得被前端当成「本次住院」（初始态判定以 status 为权威）
         isCurrent: inpatient && row.dischargedAt === null,
+        departmentName: row.department.name,
+        patientNo: row.patientNo,
+        doctorName: row.doctor?.name ?? null,
+        nurseName: row.nurse?.name ?? null,
+        operatorName: row.operator?.name ?? null,
         departments: row.departmentStays.map((stay) => ({
           id: stay.id,
           departmentId: stay.departmentId,

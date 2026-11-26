@@ -614,6 +614,22 @@ describe('PatientService.admit — R24 住院记录双写', () => {
       startedAt: admissionAt,
       endedAt: null,
     });
+    // 出入院记录快照（裁定 3）：住院号/医护取当次入参（未传 → null），操作人 = 当前账号
+    expect(created.patientNo).toBe('H-0001');
+    expect(created.doctorId).toBeNull();
+    expect(created.nurseId).toBeNull();
+    expect(created.operatorId).toBe('u-nurse');
+  });
+
+  it('出入院记录快照：入参带医护时按当次值写入', async () => {
+    // 医护归属校验通过（assertStaffInDepartment 查 user.findFirst）
+    prisma.user.findFirst.mockResolvedValue({ id: 'doc-1' });
+
+    await service.admit(deptUser, PATIENT_ID, admitInput({ doctorId: 'doc-1', nurseId: 'n-1' }));
+
+    const created = prisma.admission.create.mock.calls[0][0].data;
+    expect(created.doctorId).toBe('doc-1');
+    expect(created.nurseId).toBe('n-1');
   });
 
   it('P2-6：再入院换科室 → 新 Admission 与首条停留用入参科室（全院档用户）', async () => {
@@ -854,6 +870,11 @@ describe('PatientService.create — R24 建档双写', () => {
       startedAt: admissionAt,
       endedAt: null,
     });
+    // 出入院记录快照（裁定 3）：建档 seq=1 的操作人 = 建档人；医护/住院号取建档入参
+    expect(created.patientNo).toBe('H-0002');
+    expect(created.doctorId).toBe('doc-1');
+    expect(created.nurseId).toBeNull();
+    expect(created.operatorId).toBe('u-nurse');
   });
 
   it('建档成功后初始化控糖目标快照（R9 / 裁定 G 快照语义）', async () => {
@@ -891,7 +912,10 @@ describe('PatientService.admissions — R24 住院记录树', () => {
   let service: PatientService;
   let prisma: ReturnType<typeof createService>['prisma'];
 
-  /** 两次住院夹具：第 2 次在院（1 段停留），第 1 次已出院（2 段停留 = 转科一次） */
+  /**
+   * 两次住院夹具：第 2 次在院（1 段停留，快照四列有值 = 新数据），
+   * 第 1 次已出院（2 段停留 = 转科一次，快照四列全 null = 存量旧行，裁定 1）
+   */
   function admissionRows() {
     return [
       {
@@ -899,6 +923,11 @@ describe('PatientService.admissions — R24 住院记录树', () => {
         seq: 2,
         admittedAt: new Date(2026, 10, 1, 9, 0, 0),
         dischargedAt: null,
+        patientNo: 'H-0002',
+        department: { name: '内分泌科' },
+        doctor: { name: '王医生' },
+        nurse: { name: '李护士' },
+        operator: { name: '李护士' },
         departmentStays: [
           {
             id: 'ad-2',
@@ -914,6 +943,11 @@ describe('PatientService.admissions — R24 住院记录树', () => {
         seq: 1,
         admittedAt: new Date(2026, 9, 1, 8, 0, 0),
         dischargedAt: new Date(2026, 9, 20, 10, 0, 0),
+        patientNo: null,
+        department: { name: '心内科' },
+        doctor: null,
+        nurse: null,
+        operator: null,
         departmentStays: [
           {
             id: 'ad-1a',
@@ -955,6 +989,12 @@ describe('PatientService.admissions — R24 住院记录树', () => {
     expect(current.isCurrent).toBe(true);
     expect(current.admittedAt).toBe('2026-11-01 09:00:00');
     expect(current.dischargedAt).toBeNull();
+    // 出入院记录 Tab（规格 §3）：入院科室名平铺 + 快照四字段
+    expect(current.departmentName).toBe('内分泌科');
+    expect(current.patientNo).toBe('H-0002');
+    expect(current.doctorName).toBe('王医生');
+    expect(current.nurseName).toBe('李护士');
+    expect(current.operatorName).toBe('李护士');
     expect(current.departments).toEqual([
       {
         id: 'ad-2',
@@ -969,6 +1009,12 @@ describe('PatientService.admissions — R24 住院记录树', () => {
     expect(past.isCurrent).toBe(false);
     expect(past.dischargedAt).toBe('2026-10-20 10:00:00');
     expect(past.departments.map((stay) => stay.departmentName)).toEqual(['心内科', '内分泌科']);
+    // 存量旧行（裁定 1）：快照四列 null 原样下发，前端显示「-」；科室名不受影响
+    expect(past.departmentName).toBe('心内科');
+    expect(past.patientNo).toBeNull();
+    expect(past.doctorName).toBeNull();
+    expect(past.nurseName).toBeNull();
+    expect(past.operatorName).toBeNull();
   });
 
   it('排序参数：住院按 admittedAt 降序 NULLS LAST，停留按 startedAt 升序 NULLS FIRST（裁定 Q6）', async () => {
@@ -989,7 +1035,18 @@ describe('PatientService.admissions — R24 住院记录树', () => {
       departmentId: 'd-endo',
     });
     prisma.admission.findMany.mockResolvedValue([
-      { id: 'a-1', seq: 1, admittedAt: null, dischargedAt: null, departmentStays: [] },
+      {
+        id: 'a-1',
+        seq: 1,
+        admittedAt: null,
+        dischargedAt: null,
+        patientNo: null,
+        department: { name: '内分泌科' },
+        doctor: null,
+        nurse: null,
+        operator: null,
+        departmentStays: [],
+      },
     ]);
 
     const result = await service.admissions(deptUser, PATIENT_ID);
