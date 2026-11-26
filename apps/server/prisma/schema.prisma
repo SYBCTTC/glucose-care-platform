@@ -177,6 +177,9 @@ model Admission {
   admittedAt   DateTime? @db.Timestamptz(3)
   /// NULL = 在院（本次住院）
   dischargedAt DateTime? @db.Timestamptz(3)
+  /// 出院备注（P2-6 出院弹框填写，可空；自由文本只落本列，不进审计 detail）。
+  /// 2026-11-26 裁定：docs/specs/patient-discharge.md §2，schema 变更需人工评审
+  dischargeRemark String? @db.VarChar(255)
   /// 入院科室（首科室；完整科室轨迹见 AdmissionDepartment）
   departmentId String    @db.Uuid
   createdAt    DateTime  @default(now())
