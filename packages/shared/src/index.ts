@@ -3,6 +3,7 @@ export * from './date';
 export * from './patient/schema';
 export * from './patient/target-schema';
 export * from './glucose/schema';
+export * from './glucose/alert-schema';
 export * from './device/schema';
 export * from './auth/schema';
 export * from './auth/password';
