@@ -19,6 +19,7 @@ import type { ReactNode } from 'react';
 import ForbiddenPage from '@/pages/Forbidden';
 import PlaceholderPage from '@/pages/Placeholder';
 import PatientManagementPage from '@/pages/inpatient/patients';
+import AlertManagementPage from '@/pages/inpatient/alerts';
 import VirtualWardPage from '@/pages/inpatient/virtual-ward';
 import PatientDetailPage from '@/pages/inpatient/patient-detail';
 import AdmissionRecordTab from '@/pages/inpatient/patient-detail/AdmissionRecordTab';
@@ -104,7 +105,8 @@ export const APP_ROUTES: AppRoute[] = [
     icon: AlertOutlined,
     menuGroup: ['住院管理'],
     permissions: [PERMISSION.ALERT_VIEW],
-    element: ph('预警管理', '需实现阈值判定与预警列表（P4）'),
+    // 预警管理（P4-7）：占位替换为正式页面（docs/specs/glucose-alerts.md，2026-11-27 规格冻结）
+    element: <AlertManagementPage />,
   },
 
   // ===== 设备管理 =====

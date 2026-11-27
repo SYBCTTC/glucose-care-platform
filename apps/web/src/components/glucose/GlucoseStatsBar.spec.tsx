@@ -88,4 +88,26 @@ describe('GlucoseStatsBar — 公共统计栏渲染', () => {
   it('空数组：不抛异常、渲染为空文本（调用方据此决定是否显示统计区）', () => {
     expect(textOf(render([]))).toBe('');
   });
+
+  it('省略 label：不渲染「label：」前缀，只输出值与后缀（P4-7 预警栏的纯「Y次」段）', () => {
+    const html = render([
+      { label: '总计', value: '17', suffix: '人', numeric: true },
+      { value: '42', suffix: '次', numeric: true },
+    ]);
+
+    expect(textOf(html)).toContain('总计：17人');
+    expect(textOf(html)).toContain('42次');
+    // 无 label 项不产生第二个全角冒号
+    expect(textOf(html).split('：')).toHaveLength(2);
+  });
+
+  it('省略 label 的项 key 回退 index：多项无 label 并存不抛 key 冲突', () => {
+    const html = render([
+      { value: '42', suffix: '次', numeric: true },
+      { value: '7', suffix: '人', numeric: true },
+    ]);
+
+    expect(textOf(html)).toContain('42次');
+    expect(textOf(html)).toContain('7人');
+  });
 });

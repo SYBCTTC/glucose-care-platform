@@ -16,8 +16,11 @@ import { Typography } from 'antd';
 export const STATS_GAP_PX = 20;
 
 export interface GlucoseStatsItem {
-  /** 字段名，如「总计」「最高血糖」；同时作为 React key，同一栏内不可重复 */
-  label: string;
+  /**
+   * 字段名，如「总计」「最高血糖」；同时作为 React key，同一栏内不可重复。
+   * 可省略（P4-7 预警统计栏有纯「Y次」段）：省略时不渲染「label：」前缀，key 回退 index。
+   */
+  label?: string;
   /** 已格式化好的值文本，如 `17`、`9.4`、`High`、`-`。组件不做任何数值加工 */
   value: string;
   /**
@@ -52,10 +55,10 @@ export function GlucoseStatsBar({ items }: { items: GlucoseStatsItem[] }) {
       {items.map((item, index) => {
         const gapStyle = index === 0 && !item.divider ? undefined : { marginLeft: STATS_GAP_PX };
         return (
-          <span key={item.label}>
+          <span key={item.label ?? `item-${index}`}>
             {item.divider ? <span style={{ marginLeft: STATS_GAP_PX }}>|</span> : null}
             <span style={gapStyle}>
-              {item.label}：
+              {item.label ? `${item.label}：` : null}
               {item.numeric ? (
                 <span className="gc-num">
                   <span style={{ color: item.color }}>{item.value}</span>
