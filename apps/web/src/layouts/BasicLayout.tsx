@@ -1,5 +1,16 @@
 import { BulbFilled, BulbOutlined, FontSizeOutlined } from '@ant-design/icons';
-import { Avatar, Button, Layout, Menu, Space, Switch, Tag, Tooltip, Typography, message } from 'antd';
+import {
+  Avatar,
+  Button,
+  Layout,
+  Menu,
+  Space,
+  Switch,
+  Tag,
+  Tooltip,
+  Typography,
+  message,
+} from 'antd';
 import type { MenuProps } from 'antd';
 import { useEffect, useRef, useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
@@ -74,12 +85,15 @@ export default function BasicLayout() {
       if (idleTimer.current) {
         window.clearTimeout(idleTimer.current);
       }
-      idleTimer.current = window.setTimeout(() => {
-        void logout().then(() => {
-          message.warning(`已超过 ${IDLE_TIMEOUT_MINUTES} 分钟无操作，请重新登录`);
-          navigate('/login', { replace: true });
-        });
-      }, IDLE_TIMEOUT_MINUTES * 60 * 1000);
+      idleTimer.current = window.setTimeout(
+        () => {
+          void logout().then(() => {
+            message.warning(`已超过 ${IDLE_TIMEOUT_MINUTES} 分钟无操作，请重新登录`);
+            navigate('/login', { replace: true });
+          });
+        },
+        IDLE_TIMEOUT_MINUTES * 60 * 1000,
+      );
     };
     const events: (keyof WindowEventMap)[] = ['mousemove', 'keydown', 'click'];
     events.forEach((event) => window.addEventListener(event, reset));
@@ -122,6 +136,7 @@ export default function BasicLayout() {
             设备与人员管理平台
           </div>
           <Menu
+            className="gc-no-scrollbar"
             style={{ flex: 1, minHeight: 0, overflow: 'auto' }}
             theme={mode === 'dark' ? 'dark' : 'light'}
             mode="inline"
@@ -204,7 +219,9 @@ export default function BasicLayout() {
             </Button>
           </Space>
         </Header>
-        <Content style={{ margin: layoutSize.contentPadding, minWidth: layoutSize.contentMinWidth }}>
+        <Content
+          style={{ margin: layoutSize.contentPadding, minWidth: layoutSize.contentMinWidth }}
+        >
           <Outlet />
         </Content>
       </Layout>

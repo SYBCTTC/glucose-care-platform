@@ -219,6 +219,16 @@ body {
   min-width: var(--gc-content-min-width);
 }
 
+/* 隐藏滚动条但保留滚动能力（侧边菜单等窄容器；同 .gc-slot-filter 先例）。
+   Firefox 用 scrollbar-width，WebKit 用 ::-webkit-scrollbar，旧 Edge/IE 用 -ms-overflow-style */
+.gc-no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.gc-no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 /* 登录容器：背景图铺满（cover 等比缩放不变形），兜底底色防图片未加载时闪白 */
 .gc-login-layout {
   display: flex;
