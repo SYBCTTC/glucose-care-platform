@@ -89,4 +89,11 @@ export const AUDIT_DETAIL_ALLOW_LIST = [
    * 裁定 Q10：单一审计动作，以 detail.printType 区分三种打印，避免枚举膨胀。
    */
   'printType',
+  /**
+   * 预警列表查询（GLUCOSE_ALERT_QUERY，P4-7）：预警类型（high/low/all 枚举码，服务回显）
+   * 与大于/小于筛选值（数值，来自 query）。均非敏感，登记后 count 随筛选变化可解释（同 mealContexts 口径）。
+   */
+  'alertType',
+  'valueGt',
+  'valueLt',
 ] as const;
