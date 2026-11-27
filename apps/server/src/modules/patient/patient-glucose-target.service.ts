@@ -226,6 +226,54 @@ export class PatientGlucoseTargetService {
   }
 
   /**
+   * P4-7：批量解析控糖范围（预警列表「控糖范围」列，docs/specs/glucose-alerts.md §3）。
+   *
+   * 口径与 `resolveResultTypeThreshold` 完全一致：患者行存在用患者行（含停用时段的历史行，
+   * R10「历史记录判定时仍可用」），缺行回退全局 `SystemConfig`。两点差异均为读路径的刻意选择：
+   *  1. **批量**——患者行一次 IN 查询、全局只读一次，禁止逐条 N+1（规格 §9 性能）；
+   *  2. 全局缺失/非法**不抛 10000**，整体返回 null——列表页不该因辅助配置查不到就整页失败，
+   *     调用方对 null 显示 '-'（规格 §3；与 `loadDefaultAlert` 同一取向）。
+   *
+   * ⚠️ 同 `resolveResultTypeThreshold`：模块内部方法，不做权限/数据范围校验；
+   * 调用方（`GlucoseAlertService.list`）已用 `buildScopeWhere(PATIENT)` 收敛患者范围。
+   */
+  async resolveResultTypeThresholdsBatch(patientIds: string[]): Promise<{
+    /** key = `${patientId}|${timeSlotCode}` */
+    byPatientSlot: Map<string, GlucoseAlertThreshold>;
+    /** 全局回退值；缺失/非法时为 null */
+    global: GlucoseAlertThreshold | null;
+  }> {
+    const uniqueIds = [...new Set(patientIds)];
+    const [rows, defaults] = await Promise.all([
+      uniqueIds.length === 0
+        ? Promise.resolve(
+            [] as Array<{
+              patientId: string;
+              timeSlotCode: string;
+              valueDown: Prisma.Decimal;
+              valueUp: Prisma.Decimal;
+            }>,
+          )
+        : this.prisma.patientGlucoseTarget.findMany({
+            where: { patientId: { in: uniqueIds } },
+            select: { patientId: true, timeSlotCode: true, valueDown: true, valueUp: true },
+          }),
+      this.loadDefaultAlert(),
+    ]);
+    const byPatientSlot = new Map<string, GlucoseAlertThreshold>(
+      rows.map((row) => [
+        `${row.patientId}|${row.timeSlotCode}`,
+        { low: Number(row.valueDown), high: Number(row.valueUp) },
+      ]),
+    );
+    const global =
+      defaults.low !== null && defaults.high !== null
+        ? { low: defaults.low, high: defaults.high }
+        : null;
+    return { byPatientSlot, global };
+  }
+
+  /**
    * R8 / 裁定 Y：趋势图阈值线 = **该患者的预警值**，缺行或读取失败回退全局 `SystemConfig`。
    *
    * 与 `resolveResultTypeThreshold` 的区别：这里读 `PatientAlertThreshold`（预警值），

@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { PatientGlucoseTargetModule } from '../patient/patient-glucose-target.module';
 import { TimeSlotModule } from '../time-slot/time-slot.module';
+import { GlucoseAlertController } from './glucose-alert.controller';
+import { GlucoseAlertService } from './glucose-alert.service';
 import { GlucoseController } from './glucose.controller';
 import { GlucoseService } from './glucose.service';
 
@@ -11,7 +13,8 @@ import { GlucoseService } from './glucose.service';
   //   （全局配置只是回退源，回退口径归解析方独有，避免两处各写一套）。
   //   依赖单向：对方只 import TimeSlotModule / SystemModule，不反向依赖本模块，无循环依赖。
   imports: [TimeSlotModule, PatientGlucoseTargetModule],
-  controllers: [GlucoseController],
-  providers: [GlucoseService],
+  // GlucoseAlertController（P4-7）：跨患者预警列表，与 GlucoseController（/patients/:id 子资源）路径不冲突
+  controllers: [GlucoseController, GlucoseAlertController],
+  providers: [GlucoseService, GlucoseAlertService],
 })
 export class GlucoseModule {}

@@ -714,3 +714,80 @@ describe('resolveAlertThreshold — R8 趋势图阈值线（裁定 Y，任务 �
     expect(prisma.patientGlucoseTarget.findUnique).not.toHaveBeenCalled();
   });
 });
+
+describe('resolveResultTypeThresholdsBatch — P4-7 预警列表控糖范围批量解析', () => {
+  /** 批量行：比 targetRow 多 patientId（IN 查询返回形态） */
+  function batchRow(patientId: string, code: string, down: string, up: string) {
+    return {
+      patientId,
+      timeSlotCode: code,
+      valueDown: new Prisma.Decimal(down),
+      valueUp: new Prisma.Decimal(up),
+    };
+  }
+
+  it('患者 ID 去重后一次 IN 查询 + 全局只读一次（禁止 N+1，规格 §9）', async () => {
+    prisma.patientGlucoseTarget.findMany.mockResolvedValue([
+      batchRow('p-1', 'FASTING', '4.4', '7.0'),
+    ]);
+
+    const result = await service.resolveResultTypeThresholdsBatch(['p-1', 'p-2', 'p-1']);
+
+    expect(prisma.patientGlucoseTarget.findMany).toHaveBeenCalledTimes(1);
+    expect(prisma.patientGlucoseTarget.findMany).toHaveBeenCalledWith({
+      where: { patientId: { in: ['p-1', 'p-2'] } },
+      select: { patientId: true, timeSlotCode: true, valueDown: true, valueUp: true },
+    });
+    expect(systemConfig.getGlucoseAlertThreshold).toHaveBeenCalledTimes(1);
+    expect(result.byPatientSlot.get('p-1|FASTING')).toEqual({ low: 4.4, high: 7.0 });
+    expect(result.global).toEqual({ low: 3.9, high: 16.7 });
+  });
+
+  it('空患者列表：不查患者行，仍返回全局回退值', async () => {
+    const result = await service.resolveResultTypeThresholdsBatch([]);
+
+    expect(prisma.patientGlucoseTarget.findMany).not.toHaveBeenCalled();
+    expect(result.byPatientSlot.size).toBe(0);
+    expect(result.global).toEqual({ low: 3.9, high: 16.7 });
+  });
+
+  it('Decimal 出参转 number，key 为 `patientId|timeSlotCode`（含同一患者多时段行）', async () => {
+    prisma.patientGlucoseTarget.findMany.mockResolvedValue([
+      batchRow('p-1', 'FASTING', '4.4', '7.0'),
+      batchRow('p-1', 'BEDTIME', '5.0', '8.3'),
+      batchRow('p-2', 'FASTING', '3.9', '6.1'),
+    ]);
+
+    const result = await service.resolveResultTypeThresholdsBatch(['p-1', 'p-2']);
+
+    expect(result.byPatientSlot.get('p-1|FASTING')).toEqual({ low: 4.4, high: 7 });
+    expect(result.byPatientSlot.get('p-1|BEDTIME')).toEqual({ low: 5, high: 8.3 });
+    expect(result.byPatientSlot.get('p-2|FASTING')).toEqual({ low: 3.9, high: 6.1 });
+    expect(result.byPatientSlot.get('p-3|FASTING')).toBeUndefined();
+  });
+
+  it('不按展示集合过滤：停用时段的历史目标行照常返回（R10 历史判定仍可用）', async () => {
+    // 实现只查 patientGlucoseTarget，不触碰 timeSlots.list —— 钉住该偏差不得发生
+    prisma.patientGlucoseTarget.findMany.mockResolvedValue([
+      batchRow('p-1', 'INTENSIVE_AM', '4.0', '9.9'),
+    ]);
+
+    const result = await service.resolveResultTypeThresholdsBatch(['p-1']);
+
+    expect(result.byPatientSlot.get('p-1|INTENSIVE_AM')).toEqual({ low: 4, high: 9.9 });
+    expect(timeSlots.list).not.toHaveBeenCalled();
+  });
+
+  it('全局配置缺失/非法 → global 为 null 且整体不抛（读路径不 10000，与 loadDefaultAlert 同取向）', async () => {
+    systemConfig.getGlucoseAlertThreshold.mockRejectedValue(
+      new BusinessException(ERROR_CODES.INTERNAL_ERROR),
+    );
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+    const result = await service.resolveResultTypeThresholdsBatch(['p-1']);
+
+    expect(result.global).toBeNull();
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+});
