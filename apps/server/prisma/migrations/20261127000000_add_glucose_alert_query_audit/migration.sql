@@ -1,0 +1,22 @@
+-- ============================================================
+-- P4-7 预警管理：AuditAction 新增 GLUCOSE_ALERT_QUERY
+--
+-- 规格：docs/specs/glucose-alerts.md §5（2026-11-27 需求人批准追加）。
+--
+-- 为什么改：GET /glucose/alerts 是跨患者血糖数据查询（敏感操作，等保三级
+-- 须逐条留痕）。代码侧 @Audit('GLUCOSE_ALERT_QUERY') 已随 P4-7 上线，
+-- 枚举未登记期间 PG 拒绝非法值 → 审计行不落表（拦截器吞错只打
+-- console.error，接口本身可用，已实测确认）；本迁移补登记后恢复留痕，
+-- 同 GLUCOSE_REPORT_VIEW 缺陷补登记先例（20261120000000）。
+--
+-- ⚠️ 枚举值**追加在 AuditAction 末尾**（PostgreSQL ALTER TYPE ADD VALUE 只能加到
+--    pg_enum 末尾，Prisma 漂移检测对枚举顺序敏感，见 DB-MIGRATION-NOTES.md §2.3）。
+--    本迁移不插入审计数据，不受「同一事务内不得使用新枚举值」的限制（同 20261124000000 先例）。
+--
+-- 用 IF NOT EXISTS：幂等，若该值已被手工加入也不报错（PG12+ 支持，可在事务块内）。
+--
+-- 无新表、无新列、无存量回填；PG 枚举值不可删，回滚 = 不回滚（留存无害）。
+-- ============================================================
+
+-- AlterEnum
+ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'GLUCOSE_ALERT_QUERY';
