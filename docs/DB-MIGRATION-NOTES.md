@@ -22,15 +22,26 @@
 - **部分唯一索引**（Prisma 表达不了）：`prisma/sql/admission_one_active_department.sql` 已于 deploy 后
   手工执行（`prisma db execute`），保证「每次住院至多一条进行中停留」，同 `ward_one_active.sql` 约定。
 
+**2026-11-27 执行记录（P4-7，`20261127000000_add_glucose_alert_query_audit`）**：
+
+- `AuditAction` 末尾追加 `GLUCOSE_ALERT_QUERY`（预警列表查询留痕，规格 `docs/specs/glucose-alerts.md` §5，
+  需求人批准后实施）。写法同 `20261125120000_add_patient_target_view_audit` 先例：
+  `ALTER TYPE ... ADD VALUE IF NOT EXISTS`，幂等、不插数据、不受同事务新枚举值限制。
+- 代码侧 `@Audit('GLUCOSE_ALERT_QUERY')` 自 2026-11-27 早上已上线，迁移执行前窗口期内该动作审计行
+  被 PG 拒绝、拦截器吞错只打 console.error（接口可用）——同 `GLUCOSE_REPORT_VIEW` 补登记先例。
+- deploy + generate + 重启后端后**已实测落表**：result=SUCCESS，detail 含
+  rangeFrom/rangeTo/count/alertType/valueGt/path/requestId（valueGt/valueLt 由拦截器从请求 query 提取，
+  alertType 由响应回显提取；未传参数不写键）。
+
 ## 2. 漂移核对记录（2026-11-17 已全部处置，保留作教训）
 
 用 `prisma migrate diff --from-schema-datasource prisma/schema.prisma --to-schema-datamodel prisma/schema.prisma --script` 检查得到：
 
-| # | 漂移项 | 实库 | schema 期望 | 核对结论与处置（2026-11-17） |
-|---|---|---|---|---|
-| 1 | 枚举 `EntryChannel`、`GlucoseKind`、`GlucoseUnit`、`MealContext`、`RecordStatus` | 仍存在 | 已删除 | `pg_attribute` 核对**无任何列引用** → ✅ 已 `DROP TYPE`（迁移 `20261117000000`，带引用前置检查） |
-| 2 | `GlucoseRecord.operatorId` 外键行为 | `ON DELETE RESTRICT` | `SET NULL`（关系字段可空时的默认值） | ✅ 已**改 schema** 显式写 `onDelete: Restrict`，未动库，见 §2.2 |
-| 3 | 枚举 `AuditAction` | **16 个值** | **13 个值** | ❌ 原判断"仅顺序不同、语义无变化"**是错的**；✅ 已把 3 个历史值**补回 schema** 并按实库顺序排列，未动库，见 §2.3 |
+| #   | 漂移项                                                                           | 实库                 | schema 期望                          | 核对结论与处置（2026-11-17）                                                                                     |
+| --- | -------------------------------------------------------------------------------- | -------------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| 1   | 枚举 `EntryChannel`、`GlucoseKind`、`GlucoseUnit`、`MealContext`、`RecordStatus` | 仍存在               | 已删除                               | `pg_attribute` 核对**无任何列引用** → ✅ 已 `DROP TYPE`（迁移 `20261117000000`，带引用前置检查）                 |
+| 2   | `GlucoseRecord.operatorId` 外键行为                                              | `ON DELETE RESTRICT` | `SET NULL`（关系字段可空时的默认值） | ✅ 已**改 schema** 显式写 `onDelete: Restrict`，未动库，见 §2.2                                                  |
+| 3   | 枚举 `AuditAction`                                                               | **16 个值**          | **13 个值**                          | ❌ 原判断"仅顺序不同、语义无变化"**是错的**；✅ 已把 3 个历史值**补回 schema** 并按实库顺序排列，未动库，见 §2.3 |
 
 ### 2.1 核对用 SQL（只读，可重复执行）
 
@@ -84,11 +95,11 @@ SELECT action::text, COUNT(*) FROM "AuditLog" GROUP BY action ORDER BY 2 DESC;
 - 清理时的做法：先出 `migrate diff` 生成的 SQL 草案，人工确认后再建迁移目录；**不得在迁移里静默 `DROP` 数据列**。
 - **2026-11-17 的关键教训：`migrate diff` 的产物不可直接采用。**
 
-| 漂移项 | diff 草案 | 复核结论 | 实际处置 |
-|---|---|---|---|
-| 5 个残留枚举 | `DROP TYPE` × 5 | ✅ 可采纳（已核对无列引用） | 手写迁移 `20261117000000_drop_residual_glucose_enums`，带 `DO $$` 引用前置检查 |
-| `AuditAction` | 重建类型 + `ALTER COLUMN ... USING` | ❌ 不可采纳，会因 13 行历史审计失败（§2.3） | **改 schema**：补回 3 个历史值 + 按实库顺序重排，未动库 |
-| `operatorId` 外键 | `DROP CONSTRAINT` + 重建为 `SET NULL` | ❌ 方向错（§2.2） | **改 schema**：显式 `onDelete: Restrict`，未动库 |
+| 漂移项            | diff 草案                             | 复核结论                                    | 实际处置                                                                       |
+| ----------------- | ------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------ |
+| 5 个残留枚举      | `DROP TYPE` × 5                       | ✅ 可采纳（已核对无列引用）                 | 手写迁移 `20261117000000_drop_residual_glucose_enums`，带 `DO $$` 引用前置检查 |
+| `AuditAction`     | 重建类型 + `ALTER COLUMN ... USING`   | ❌ 不可采纳，会因 13 行历史审计失败（§2.3） | **改 schema**：补回 3 个历史值 + 按实库顺序重排，未动库                        |
+| `operatorId` 外键 | `DROP CONSTRAINT` + 重建为 `SET NULL` | ❌ 方向错（§2.2）                           | **改 schema**：显式 `onDelete: Restrict`，未动库                               |
 
 即 3 项漂移里有 **2 项的正确修法是改 `schema.prisma` 向实库靠拢**，只有枚举残留需要真正动库。
 两项 schema 改动经 2026-11-17 人工批准后实施（提交 `3813f93`）。
@@ -98,11 +109,11 @@ SELECT action::text, COUNT(*) FROM "AuditLog" GROUP BY action ORDER BY 2 DESC;
 
 ## 4. 决策记录（原「待决策」三项，2026-11-17 全部闭环）
 
-| # | 事项 | 结论 | 影响 |
-|---|---|---|---|
-| 1 | 审计 `detail` 是否记录 `skipped` | ✅ **方案 A**（提交 `629b16c`）：`skipped` 加入 `AUDIT_DETAIL_ALLOW_LIST`，`result` 仍为 `SUCCESS`，三值语义不变 | 审计 `detail.skipped` 可区分"写入了"与"未重复保存"；已补拦截器单测 4 项 + 真实链路验证 |
-| 2 | 库漂移清理（见 §2） | ✅ **已完成**（提交 `3813f93`）：2 项改 schema 向实库靠拢、1 项手写迁移 `DROP TYPE` × 5；`migrate diff` 已输出空迁移 | 漂移清零；仍按 §3 用手写 SQL + `db:deploy`，不用 `migrate dev` |
-| 3 | `TIME_SLOTS` 静态白名单 | ✅ **已完成**（提交 `67804a4`）：改为服务端查 `TimeSlot` 表运行时校验；静态常量降级为仅 seed 源，删除 `getFallbackTimeSlots` / `getTimeSlotLabel` | 库里新增/停用时段无需改代码、无需发版；规格见 `docs/specs/glucose-timeslot-validation.md` |
+| #   | 事项                             | 结论                                                                                                                                              | 影响                                                                                      |
+| --- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| 1   | 审计 `detail` 是否记录 `skipped` | ✅ **方案 A**（提交 `629b16c`）：`skipped` 加入 `AUDIT_DETAIL_ALLOW_LIST`，`result` 仍为 `SUCCESS`，三值语义不变                                  | 审计 `detail.skipped` 可区分"写入了"与"未重复保存"；已补拦截器单测 4 项 + 真实链路验证    |
+| 2   | 库漂移清理（见 §2）              | ✅ **已完成**（提交 `3813f93`）：2 项改 schema 向实库靠拢、1 项手写迁移 `DROP TYPE` × 5；`migrate diff` 已输出空迁移                              | 漂移清零；仍按 §3 用手写 SQL + `db:deploy`，不用 `migrate dev`                            |
+| 3   | `TIME_SLOTS` 静态白名单          | ✅ **已完成**（提交 `67804a4`）：改为服务端查 `TimeSlot` 表运行时校验；静态常量降级为仅 seed 源，删除 `getFallbackTimeSlots` / `getTimeSlotLabel` | 库里新增/停用时段无需改代码、无需发版；规格见 `docs/specs/glucose-timeslot-validation.md` |
 
 ## 5. 改动 schema 前的检查清单
 
@@ -121,10 +132,10 @@ SELECT action::text, COUNT(*) FROM "AuditLog" GROUP BY action ORDER BY 2 DESC;
 与 schema 迁移分开管理：这类操作**不产生 migration 目录**，`prisma migrate status` 也看不出差别，
 但会改存量行，同样需要试运行、可复核、可幂等重跑。
 
-| 脚本 | 用途 | 执行 |
-|---|---|---|
+| 脚本                                 | 用途                                                                                                                                                    | 执行                                                                  |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
 | `prisma/reencrypt-patient-fields.ts` | 把 `Patient.*Cipher` / `User.phoneCipher` 的旧方案密文重加密为当前的确定性 AES-256-GCM；设 `PATIENT_FIELD_KEY_OLD` 则为**换密钥**（旧钥解密、新钥加密） | `pnpm db:reencrypt`（试运行）→ `pnpm db:reencrypt -- --apply`（写库） |
-| `prisma/remask-patient-fields.ts` | 按 `@gc/shared` 当前脱敏规则重算 `Patient.nameMasked` / `idCardMasked` / `phoneMasked` | `pnpm db:remask`（试运行）→ `pnpm db:remask -- --apply`（写库） |
+| `prisma/remask-patient-fields.ts`    | 按 `@gc/shared` 当前脱敏规则重算 `Patient.nameMasked` / `idCardMasked` / `phoneMasked`                                                                  | `pnpm db:remask`（试运行）→ `pnpm db:remask -- --apply`（写库）       |
 
 **`db:remask` 什么时候必须跑**：任何改动脱敏规则之后。`*Masked` 是**落库字段**而非读取时计算，
 不跑就会新旧格式混杂（列表里一部分 `张**`、一部分 `张*丰`）。
@@ -142,6 +153,7 @@ SELECT action::text, COUNT(*) FROM "AuditLog" GROUP BY action ORDER BY 2 DESC;
 （查询用 AES 密文匹配，存量是 base64，匹配不上）。
 
 **脚本的安全约定**（新增同类脚本时照抄）：
+
 - 默认试运行，必须显式 `--apply` 才写库；
 - 前置条件不满足直接拒绝执行并退出码 1（如未配密钥时 base64→base64 空转还报"成功"，会掩盖问题）；
 - 解密不出的行**跳过并计数**，绝不拿 `null`/空串覆盖原密文；
@@ -174,6 +186,7 @@ Remove-Item Env:PATIENT_FIELD_KEY_OLD                             # 跑完立刻
 
 **2026-11-17 正式执行记录**（需求人写入 `PATIENT_FIELD_KEY` 后）：
 开发库已完成迁移，**不再是 base64**。只读复核结果：
+
 - 存量密文方案分布 `aes 1013`，legacy / hmac 均为 0；最长密文 81 字符（列上限 512）
 - 1013 个 AES 密文全部能用当前密钥还原，且"解密后重新加密 == 原密文"（确定性成立，也反证密钥与密文匹配）
 - 姓名等值查询命中 7 行同名患者
@@ -218,6 +231,7 @@ Remove-Item Env:PATIENT_FIELD_KEY_OLD                             # 跑完立刻
 姓名等值查询命中 7 行、审计引用仍为 1 条。
 
 **换钥标准流程**（缺一不可，本次因跳过第 1 步才导致数据损失）：
+
 1. **备份旧钥**与数据库；2. 改 `.env` 的 `PATIENT_FIELD_KEY` 为新钥；
-3. **重启后端**；4. 用 `PATIENT_FIELD_KEY_OLD` 跑 `db:reencrypt` 试运行 → `--apply`；
-5. 只读复核往返解密与姓名等值查询；6. 清除 `PATIENT_FIELD_KEY_OLD`，按密钥保管要求处置旧钥。
+2. **重启后端**；4. 用 `PATIENT_FIELD_KEY_OLD` 跑 `db:reencrypt` 试运行 → `--apply`；
+3. 只读复核往返解密与姓名等值查询；6. 清除 `PATIENT_FIELD_KEY_OLD`，按密钥保管要求处置旧钥。

@@ -29,12 +29,13 @@
 
 ### 2. 数据模型变更
 
-| 模型                | 字段                           | 类型 | 说明             | 是否需迁移         |
-| ------------------- | ------------------------------ | ---- | ---------------- | ------------------ |
-| AuditAction（枚举） | 末尾追加 `GLUCOSE_ALERT_QUERY` | enum | 预警列表查询留痕 | **是（人工执行）** |
+| 模型                | 字段                           | 类型 | 说明             | 是否需迁移                                                  |
+| ------------------- | ------------------------------ | ---- | ---------------- | ----------------------------------------------------------- |
+| AuditAction（枚举） | 末尾追加 `GLUCOSE_ALERT_QUERY` | enum | 预警列表查询留痕 | ✅ 已执行（`20261127000000_add_glucose_alert_query_audit`） |
 
 - 无新模型、无新字段、无存量数据影响、无回填。
-- ⚠️ 枚举只能追加在 `PATIENT_TARGET_VIEW` 之后（PG `ALTER TYPE ADD VALUE` 限制，DB-MIGRATION-NOTES.md §2.3）；schema 变更 AI 禁改，迁移脚本由需求人人工执行。**执行前接口可用，但该动作审计行不落表**（拦截器吞错，同 `GLUCOSE_TREND_VIEW` 先例）——需求人已接受（裁定 R2-Q3）。
+- ⚠️ 枚举只能追加在 `PATIENT_TARGET_VIEW` 之后（PG `ALTER TYPE ADD VALUE` 限制，DB-MIGRATION-NOTES.md §2.3）。
+- **迁移已于 2026-11-27 执行完毕**：需求人批准追加后，按 DB-MIGRATION-NOTES §3 约定手写 SQL + `pnpm db:deploy`（幂等 `IF NOT EXISTS`）+ `pnpm db:generate` + 重启后端；实测审计行落表（action=GLUCOSE_ALERT_QUERY、result=SUCCESS、detail 含 rangeFrom/rangeTo/count/alertType/valueGt/path/requestId）。执行前窗口期该动作审计行不落表（拦截器吞错，同 `GLUCOSE_TREND_VIEW` 先例）——裁定 R2-Q3 已接受，现已闭环。
 
 ### 3. 接口契约 ⭐
 
@@ -173,7 +174,7 @@
 - [x] 服务端单测（`glucose-alert.service.spec.ts`，21 例）：resultType 过滤（含 type 单值/全部）；valueGt/valueLt AND 组合与单边（含 gt ≥ lt 不强拦）；admissionStatus 三态；时间闭区间与 voidedAt 排除（where 构造断言）；统计去重（distinct patientId）与 high/lowCount 分组（含 type 指定时跳过无谓 count）；姓名密文等值；scope 过滤 ALL/DEPARTMENT（NONE 档由 `buildScopeWhere` 公共单测覆盖，服务层不重测）；items 映射与审计回显字段。批量解析在 `patient-glucose-target.service.spec.ts` 追加 `resolveResultTypeThresholdsBatch` describe（5 例：去重 IN/空列表/Decimal 转 number/不按展示集合过滤/全局失败返回 null）。
 - [x] 前端单测：`alert-time.spec.ts`（9 例）六种预设（本月/近一月 30 天/近三月日历/月末 clamp/自选 23:59:59/自选未选回退本月）；`alert-stats.spec.ts`（6 例）统计栏三种文案格式；`GlucoseStatsBar.spec.tsx` 追加省略 label 用例（2 例）。Tab 切换列显隐、重置回默认、切 Tab 保留筛选属交互行为，web 测试环境无 jsdom（hook 不可测），由 playwright 实测覆盖（见下）。
 - [x] playwright 实测（2026-11-27，sys.admin）：页面加载/三 Tab 切换（高/低 Tab 隐藏预警类型列、统计栏两种格式）/大于 10 筛选（统计随筛选）/重置回默认/时间预设请求参数（本月=11-01 零点、近三月=08-27 日历回推）/自选区间 00:00:00~23:59:59/出院状态空态「暂无数据」/控糖范围列与判定口径一致（6.1>患者空腹上限 6.0 → 高预警）。
-- [ ] 手工验证（待人工）：`dr.wang`（内分泌科）仅见科室内预警；无 alert:view 账号 → 30004；**人工执行枚举迁移后** AuditLog 出现 `GLUCOSE_ALERT_QUERY` 行（detail 含 rangeFrom/rangeTo/count/alertType/valueGt/valueLt）。迁移前接口可用、审计写入被拦截仅记服务端日志（已实测确认，同 GLUCOSE_TREND_VIEW 先例）。
+- [x] 手工验证：`dr.wang`（内分泌科）仅见科室内预警；无 alert:view 账号 → 30004——**需求人 2026-11-27 确认已完成**。枚举迁移执行后 AuditLog 出现 `GLUCOSE_ALERT_QUERY` 行（result=SUCCESS，detail 含 rangeFrom/rangeTo/count/alertType/valueGt/path/requestId；valueLt 未传时不写键）——已实测确认。
 
 ### 9. 非功能要求
 
@@ -193,10 +194,10 @@
 - [x] valueGt/valueLt AND 叠加、宽松校验（≥ 不强拦；单测＋实测「大于 10」筛出 6 条 18.5）
 - [x] 统计随全部筛选、患者数去重、不受分页影响；三种统计栏格式正确（实测「总计：1人15次|高7低8」/「总计：1人7次」）
 - [x] 切 Tab 保留筛选自动查询；高/低 Tab 隐藏预警类型列；重置回默认（住院＋本月）——playwright 实测
-- [ ] 设备管理员被拒 30006 且落审计（**待人工**：需设备管理员账号实测＋枚举迁移后验证审计行）；科室档只见范围内数据（scope 合入由单测钉住，dr.wang 实测待人工）
+- [x] 设备管理员被拒 30006 且落审计；科室档只见范围内数据（scope 合入由单测钉住）——需求人 2026-11-27 确认手工验证已完成
 - [x] 姓名脱敏展示、密文精确筛选；性别/时段码前端字典映射（实测「林*」「空腹/早餐后」；密文等值单测）
 - [x] 共享包改动走 build → sync:shared → 清 Vite 缓存三步
-- [ ] `GLUCOSE_ALERT_QUERY` 枚举由需求人人工迁移后审计行落表（迁移前接口可用、审计写入被拦截仅记服务端日志——已实测确认为已知态）
+- [x] `GLUCOSE_ALERT_QUERY` 枚举迁移已执行（2026-11-27，`20261127000000_add_glucose_alert_query_audit`，需求人批准）；审计行落表已实测（见 §2）
 - [x] 文档回写：ROADMAP P4-7 状态翻转（归属已裁定计入 P4，随本次实现提交）
 
 ### 11. 待确认项
