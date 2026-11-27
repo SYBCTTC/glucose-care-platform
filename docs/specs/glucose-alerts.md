@@ -77,10 +77,10 @@
     patientNo: string | null; // 住院号
     alertType: 'high' | 'low'; // 落库 resultType '2'→high、'0'→low（裁定 R1-Q1，不实时重判）
     valueMmolL: number; // mmol/L，1 位小数（resultType 0/2 必有数值，非空）
-    measuredAt: string; // ISO
+    measuredAt: string; // 'YYYY-MM-DD HH:mm:ss' 本地秒级（formatDateTime 出参，同 R27 记录列表口径；实现时修正，非 ISO）
     mealContext: string | null; // 时段码原样返回，前端 getTimeSlotName(code) 转名（含停用时段，同血糖记录页先例）
     targetRange: { low: number; high: number } | null;
-    // 控糖范围：查询时 resolveResultTypeThreshold(patientId, mealContext) 实时解析
+    // 控糖范围：查询时 resolveResultTypeThresholdsBatch(patientIds) 批量实时解析
     //（患者时段目标 → 缺行回退全局）；解析失败 null，前端显示 '-'。
     // 目标事后被调整时范围与落库 alertType 可能不一致——需求人已知悉接受（裁定 R1-Q1）
     doctorName: string | null; // 责任医生（Patient.doctorId → Staff.name）
@@ -95,6 +95,11 @@
     highCount: number; // 当前筛选下高预警次数（type='low' 时为 0）
     lowCount: number; // 同上对称
   }
+  // 审计回显字段（AuditLogInterceptor 按 AUDIT_DETAIL_ALLOW_LIST 白名单提取，同 R27 口径；实现时补充登记）
+  rangeFrom: string; // = startTime 本地格式化
+  rangeTo: string; // = endTime 本地格式化
+  count: number; // 当页行数
+  alertType: 'high' | 'low' | 'all'; // = type ?? 'all'
 }
 ```
 
@@ -103,7 +108,7 @@
 1. 固定条件：`voidedAt: null`（软删排除）＋ `resultType IN ('0','2')`（或 type 单值）＋ `measuredAt` 闭区间 ＋ `valueMmolL` gt/lt。
 2. 患者条件：`buildScopeWhere(user, RESOURCE.PATIENT)` 合入 patient 关系 ＋ `Patient.status`（admissionStatus 映射 INPATIENT/DISCHARGED，all 不过滤）＋ departmentId/doctorId/patientNo/nameCipher/bedNo。
 3. 排序：`measuredAt DESC`，同刻 `id ASC` 稳定序；服务端分页。
-4. `targetRange` 批量解析：收集当页 items 的 patientId 一次性 IN 查询 `PatientGlucoseTarget` ＋ 全局回退值取一次，内存组装，**禁止逐条 N+1**。
+4. `targetRange` 批量解析：`PatientGlucoseTargetService.resolveResultTypeThresholdsBatch(patientIds)`（实现落点）——当页 patientId 去重后一次性 IN 查询 `PatientGlucoseTarget` ＋ 全局回退值取一次，返回 `Map<patientId|timeSlotCode, 阈值>` 内存组装，**禁止逐条 N+1**；全局缺失/非法整体返回 null 不抛 10000（读路径不整页失败）。
 5. 统计与列表共用同一 where（含 type）；`patientCount` 用 distinct patientId 聚合，high/lowCount 用 resultType 分组计数。
 6. 姓名筛选复用患者管理密文等值逻辑（patient.service.ts L321-323 同款）。
 
@@ -141,6 +146,7 @@
   3. 统计栏 `AlertStatsBar`（间距 20px）：
      - 所有预警 Tab：`总计：{patientCount}人 {totalCount}次 | 高血糖预警：{highCount}次 低血糖预警：{lowCount}次`
      - 高/低 Tab：`总计：{patientCount}人 {totalCount}次`
+     - 实现（落地时补充）：渲染层**复用公共 `GlucoseStatsBar`**（为此把其 `label` 扩展为可选——省略时不渲染「label：」前缀，向后兼容），口径层独立 `alert-stats.ts` 的 `buildAlertStatsItems(tab, stats)`，沿 R20 `buildReportStatsItems` 两层分离先例。
   4. 列表 `AlertTable`：Antd Table 服务端分页，默认 20 条/页（pageSizeOptions 沿用惯例 [10,20,50,100]、showTotal「共 N 条」）。
 - **列定义**（12 列；高/低 Tab 隐藏「预警类型」为 11 列）：科室、床号、姓名（脱敏文）、性别（GENDER_LABELS）、住院号、预警类型（文案「高血糖预警/低血糖预警」）、血糖值（x.x mmol/L）、检测时间（YYYY-MM-DD HH:mm）、检测时段（getTimeSlotName）、控糖范围（`4.4-7.0 mmol/L`，对齐 formatTargetRange 先例；null → '-'）、责任医生、责任护士（空值 '-'）。
 - **颜色**：预警类型文字与血糖值用血糖 Low/High 语义色（global.css 既有 `.gc-text-glucose-low/high` 工具类，tokens 变量，明暗模式自适应）；预警类型列自带文字，满足「色＋文」双通道。
@@ -148,7 +154,7 @@
 - **按钮级权限**：纯只读列表，无行级操作按钮。
 - **异常呈现**：统一由 `client.ts` 拦截器 `applyErrorStrategy()` 处理，页面不自弹 toast；10001 的 details 映射到筛选项。
 - **可访问性**：大字号/明暗模式沿用全局机制；本页无打印需求，不做打印适配。
-- **新增文件**：`api/alert.ts`（fetchGlucoseAlerts）、`pages/inpatient/alerts/{index.tsx, AlertFilter.tsx, AlertStatsBar.tsx, AlertTable.tsx, useAlertQuery.ts, alert-time.ts}`；`alert-time.ts` 纯函数计算时间预设（可单测）。
+- **新增文件**：`api/alert.ts`（fetchGlucoseAlerts）、`pages/inpatient/alerts/{index.tsx, AlertFilter.tsx, AlertStatsBar.tsx, AlertTable.tsx, useAlertQuery.ts, alert-time.ts, alert-stats.ts}`；`alert-time.ts` / `alert-stats.ts` 均为纯函数（可单测，已配套 spec）。
 
 ### 7. 错误码与前端行为 ⭐
 
@@ -164,9 +170,10 @@
 
 ### 8. 测试要求
 
-- [ ] 服务端单测：resultType 过滤（含 type 单值/全部）；valueGt/valueLt AND 组合与单边；admissionStatus 三态；时间闭区间边界（含 23:59:59 命中、voidedAt 记录排除）；统计去重（同一患者多条/兼高低计 1 人）与 high/lowCount 分组；姓名密文等值；scope 过滤（ALL/DEPARTMENT/NONE）。
-- [ ] 前端单测：`alert-time.ts` 六种预设（本月/近一月 30 天/近三月日历/月末 clamp/自选 23:59:59）；统计栏三种文案格式；Tab 切换列显隐（预警类型列）；重置回默认；切 Tab 保留筛选。
-- [ ] 手工验证：`dr.wang`（内分泌科）仅见科室内预警；`sys.admin` 全院；无 alert:view 账号 → 30004；人工执行枚举迁移后 AuditLog 出现 `GLUCOSE_ALERT_QUERY` 行（detail 含 rangeFrom/rangeTo/count/alertType）。
+- [x] 服务端单测（`glucose-alert.service.spec.ts`，21 例）：resultType 过滤（含 type 单值/全部）；valueGt/valueLt AND 组合与单边（含 gt ≥ lt 不强拦）；admissionStatus 三态；时间闭区间与 voidedAt 排除（where 构造断言）；统计去重（distinct patientId）与 high/lowCount 分组（含 type 指定时跳过无谓 count）；姓名密文等值；scope 过滤 ALL/DEPARTMENT（NONE 档由 `buildScopeWhere` 公共单测覆盖，服务层不重测）；items 映射与审计回显字段。批量解析在 `patient-glucose-target.service.spec.ts` 追加 `resolveResultTypeThresholdsBatch` describe（5 例：去重 IN/空列表/Decimal 转 number/不按展示集合过滤/全局失败返回 null）。
+- [x] 前端单测：`alert-time.spec.ts`（9 例）六种预设（本月/近一月 30 天/近三月日历/月末 clamp/自选 23:59:59/自选未选回退本月）；`alert-stats.spec.ts`（6 例）统计栏三种文案格式；`GlucoseStatsBar.spec.tsx` 追加省略 label 用例（2 例）。Tab 切换列显隐、重置回默认、切 Tab 保留筛选属交互行为，web 测试环境无 jsdom（hook 不可测），由 playwright 实测覆盖（见下）。
+- [x] playwright 实测（2026-11-27，sys.admin）：页面加载/三 Tab 切换（高/低 Tab 隐藏预警类型列、统计栏两种格式）/大于 10 筛选（统计随筛选）/重置回默认/时间预设请求参数（本月=11-01 零点、近三月=08-27 日历回推）/自选区间 00:00:00~23:59:59/出院状态空态「暂无数据」/控糖范围列与判定口径一致（6.1>患者空腹上限 6.0 → 高预警）。
+- [ ] 手工验证（待人工）：`dr.wang`（内分泌科）仅见科室内预警；无 alert:view 账号 → 30004；**人工执行枚举迁移后** AuditLog 出现 `GLUCOSE_ALERT_QUERY` 行（detail 含 rangeFrom/rangeTo/count/alertType/valueGt/valueLt）。迁移前接口可用、审计写入被拦截仅记服务端日志（已实测确认，同 GLUCOSE_TREND_VIEW 先例）。
 
 ### 9. 非功能要求
 
@@ -179,18 +186,18 @@
 
 ### 10. 验收标准（可勾选）⭐
 
-- [ ] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` 全绿
-- [ ] 接口返回符合 §3 契约（items/total/page/pageSize/stats），错误码符合 §7
-- [ ] 预警判定=落库 resultType；作废（voidedAt）记录不出现
-- [ ] 时间六预设＋自选口径正确（含月末 clamp、结束日 23:59:59、近一月=30 天与近三月=日历回推的混合口径）
-- [ ] valueGt/valueLt AND 叠加、宽松校验（≥ 不强拦）
-- [ ] 统计随全部筛选、患者数去重、不受分页影响；三种统计栏格式正确
-- [ ] 切 Tab 保留筛选自动查询；高/低 Tab 隐藏预警类型列；重置回默认（住院＋本月）
-- [ ] 设备管理员被拒 30006 且落审计；科室档只见范围内数据
-- [ ] 姓名脱敏展示、密文精确筛选；性别/时段码前端字典映射
-- [ ] 共享包改动走 build → sync:shared → 清 Vite 缓存三步
-- [ ] `GLUCOSE_ALERT_QUERY` 枚举由需求人人工迁移后审计行落表（迁移前接口可用、审计暂不落表为已知态）
-- [ ] 文档回写：ROADMAP P4-7 状态翻转（归属已裁定计入 P4）
+- [x] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` 全绿（2026-11-27）
+- [x] 接口返回符合 §3 契约（items/total/page/pageSize/stats＋审计回显字段），错误码符合 §7
+- [x] 预警判定=落库 resultType；作废（voidedAt）记录不出现（单测 where 断言）
+- [x] 时间六预设＋自选口径正确（含月末 clamp、结束日 23:59:59、近一月=30 天与近三月=日历回推的混合口径；单测＋实测请求参数双重验证）
+- [x] valueGt/valueLt AND 叠加、宽松校验（≥ 不强拦；单测＋实测「大于 10」筛出 6 条 18.5）
+- [x] 统计随全部筛选、患者数去重、不受分页影响；三种统计栏格式正确（实测「总计：1人15次|高7低8」/「总计：1人7次」）
+- [x] 切 Tab 保留筛选自动查询；高/低 Tab 隐藏预警类型列；重置回默认（住院＋本月）——playwright 实测
+- [ ] 设备管理员被拒 30006 且落审计（**待人工**：需设备管理员账号实测＋枚举迁移后验证审计行）；科室档只见范围内数据（scope 合入由单测钉住，dr.wang 实测待人工）
+- [x] 姓名脱敏展示、密文精确筛选；性别/时段码前端字典映射（实测「林*」「空腹/早餐后」；密文等值单测）
+- [x] 共享包改动走 build → sync:shared → 清 Vite 缓存三步
+- [ ] `GLUCOSE_ALERT_QUERY` 枚举由需求人人工迁移后审计行落表（迁移前接口可用、审计写入被拦截仅记服务端日志——已实测确认为已知态）
+- [x] 文档回写：ROADMAP P4-7 状态翻转（归属已裁定计入 P4，随本次实现提交）
 
 ### 11. 待确认项
 
